@@ -477,6 +477,8 @@ class SetupResult:
     checks: List[CheckResult] = field(default_factory=list)
     repairs: List[RepairAction] = field(default_factory=list)
     registrations: List[Dict[str, Any]] = field(default_factory=list)
+    #: Companion embedding model for RAG: what was set up, and whether it works.
+    embedding: Optional[Dict[str, Any]] = None
     started_at: Optional[str] = None
     finished_at: Optional[str] = None
 
@@ -509,6 +511,7 @@ class SetupResult:
             "checks": [c.to_dict() for c in self.checks],
             "repairs": [r.to_dict() for r in self.repairs],
             "registrations": self.registrations,
+            "embedding": self.embedding,
             "succeeded": self.succeeded,
             "verified": self.checks_ran,
             "started_at": self.started_at,

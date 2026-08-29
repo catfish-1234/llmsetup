@@ -127,6 +127,15 @@ answers, so a stated requirement is a tested one:
 Each failure returns a machine-readable signature, which is the join key into
 repair.
 
+### RAG gets a real retriever
+
+Asking for RAG provisions **two** models: the chat model, and a separate
+embedding model chosen for your languages (a multilingual corpus gets a
+multilingual retriever — an English-only one returns plausible-looking but wrong
+neighbours). The retriever is verified like everything else, and a failure there
+is reported rather than dressed up: a chat model makes a poor retriever, and
+silently shipping one would degrade retrieval invisibly.
+
 ### Repair
 
 Diagnosis maps a signature to **ranked, costed** remediations. The loop applies
@@ -175,6 +184,8 @@ llmfit verify           # test an endpoint I already run
 llmfit doctor           # re-test the last setup and repair it
 llmfit export           # register an existing model with my other apps
 llmfit catalog list     # what models are known
+llmfit catalog add      # teach it about a model it doesn't know
+llmfit catalog refresh  # check the catalog against reality
 llmfit runtimes         # which engines are installed
 ```
 
@@ -222,6 +233,39 @@ models:
 Repeating an existing `id` patches just those fields, so overriding one setting
 doesn't mean restating the whole entry.
 
+Or let it read the architecture out of a file you already have — which is safer
+than typing it, because layer and KV-head counts drive the whole memory model:
+
+```bash
+llmfit catalog add my-finetune --gguf ./my-finetune-Q4_K_M.gguf --publisher me
+#  ✓ read architecture from the file: 48 layers, 8 KV heads, 128 head dim
+#  ✓ my-finetune is now in the catalog (7.9B, 48 layers, measured architecture)
+```
+
+`llmfit catalog refresh` checks entries against local GGUFs and upstream repos
+and reports drift — a renamed repo, a quantization that no longer exists, a
+layer count that does not match the file. It writes a **proposed** overlay
+rather than editing in place: a catalog that changes underneath you turns a
+reproducible setup into a moving target.
+
+## Security posture
+
+Catalog YAML is treated as **untrusted input**, because it is designed to be
+extended, shared and refreshed:
+
+- every catalog-derived path component is sanitised and the resulting path is
+  re-checked against its root, so an entry cannot place a multi-gigabyte
+  download outside the model store;
+- repository ids are validated against an anchored pattern before they reach a
+  URL;
+- GGUF header lengths are bounded by the real file size, so a crafted 58-byte
+  file cannot trigger a huge allocation — a hostile or corrupt file degrades to
+  "use the catalog estimate" rather than crashing the run.
+
+There is one runtime dependency (PyYAML), parsed with `safe_load`. No `shell=True`,
+no `eval`, no `pickle`, and TLS verification is never disabled. CI runs
+`pip-audit` against the declared dependency set on every push.
+
 ## Requirements
 
 Python 3.9+ and PyYAML — deliberately close to zero dependencies, because this
@@ -235,14 +279,16 @@ The 3.9 floor is tested, not assumed: CI runs the full suite on 3.9, 3.10, 3.11,
 
 ```bash
 pip install -e ".[dev]"
-pytest                       # 228 tests, no GPU or network required
+pytest                       # 302 tests, no GPU or network required
 ruff check src/ tests/
 ```
 
 Tests cover the fit maths against independently published figures (the KV-cache
 formula is pinned exactly), catalog integrity, repair convergence and
-termination, and every check against a scripted endpoint. Nothing in the suite
-needs a GPU or the network — anything reaching for either is a bug in the test.
+termination, every check against a scripted endpoint, and a security suite that
+reproduces each fixed weakness (path traversal, URL injection, hostile GGUF
+headers). Nothing in the suite needs a GPU or the network — anything reaching
+for either is a bug in the test.
 
 ## License
 
