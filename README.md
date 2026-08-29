@@ -186,6 +186,7 @@ llmfit export           # register an existing model with my other apps
 llmfit catalog list     # what models are known
 llmfit catalog add      # teach it about a model it doesn't know
 llmfit catalog refresh  # check the catalog against reality
+llmfit catalog update   # pull the newest catalog now
 llmfit runtimes         # which engines are installed
 ```
 
@@ -248,6 +249,42 @@ layer count that does not match the file. It writes a **proposed** overlay
 rather than editing in place: a catalog that changes underneath you turns a
 reproducible setup into a moving target.
 
+## It updates itself
+
+The catalog is a snapshot of a landscape that turns over every few weeks, so
+nothing here depends on someone remembering to publish a release.
+
+**Your install pulls new models on its own.** Once a day (configurable), llmfit
+fetches a newer catalog, validates it, and caches it alongside your own entries.
+A model released after you installed simply shows up.
+
+```bash
+llmfit catalog auto-update              # when it last checked, and from where
+llmfit catalog auto-update --disable    # opt out for good
+llmfit catalog update                   # check right now
+```
+
+It is built to be invisible when it fails: one short timeout, checked at most
+once per interval, and **any** failure — offline, DNS, a 500, malformed YAML —
+leaves the bundled catalog in place and the run continues. It never fetches for
+an `--offline` profile.
+
+**The published catalog refreshes itself too.** A scheduled workflow discovers
+newly popular open-weight models on Hugging Face and commits them, so the file
+your install pulls stays current with nobody pushing anything.
+
+Discovery reads architecture from each model's `config.json` — `num_hidden_layers`,
+`num_key_value_heads`, `hidden_size`, `head_dim` — which is exactly what the
+memory model needs, so an auto-added entry is as trustworthy as a hand-written
+one. **It will not add a model it cannot describe**: an incomplete config is a
+reason to skip, because a guessed layer count is a wrong memory plan and an
+out-of-memory error on someone's machine.
+
+Before anything is committed, the updated catalog must load, have plausible
+values, survive a real planning run, and pass the full test suite. If any of
+that fails the job fails loudly and nothing is written. Point it elsewhere with
+`LLMFIT_CATALOG_URL` (a `file://` or internal URL works, for air-gapped setups).
+
 ## Security posture
 
 Catalog YAML is treated as **untrusted input**, because it is designed to be
@@ -279,7 +316,7 @@ The 3.9 floor is tested, not assumed: CI runs the full suite on 3.9, 3.10, 3.11,
 
 ```bash
 pip install -e ".[dev]"
-pytest                       # 302 tests, no GPU or network required
+pytest                       # 354 tests, no GPU or network required
 ruff check src/ tests/
 ```
 

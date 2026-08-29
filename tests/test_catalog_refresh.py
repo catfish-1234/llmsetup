@@ -51,7 +51,7 @@ class TestAdd:
         """Hand-typed layer and KV-head counts are how people plan a model into
         memory it does not fit, so the file is the source of truth."""
         gguf = write_gguf(tmp_path / "m.gguf", layers=48, kv_heads=8, hidden=4096)
-        add_model(console, "my-model", gguf_path=gguf, publisher="acme")
+        add_model(console, "my-model", gguf_path=gguf, publisher="acme", params_b=8.0)
 
         catalog = load_catalog()
         spec = catalog.require("my-model")
@@ -64,12 +64,27 @@ class TestAdd:
 
     def test_infers_tool_support_from_the_chat_template(self, tmp_path, console):
         with_tools = write_gguf(tmp_path / "a.gguf", template="{% if tools %}x{% endif %}")
-        add_model(console, "has-tools", gguf_path=with_tools)
+        add_model(console, "has-tools", gguf_path=with_tools, params_b=8.0)
         assert load_catalog().require("has-tools").supports_tools
 
         without = write_gguf(tmp_path / "b.gguf", template="{{ messages }}")
-        add_model(console, "no-tools", gguf_path=without)
+        add_model(console, "no-tools", gguf_path=without, params_b=8.0)
         assert not load_catalog().require("no-tools").supports_tools
+
+    def test_estimates_params_from_a_realistically_sized_file(self, tmp_path, console):
+        """A ~4.8 GB Q4 file implies roughly 8B parameters."""
+        gguf = write_gguf(tmp_path / "big.gguf", layers=32, pad=48 * 1024 * 1024)
+        add_model(console, "sized", gguf_path=gguf)
+        assert load_catalog().require("sized").params_b > 0.05
+
+    def test_refuses_to_invent_params_for_an_implausibly_small_file(self, tmp_path,
+                                                                    console):
+        """A stub or truncated download must not produce a bogus parameter count
+        that the planner would then size memory against."""
+        stub = write_gguf(tmp_path / "stub.gguf", layers=32)
+        with pytest.raises(CatalogError) as excinfo:
+            add_model(console, "stub", gguf_path=stub)
+        assert "--params" in excinfo.value.hint
 
     def test_works_without_a_file_when_params_are_given(self, console):
         add_model(console, "remote-only", params_b=7.0,
@@ -95,8 +110,9 @@ class TestAdd:
 
     def test_adding_twice_replaces_rather_than_duplicates(self, tmp_path, console):
         gguf = write_gguf(tmp_path / "m.gguf", layers=48)
-        add_model(console, "dupe", gguf_path=gguf)
-        add_model(console, "dupe", gguf_path=write_gguf(tmp_path / "m2.gguf", layers=60))
+        add_model(console, "dupe", gguf_path=gguf, params_b=8.0)
+        add_model(console, "dupe", params_b=8.0,
+                  gguf_path=write_gguf(tmp_path / "m2.gguf", layers=60))
 
         document = yaml.safe_load(user_catalog_path().read_text())
         ids = [m["id"] for m in document["models"]]
