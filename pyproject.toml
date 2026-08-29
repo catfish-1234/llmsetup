@@ -1,0 +1,63 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "llmfit"
+version = "0.1.0"
+description = "Interview-driven setup assistant for local open-weight LLMs: picks the model, tunes the runtime, proves it works, and registers it with every local LLM app you use."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "Apache-2.0" }
+keywords = ["llm", "local-llm", "gguf", "ollama", "llama.cpp", "lm-studio", "vllm", "mlx"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+# Deliberately near-zero dependency: this tool runs on whatever machine the user
+# already has. PyYAML is the only runtime dep (human-editable model catalog).
+dependencies = ["PyYAML>=5.4"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "pytest-cov>=4"]
+
+[project.scripts]
+llmfit = "llmfit.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/catfish-1234/open-source-llm"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+llmfit = ["catalog/data/*.yaml", "interop/templates/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+# A deliberate set rather than ruff's defaults. The project targets Python 3.9
+# and annotates with `typing.List` / `Optional` throughout; the PEP 585/604
+# rewrite rules (UP006/UP035/UP045) would churn every file for no functional
+# gain, so they are off rather than suppressed line by line.
+select = ["E", "F", "W", "I", "B", "C4", "SIM", "RUF"]
+ignore = [
+    "E501",    # line length is handled by the formatter
+    "B008",    # function call in a default argument: not used here
+    "SIM105",  # contextlib.suppress is not clearer than a commented try/except
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests reach into private helpers on purpose, to pin behaviour that has no
+# public surface (regex helpers, JSON extraction, PNG generation).
+"tests/*" = ["SIM117"]

@@ -1,0 +1,125 @@
+"""Orchestrates registration across every target.
+
+The contract: one copy of the weights in the shared store, linked into each
+app's expected location, plus emitted config for everything that talks HTTP.
+Registration never deletes user data and never overwrites a file it did not
+create, so running this twice is safe.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+from llmfit.interop import jan as jan_target
+from llmfit.interop import lmstudio as lmstudio_target
+from llmfit.interop import ollama as ollama_target
+from llmfit.interop.openai_clients import snippets
+from llmfit.runtimes.base import Endpoint
+from llmfit.types import Client, ModelSpec, RuntimeConfig
+from llmfit.util.fs import app_dir, ensure_dir, write_text
+from llmfit.util.log import Console
+
+
+def available_targets() -> Dict[str, bool]:
+    """Which desktop apps are installed on this machine."""
+    return {
+        "lm_studio": lmstudio_target.is_installed(),
+        "ollama": ollama_target.is_installed(),
+        "jan": jan_target.is_installed(),
+    }
+
+
+def register_everywhere(
+    spec: ModelSpec,
+    config: RuntimeConfig,
+    endpoint: Optional[Endpoint],
+    console: Console,
+    gguf_path: Optional[Path] = None,
+    requested: Optional[List[Client]] = None,
+    write_snippets: bool = True,
+) -> List[Dict[str, Any]]:
+    """Register with every applicable target. Returns one record per attempt."""
+    records: List[Dict[str, Any]] = []
+    installed = available_targets()
+    wanted = {c.value for c in (requested or [])}
+
+    def should_do(target: str) -> bool:
+        # Register with an app if the user named it, or if it is simply present —
+        # "I want to see it in my other tools" is the default expectation.
+        return target in wanted or installed.get(target, False)
+
+    # --- desktop apps that need the weights on disk ------------------------- #
+    if gguf_path and Path(gguf_path).exists():
+        path = Path(gguf_path)
+
+        if should_do("lm_studio"):
+            record = _guard("lm_studio", lambda: lmstudio_target.register_in_lmstudio(
+                spec, path, config.quant))
+            records.append(record)
+
+        if should_do("jan"):
+            records.append(_guard("jan", lambda: jan_target.register_in_jan(
+                spec, path, config)))
+    elif wanted & {"lm_studio", "jan"}:
+        records.append({
+            "target": "lm_studio/jan", "ok": False,
+            "note": (f"the {config.runtime} runtime does not produce a local GGUF "
+                     f"file, so these apps cannot load this model directly; they "
+                     f"can still use the HTTP endpoint below"),
+        })
+
+    # --- Ollama --------------------------------------------------------------#
+    if should_do("ollama") and config.runtime != "ollama":
+        records.append(_guard("ollama", lambda: ollama_target.register_in_ollama(
+            spec, config, Path(gguf_path) if gguf_path else None)))
+    elif config.runtime == "ollama":
+        records.append({
+            "target": "ollama", "ok": True, "name": config.served_name,
+            "note": f"already registered as `{config.served_name}` by the setup",
+        })
+
+    # --- OpenAI-compatible clients ------------------------------------------ #
+    if endpoint:
+        emitted = snippets(endpoint, spec, config)
+        directory = ensure_dir(app_dir() / "clients" / spec.id)
+        written = []
+        if write_snippets:
+            for client_id, snippet in emitted.items():
+                extension = {"yaml": "yaml", "json": "json", "shell": "sh"}.get(
+                    snippet["format"], "txt")
+                target = directory / f"{client_id}.{extension}"
+                write_text(target, _header(snippet) + snippet["content"])
+                written.append(str(target))
+        records.append({
+            "target": "openai_clients", "ok": True,
+            "base_url": f"{endpoint.base_url.rstrip('/')}/v1",
+            "model": endpoint.model,
+            "files": written,
+            "clients": {k: v["path"] for k, v in emitted.items()},
+            "note": f"config snippets written to {directory}",
+        })
+
+    for record in records:
+        if record.get("ok"):
+            console.ok(f"{record['target']}: {record.get('note', 'registered')}")
+        else:
+            console.warn(f"{record['target']}: {record.get('note', 'skipped')}")
+    return records
+
+
+def _guard(target: str, fn) -> Dict[str, Any]:
+    """Registration failures are reported, never fatal — the setup still works."""
+    try:
+        return fn()
+    except Exception as exc:
+        return {"target": target, "ok": False,
+                "note": f"registration failed: {exc}"}
+
+
+def _header(snippet: Dict[str, str]) -> str:
+    comment = {"yaml": "#", "shell": "#"}.get(snippet["format"])
+    if not comment:
+        return ""
+    return (f"{comment} Generated by llmfit for {snippet['name']}.\n"
+            f"{comment} Goes in: {snippet['path']}\n\n")

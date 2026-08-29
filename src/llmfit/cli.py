@@ -1,0 +1,570 @@
+"""Command line interface.
+
+Subcommands mirror the pipeline stages, so any one of them can be run and
+inspected on its own:
+
+    llmfit setup       the whole thing
+    llmfit detect      what hardware do I have?
+    llmfit plan        what would you pick, and why?
+    llmfit verify      does my current endpoint actually work?
+    llmfit doctor      re-test and repair an existing setup
+    llmfit export      register an existing model with my other apps
+    llmfit catalog     inspect or extend the model list
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+from typing import List, Optional
+
+from llmfit.catalog.catalog import load_catalog
+from llmfit.hardware import apply_overrides, detect_hardware
+from llmfit.hardware.detect import summarize as summarize_hardware
+from llmfit.interview.questions import infer_flags
+from llmfit.interview.wizard import (
+    load_answers,
+    profile_from_answers,
+    run_interview,
+    save_profile,
+)
+from llmfit.pipeline import Pipeline, companion_embedding_plan
+from llmfit.report.render import render_markdown, render_terminal
+from llmfit.runtimes.registry import all_runtimes
+from llmfit.types import UseCaseProfile
+from llmfit.util.errors import LlmfitError
+from llmfit.util.fs import app_dir, ensure_dir, write_text
+from llmfit.util.log import Console
+from llmfit.util.units import gb
+
+VERSION = "0.1.0"
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    console = Console(quiet=getattr(args, "quiet", False),
+                      verbose=getattr(args, "verbose", False))
+
+    handler = {
+        "setup": cmd_setup, "detect": cmd_detect, "plan": cmd_plan,
+        "verify": cmd_verify, "doctor": cmd_doctor, "export": cmd_export,
+        "catalog": cmd_catalog, "runtimes": cmd_runtimes,
+    }.get(args.command)
+
+    if handler is None:
+        parser.print_help()
+        return 2
+
+    try:
+        return handler(args, console)
+    except LlmfitError as exc:
+        console.error(str(exc))
+        return 1
+    except KeyboardInterrupt:
+        console.error("interrupted")
+        return 130
+
+
+# --------------------------------------------------------------------------- #
+# parser
+# --------------------------------------------------------------------------- #
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="llmfit",
+        description="Pick, tune, verify and register a local open-weight LLM.",
+    )
+    parser.add_argument("--version", action="version", version=f"llmfit {VERSION}")
+    sub = parser.add_subparsers(dest="command")
+
+    def common(p: argparse.ArgumentParser) -> None:
+        p.add_argument("-q", "--quiet", action="store_true", help="only errors")
+        p.add_argument("-v", "--verbose", action="store_true", help="show debug detail")
+        p.add_argument("--json", action="store_true", help="emit machine-readable JSON")
+
+    def hardware_flags(p: argparse.ArgumentParser) -> None:
+        p.add_argument("--vram", help="override detected VRAM, e.g. 24 or 24GB")
+        p.add_argument("--ram", help="override detected system RAM")
+        p.add_argument("--gpu-vendor", choices=["nvidia", "amd", "apple", "intel"],
+                       help="override the detected GPU vendor")
+        p.add_argument("--cpu-only", action="store_true", help="ignore any GPU")
+        p.add_argument("--threads", type=int, help="override the physical core count")
+
+    def profile_flags(p: argparse.ArgumentParser) -> None:
+        p.add_argument("--answers", type=Path,
+                       help="YAML file of interview answers (skips the questions)")
+        p.add_argument("--task", action="append", dest="tasks",
+                       help="chat|coding|agent|rag|summarize|creative|extract|"
+                            "translate|vision (repeatable)")
+        p.add_argument("--client", action="append", dest="clients",
+                       help="apps to register with (repeatable)")
+        p.add_argument("--context", type=int, dest="context_tokens",
+                       help="context length in tokens")
+        p.add_argument("--priority", choices=["speed", "balanced", "quality"])
+        p.add_argument("--users", type=int, dest="concurrent_users",
+                       help="concurrent users to size for")
+        p.add_argument("--tools", dest="needs_tools", action="store_true",
+                       default=None, help="require tool calling")
+        p.add_argument("--json-output", dest="needs_json", action="store_true",
+                       default=None, help="require structured JSON output")
+        p.add_argument("--vision", dest="needs_vision", action="store_true",
+                       default=None, help="require image input")
+        p.add_argument("--embeddings", dest="needs_embeddings", action="store_true",
+                       default=None, help="also set up an embedding model")
+        p.add_argument("--commercial", dest="commercial_use", action="store_true",
+                       default=None, help="only permissively licensed models")
+        p.add_argument("--languages", help="comma-separated language codes")
+        p.add_argument("--yes", action="store_true",
+                       help="accept all defaults instead of asking")
+
+    p_setup = sub.add_parser("setup", help="the full flow, end to end")
+    common(p_setup)
+    hardware_flags(p_setup)
+    profile_flags(p_setup)
+    p_setup.add_argument("--runtime", help="force a runtime (ollama, llamacpp, vllm, …)")
+    p_setup.add_argument("--model", help="force a catalog model id")
+    p_setup.add_argument("--quant", help="force a quantization, e.g. Q4_K_M")
+    p_setup.add_argument("--quick", action="store_true",
+                         help="run only the essential checks")
+    p_setup.add_argument("--dry-run", action="store_true",
+                         help="plan and tune, but download and launch nothing")
+    p_setup.add_argument("--no-register", action="store_true",
+                         help="skip registering with other apps")
+    p_setup.add_argument("--no-repair", action="store_true",
+                         help="report failures instead of fixing them")
+    p_setup.add_argument("--report", type=Path, help="write a markdown report here")
+    p_setup.add_argument("--save-profile", type=Path,
+                         help="save the answers for a repeatable run")
+    p_setup.add_argument("--catalog", type=Path, action="append",
+                         help="additional catalog file (repeatable)")
+
+    p_detect = sub.add_parser("detect", help="show what hardware was found")
+    common(p_detect)
+    hardware_flags(p_detect)
+
+    p_plan = sub.add_parser("plan", help="show the ranked recommendations")
+    common(p_plan)
+    hardware_flags(p_plan)
+    profile_flags(p_plan)
+    p_plan.add_argument("--runtime")
+    p_plan.add_argument("--top", type=int, default=5, help="how many to show")
+    p_plan.add_argument("--catalog", type=Path, action="append")
+
+    p_verify = sub.add_parser("verify", help="test an endpoint you already have")
+    common(p_verify)
+    profile_flags(p_verify)
+    p_verify.add_argument("--base-url", default="http://127.0.0.1:11434",
+                          help="OpenAI-compatible endpoint")
+    p_verify.add_argument("--model", required=True, help="model name to request")
+    p_verify.add_argument("--checks", help="comma-separated subset of checks")
+
+    p_doctor = sub.add_parser("doctor", help="re-test the last setup and fix problems")
+    common(p_doctor)
+    hardware_flags(p_doctor)
+    p_doctor.add_argument("--profile", type=Path, help="saved setup JSON to re-test")
+
+    p_export = sub.add_parser("export", help="register a model with your other apps")
+    common(p_export)
+    p_export.add_argument("--model", required=True, help="catalog model id")
+    p_export.add_argument("--quant", default="Q4_K_M")
+    p_export.add_argument("--gguf", type=Path, help="path to an existing GGUF file")
+    p_export.add_argument("--base-url", default="http://127.0.0.1:11434")
+
+    p_catalog = sub.add_parser("catalog", help="inspect the model catalog")
+    common(p_catalog)
+    p_catalog.add_argument("action", choices=["list", "show", "path"], default="list",
+                           nargs="?")
+    p_catalog.add_argument("model_id", nargs="?")
+
+    p_runtimes = sub.add_parser("runtimes", help="show which engines are installed")
+    common(p_runtimes)
+
+    return parser
+
+
+# --------------------------------------------------------------------------- #
+# commands
+# --------------------------------------------------------------------------- #
+
+
+def cmd_detect(args, console: Console) -> int:
+    hardware = _hardware(args)
+    if args.json:
+        print(json.dumps(hardware.to_dict(), indent=2))
+        return 0
+
+    from llmfit.hardware.bandwidth import describe_bandwidth
+
+    console.print(console.bold("Hardware"))
+    console.info(summarize_hardware(hardware))
+    console.info(f"memory bandwidth: {describe_bandwidth(hardware)}")
+    console.info(f"usable for a model: {gb(hardware.memory_budget)}"
+                 + (" (unified memory, capped for OS headroom)"
+                    if hardware.unified_memory else ""))
+    console.info(f"free disk in the model store: {gb(hardware.disk_free_bytes)}")
+    for gpu in hardware.gpus:
+        free = f", {gb(gpu.vram_free_bytes)} free" if gpu.vram_free_bytes else ""
+        console.info(f"GPU {gpu.index}: {gpu.name} — {gb(gpu.vram_bytes)}{free}"
+                     f"  flash-attention: "
+                     f"{'yes' if gpu.supports_flash_attention else 'no'}")
+    for warning in hardware.detection_warnings:
+        console.warn(warning)
+    return 0
+
+
+def cmd_plan(args, console: Console) -> int:
+    from llmfit.planner.plan import build_plan
+    from llmfit.planner.score import explain
+
+    hardware = _hardware(args)
+    profile = _profile(args, console)
+    catalog = load_catalog(extra_paths=getattr(args, "catalog", None))
+    plan = build_plan(profile, hardware, catalog, runtime=args.runtime)
+
+    if args.json:
+        print(json.dumps({
+            "runtime": plan.runtime,
+            "runtime_reason": plan.runtime_reason,
+            "candidates": [{
+                "model": c.model.id, "name": c.model.name, "quant": c.quant,
+                "score": c.score, "breakdown": c.score_breakdown,
+                "memory_gb": round(c.estimate.total_gb, 2),
+                "kv_quant": c.estimate.kv_quant,
+                "fits_on_gpu": c.fits_on_gpu, "warnings": c.warnings,
+            } for c in plan.candidates[:args.top]],
+            "notes": plan.notes,
+        }, indent=2))
+        return 0
+
+    console.print(console.bold(f"Machine: {summarize_hardware(hardware)}"))
+    console.print(console.bold(f"Runtime: {plan.runtime} — {plan.runtime_reason}"))
+    console.print()
+    console.print(console.bold(f"Top {min(args.top, len(plan.candidates))} for "
+                               f"{', '.join(t.value for t in profile.tasks)} "
+                               f"at {profile.context_tokens:,} tokens"))
+    console.print()
+    for index, candidate in enumerate(plan.candidates[:args.top], 1):
+        marker = "*" if index == 1 else " "
+        tps = candidate.score_breakdown.get("est_tokens_per_s")
+        console.print(
+            f" {marker} {index}. {candidate.model.name} ({candidate.quant})  "
+            f"{candidate.estimate.total_gb:.1f} GB  "
+            + (f"~{tps:.0f} tok/s  " if tps else "")
+            + f"score {candidate.score:.3f}"
+        )
+        console.info(console.dim(f"   {explain(candidate, profile)}"))
+        console.info(console.dim(
+            f"   weights {gb(candidate.estimate.weights)} + "
+            f"KV {gb(candidate.estimate.kv_cache)} ({candidate.estimate.kv_quant}) + "
+            f"overhead {gb(candidate.estimate.overhead)}"
+        ))
+        for warning in candidate.warnings:
+            console.warn(f"   {warning}")
+    console.print()
+    for note in plan.notes:
+        console.info(console.dim(note))
+
+    embedder = companion_embedding_plan(profile, hardware, catalog)
+    if embedder:
+        console.print()
+        console.print(console.bold("Companion embedding model"))
+        console.info(f"{embedder.name} ({embedder.license}) — "
+                     f"{embedder.max_context:,} token window")
+    return 0
+
+
+def cmd_setup(args, console: Console) -> int:
+    hardware = _hardware(args)
+    profile = _profile(args, console)
+    catalog = load_catalog(extra_paths=getattr(args, "catalog", None))
+
+    if args.save_profile:
+        save_profile(profile, args.save_profile)
+        console.ok(f"answers saved to {args.save_profile}")
+
+    if args.model:
+        # An explicit model choice still gets tuned and verified; it just skips
+        # the ranking. Validate it here so the error is immediate.
+        catalog.require(args.model)
+        catalog.models = [m for m in catalog.models if m.id == args.model]
+        catalog._by_id = {m.id: m for m in catalog.models}
+        if args.quant:
+            catalog.models[0].recommended_quants = [args.quant]
+
+    pipeline = Pipeline(
+        profile, hardware, catalog, console,
+        runtime_name=args.runtime, quick=args.quick, dry_run=args.dry_run,
+        max_repairs=0 if args.no_repair else 12,
+        register=not args.no_register,
+    )
+    try:
+        result = pipeline.run()
+    finally:
+        # llama.cpp/vLLM servers we launched are ours to clean up. Ollama and
+        # LM Studio are shared daemons and are deliberately left running.
+        pipeline.shutdown()
+
+    if args.json:
+        print(json.dumps(result.to_dict(), indent=2, default=str))
+    else:
+        render_terminal(result, console)
+
+    _save_last(result)
+    if args.report:
+        write_text(args.report, render_markdown(result))
+        console.ok(f"report written to {args.report}")
+
+    if args.dry_run:
+        # Nothing was attempted, so there is nothing to have failed.
+        return 0
+    return 0 if result.succeeded else 1
+
+
+def cmd_verify(args, console: Console) -> int:
+    from llmfit.runtimes.base import Endpoint
+    from llmfit.verify.client import OpenAIClient
+    from llmfit.verify.harness import Harness
+
+    hardware = detect_hardware()
+    profile = _profile(args, console)
+    catalog = load_catalog()
+
+    spec = catalog.get(args.model) or _synthetic_spec(args.model, catalog)
+    endpoint = Endpoint(base_url=args.base_url, model=args.model, runtime="external")
+    config = _config_for_external(spec, profile, args)
+
+    harness = Harness(
+        client=OpenAIClient(endpoint), spec=spec, config=config, profile=profile,
+        hardware=hardware, console=console,
+    )
+    names = args.checks.split(",") if args.checks else None
+    console.step(f"Verifying {args.model} at {args.base_url}")
+    results = harness.run(names or _default_checks(profile, spec))
+
+    if args.json:
+        print(json.dumps([r.to_dict() for r in results], indent=2))
+    failed = [r for r in results if r.blocking]
+    console.print()
+    console.print(console.bold(
+        f"{len(results) - len(failed)}/{len(results)} checks passed"
+    ))
+    return 1 if failed else 0
+
+
+def cmd_doctor(args, console: Console) -> int:
+    """Re-test the last setup and repair anything that broke."""
+    path = args.profile or (app_dir() / "last-setup.json")
+    if not Path(path).exists():
+        raise LlmfitError(
+            f"no saved setup at {path}",
+            hint="run `llmfit setup` first, or pass --profile",
+        )
+    from llmfit.util.fs import read_json
+
+    saved = read_json(Path(path))
+    if not saved:
+        raise LlmfitError(f"{path} is not readable")
+
+    profile = profile_from_answers(saved.get("profile", {}))
+    catalog = load_catalog()
+    hardware = _hardware(args)
+    model_id = (saved.get("config") or {}).get("model_id")
+    if not model_id:
+        raise LlmfitError(f"{path} does not record which model was set up")
+
+    console.step(f"Re-testing {model_id}")
+    catalog.models = [m for m in catalog.models if m.id == model_id] or catalog.models
+    catalog._by_id = {m.id: m for m in catalog.models}
+
+    pipeline = Pipeline(profile, hardware, catalog, console,
+                        runtime_name=saved.get("runtime"))
+    try:
+        result = pipeline.run()
+    finally:
+        pipeline.shutdown()
+
+    render_terminal(result, console)
+    _save_last(result)
+    return 0 if result.succeeded else 1
+
+
+def cmd_export(args, console: Console) -> int:
+    from llmfit.interop.export import register_everywhere
+    from llmfit.runtimes.base import Endpoint
+    from llmfit.runtimes.gguf_store import find_local
+
+    catalog = load_catalog()
+    spec = catalog.require(args.model)
+    gguf = args.gguf or find_local(spec, args.quant)
+    if gguf and not Path(gguf).exists():
+        raise LlmfitError(f"{gguf} does not exist")
+    if not gguf:
+        console.warn(
+            f"no local GGUF found for {spec.id}:{args.quant}; only HTTP client "
+            f"configs will be emitted"
+        )
+
+    config = _config_for_external(spec, UseCaseProfile(), args)
+    config.quant = args.quant
+    endpoint = Endpoint(base_url=args.base_url, model=spec.id, runtime="external")
+
+    console.step("Registering")
+    records = register_everywhere(spec, config, endpoint, console,
+                                  gguf_path=Path(gguf) if gguf else None)
+    if args.json:
+        print(json.dumps(records, indent=2))
+    return 0
+
+
+def cmd_catalog(args, console: Console) -> int:
+    catalog = load_catalog()
+
+    if args.action == "path":
+        for source in catalog.sources:
+            console.print(source)
+        console.info(console.dim(
+            f"add your own entries in {app_dir() / 'catalog.d'}/*.yaml"))
+        return 0
+
+    if args.action == "show":
+        if not args.model_id:
+            raise LlmfitError("`catalog show` needs a model id")
+        spec = catalog.require(args.model_id)
+        print(json.dumps(spec.to_dict(), indent=2))
+        return 0
+
+    if args.json:
+        print(json.dumps([m.to_dict() for m in catalog.models], indent=2))
+        return 0
+
+    console.print(console.bold(f"{len(catalog)} models (catalog updated "
+                               f"{catalog.updated})"))
+    console.print()
+    header = f"  {'id':30s} {'params':>10s} {'ctx':>7s} {'caps':12s} license"
+    console.print(console.bold(header))
+    for spec in sorted(catalog.models, key=lambda m: (-m.params_b, m.id)):
+        caps = "".join([
+            "T" if spec.supports_tools else "-",
+            "V" if spec.supports_vision else "-",
+            "J" if spec.supports_json else "-",
+            "R" if spec.is_reasoning else "-",
+            "E" if spec.is_embedding else "-",
+        ])
+        params = (f"{spec.params_b:g}B"
+                  + (f"/{spec.active_params_b:g}B" if spec.is_moe else ""))
+        console.print(f"  {spec.id:30s} {params:>10s} "
+                      f"{spec.max_context // 1024:>6d}K {caps:12s} {spec.license}")
+    console.print()
+    console.info(console.dim("caps: T=tools V=vision J=json R=reasoning E=embedding"))
+    return 0
+
+
+def cmd_runtimes(args, console: Console) -> int:
+    rows = []
+    for runtime in all_runtimes():
+        available = runtime.is_available()
+        rows.append({"name": runtime.name, "label": runtime.label,
+                     "available": available,
+                     "version": runtime.version() if available else None,
+                     "install": "" if available else runtime.install_hint()})
+    if args.json:
+        print(json.dumps(rows, indent=2))
+        return 0
+
+    console.print(console.bold("Inference engines"))
+    for row in rows:
+        if row["available"]:
+            console.ok(f"{row['label']}: installed"
+                       + (f" ({row['version']})" if row["version"] else ""))
+        else:
+            console.info(f"  - {row['label']}: not installed — {row['install']}")
+    return 0
+
+
+# --------------------------------------------------------------------------- #
+# helpers
+# --------------------------------------------------------------------------- #
+
+
+def _hardware(args):
+    hardware = detect_hardware(probe_gpus=not getattr(args, "cpu_only", False))
+    overrides = {k: getattr(args, k, None)
+                 for k in ("vram", "ram", "gpu_vendor", "cpu_only", "threads")}
+    if any(v for v in overrides.values()):
+        hardware = apply_overrides(hardware, overrides)
+    return hardware
+
+
+def _profile(args, console: Console) -> UseCaseProfile:
+    """Build a profile from an answers file, flags, or the interactive wizard."""
+    answers = {}
+    if getattr(args, "answers", None):
+        answers.update(load_answers(args.answers))
+
+    for key in ("tasks", "clients", "context_tokens", "priority",
+                "concurrent_users", "needs_tools", "needs_json", "needs_vision",
+                "needs_embeddings", "commercial_use"):
+        value = getattr(args, key, None)
+        if value is not None:
+            answers[key] = value
+    if getattr(args, "languages", None):
+        answers["languages"] = args.languages
+
+    interactive = sys.stdin.isatty() and not getattr(args, "yes", False)
+    # Flags that already say what the model is for make the interview redundant.
+    have_enough = "tasks" in answers
+
+    if interactive and not have_enough:
+        return run_interview(console, defaults=answers)
+    return profile_from_answers(infer_flags(answers or {"tasks": ["chat"]}))
+
+
+def _default_checks(profile, spec):
+    from llmfit.verify.harness import select_checks
+
+    return select_checks(profile, spec)
+
+
+def _synthetic_spec(model_id: str, catalog):
+    """A placeholder spec for verifying a model that is not in the catalog.
+
+    Conservative on purpose: unknown capabilities are assumed absent so checks
+    are advisory rather than falsely required.
+    """
+    from llmfit.types import ModelSpec
+
+    return ModelSpec(
+        id=model_id, name=model_id, publisher="unknown", params_b=8.0,
+        max_context=8192, license="unknown",
+        tasks=["chat", "coding", "agent", "rag", "summarize", "extract"],
+        supports_tools=True, supports_json=True,
+        notes="not in the catalog; capabilities are unverified assumptions",
+    )
+
+
+def _config_for_external(spec, profile, args):
+    from llmfit.types import RuntimeConfig
+
+    return RuntimeConfig(
+        runtime="external", model_id=spec.id, quant=getattr(args, "quant", "unknown"),
+        context_tokens=profile.context_tokens, total_layers=spec.layers,
+        gpu_layers=spec.layers, served_name=getattr(args, "model", spec.id),
+    )
+
+
+def _save_last(result) -> None:
+    """Record the run so `llmfit doctor` can re-test it later."""
+    from llmfit.util.fs import write_json
+
+    try:
+        write_json(ensure_dir(app_dir()) / "last-setup.json", result.to_dict())
+    except OSError:
+        pass
+
+
+if __name__ == "__main__":
+    sys.exit(main())
