@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A newer push to the same branch makes an in-flight run obsolete.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: tests (python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false        # one version failing should not hide the others
+      matrix:
+        # The floor declared in pyproject, the newest release, and the ends of
+        # the range in between. Every one of these is verified, not assumed.
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run tests
+        # The suite needs no GPU and no network by design; anything that
+        # reaches for either is a bug in the test, not the environment.
+        run: pytest -q
+
+      - name: Smoke-test the CLI
+        # Catches packaging faults the unit tests cannot see: a missing entry
+        # point, or catalog YAML left out of the wheel.
+        run: |
+          llmfit --version
+          llmfit catalog list
+          llmfit runtimes
+          llmfit plan --vram 24 --gpu-vendor nvidia --task coding --yes
+
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install ruff
+        run: pip install ruff
+      - name: Lint
+        run: ruff check src/ tests/
+
+  catalog:
+    name: catalog integrity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: pip install -e ".[dev]"
+      - name: Validate the model catalog
+        # The catalog is data that ages, and a bad entry there is a wrong
+        # memory plan rather than a crash — so it gets its own gate.
+        run: pytest tests/test_catalog.py -q
