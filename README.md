@@ -228,16 +228,21 @@ Python 3.9+ and PyYAML — deliberately close to zero dependencies, because this
 runs on whatever machine you already have. An inference engine is needed only for
 `setup` and `verify`; `plan` and `detect` work with nothing installed.
 
+The 3.9 floor is tested, not assumed: CI runs the full suite on 3.9, 3.10, 3.11,
+3.12 and 3.13.
+
 ## Development
 
 ```bash
 pip install -e ".[dev]"
-pytest                       # 223 tests, no GPU or network required
+pytest                       # 228 tests, no GPU or network required
+ruff check src/ tests/
 ```
 
 Tests cover the fit maths against independently published figures (the KV-cache
 formula is pinned exactly), catalog integrity, repair convergence and
-termination, and every check against a scripted endpoint.
+termination, and every check against a scripted endpoint. Nothing in the suite
+needs a GPU or the network — anything reaching for either is a bug in the test.
 
 ## License
 
