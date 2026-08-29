@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from llmfit.types import ModelSpec, RuntimeConfig
-from llmfit.util.fs import link_or_copy
+from llmfit.util.fs import link_or_copy, safe_component, safe_subpath
 from llmfit.util.proc import run, which
 
 
@@ -36,12 +36,14 @@ def is_installed() -> bool:
 
 def _sanitize(value: str) -> str:
     """LM Studio shows these as folder names, so keep them filesystem-clean."""
-    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", value).strip("-")
-    return cleaned or "unknown"
+    return safe_component(value)
 
 
 def target_path(spec: ModelSpec, quant: str, filename: str) -> Path:
-    return models_dir() / _sanitize(spec.publisher) / _sanitize(f"{spec.id}-{quant}") / filename
+    # Path.name on the filename too: it originates from a remote repo listing.
+    return safe_subpath(
+        models_dir(), spec.publisher, f"{spec.id}-{quant}", Path(filename).name
+    )
 
 
 def register_in_lmstudio(spec: ModelSpec, gguf_path: Path, quant: str,

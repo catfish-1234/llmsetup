@@ -80,6 +80,7 @@ def render_terminal(result: SetupResult, console: Console) -> None:
     console.info(f"runtime: {plan.runtime} — {plan.runtime_reason}")
 
     _render_checks(result.checks, console)
+    _render_embedding(result, console)
     _render_repairs(result, console)
     _render_registrations(result, console)
     _render_next_steps(result, console)
@@ -110,6 +111,30 @@ def _render_checks(checks: List[CheckResult], console: Console) -> None:
             f"not tested: {', '.join(untested)} — no claim is made about these"
         ))
     console.info(console.dim(f"verified: {len(tested)} of {len(checks)} checks"))
+
+
+def _render_embedding(result: SetupResult, console: Console) -> None:
+    record = result.embedding
+    if not record:
+        return
+    console.print()
+    console.print(console.bold("Retrieval (embeddings)"))
+    if record.get("ok"):
+        dims = record.get("dimensions")
+        console.ok(
+            f"{record.get('name', record.get('model'))} "
+            + (f"— {dims}-dimensional vectors, " if dims else "— ")
+            + "verified to separate related from unrelated text"
+        )
+        if record.get("base_url"):
+            console.info(console.dim(f"    endpoint {record['base_url']}"))
+        if record.get("note"):
+            console.info(console.dim(f"    {record['note']}"))
+    else:
+        console.warn(
+            f"no working embedding model: {record.get('reason', 'unknown')}. "
+            f"Retrieval quality will suffer until this is fixed."
+        )
 
 
 def _render_repairs(result: SetupResult, console: Console) -> None:
@@ -261,6 +286,29 @@ def render_markdown(result: SetupResult) -> str:
             lines.append(f"- **{check.name}**: {check.message}")
             if check.detail:
                 lines.append(f"  ```\n  {check.detail.strip()[:500]}\n  ```")
+        lines.append("")
+
+    if result.embedding:
+        record = result.embedding
+        lines.append("## Retrieval (embeddings)")
+        lines.append("")
+        if record.get("ok"):
+            dims = record.get("dimensions")
+            lines.append(
+                f"- **{record.get('name', record.get('model'))}**"
+                + (f" — {dims}-dimensional vectors," if dims else " —")
+                + " verified to separate related from unrelated text."
+            )
+            if record.get("base_url"):
+                lines.append(f"- Endpoint: `{record['base_url']}`")
+            if record.get("note"):
+                lines.append(f"- {record['note']}")
+        else:
+            lines.append(
+                f"- **Not working**: {record.get('reason', 'unknown')}. "
+                f"A chat model makes a poor retriever, so RAG results will be weak "
+                f"until a real embedding model is in place."
+            )
         lines.append("")
 
     if result.registrations:
