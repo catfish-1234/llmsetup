@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from llmfit.catalog.catalog import Catalog, arch_source
+from llmfit.catalog.catalog import Catalog
 from llmfit.planner.memory import (
     KV_QUALITY_ORDER,
     estimate_memory,
@@ -179,7 +179,7 @@ def _build_candidate(
             f"{hardware.disk_free_bytes / GIB:.1f} GB is free"
         )
 
-    if arch_source(spec.id) == "estimated":
+    if catalog.arch_source(spec.id) == "estimated":
         warnings.append(
             "architecture figures are estimated; memory numbers will be "
             "recomputed from the real file after download"

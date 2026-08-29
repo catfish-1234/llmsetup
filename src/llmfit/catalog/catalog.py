@@ -31,12 +31,34 @@ class Catalog:
     """A loaded catalog: model specs plus the quantization size table."""
 
     def __init__(self, models: List[ModelSpec], quant_bpw: Dict[str, float],
-                 updated: str = "", sources: Optional[List[str]] = None):
+                 updated: str = "", sources: Optional[List[str]] = None,
+                 extras: Optional[Dict[str, dict]] = None):
         self.models = models
         self.quant_bpw = quant_bpw
         self.updated = updated
         self.sources = sources or []
-        self._by_id = {m.id: m for m in models}
+        # Non-schema keys (arch_source and other provenance) live on the instance,
+        # not in a module global: two Catalog objects in one process must not
+        # report each other's provenance.
+        self.extras = extras or {}
+        self._reindex()
+
+    def _reindex(self) -> None:
+        self._by_id = {m.id: m for m in self.models}
+
+    def restrict_to(self, model_id: str) -> "Catalog":
+        """A view containing only one model, for `--model` and `doctor`.
+
+        Returns a new Catalog rather than mutating this one, so callers never
+        have to reach into private indexes to keep them consistent.
+        """
+        spec = self.require(model_id)
+        return Catalog([spec], dict(self.quant_bpw), self.updated, list(self.sources),
+                       {spec.id: dict(self.extras.get(spec.id, {}))})
+
+    def arch_source(self, model_id: str) -> str:
+        """'measured' or 'estimated' — whether the architecture figures are trustworthy."""
+        return str(self.extras.get(model_id, {}).get("arch_source", "measured"))
 
     def __len__(self) -> int:
         return len(self.models)
@@ -155,6 +177,7 @@ def load_catalog(extra_paths: Optional[Iterable[Path]] = None,
         paths.extend(Path(p).expanduser() for p in extra_paths)
 
     merged: Dict[str, ModelSpec] = {}
+    extras: Dict[str, dict] = {}
     quant_bpw: Dict[str, float] = {}
     updated = ""
     used: List[str] = []
@@ -178,14 +201,14 @@ def load_catalog(extra_paths: Optional[Iterable[Path]] = None,
             # existence check comes before we try to build a full ModelSpec.
             if model_id in merged:
                 merged[model_id] = _patch(merged[model_id], raw)
-                _record_extras(model_id, raw)
             else:
                 merged[model_id] = _to_spec(raw, path)
+            _record_extras(extras, model_id, raw)
         used.append(str(path))
 
     if not merged:
         raise CatalogError("catalog contains no models", hint="check your catalog YAML files")
-    return Catalog(list(merged.values()), quant_bpw, updated, used)
+    return Catalog(list(merged.values()), quant_bpw, updated, used, extras)
 
 
 def _read_yaml(path: Path) -> dict:
@@ -215,25 +238,16 @@ def _to_spec(raw: dict, path: Path) -> ModelSpec:
         spec = ModelSpec(**fields)
     except TypeError as exc:
         raise CatalogError(f"bad catalog entry {raw.get('id')!r} in {path}: {exc}") from None
-    _record_extras(spec.id, raw)
     return spec
 
 
-def _record_extras(model_id: str, raw: dict) -> None:
-    extras = {k: v for k, v in raw.items() if k not in _SPEC_FIELDS}
-    if extras:
-        _EXTRAS.setdefault(model_id, {}).update(extras)
+def _record_extras(store: Dict[str, dict], model_id: str, raw: dict) -> None:
+    found = {k: v for k, v in raw.items() if k not in _SPEC_FIELDS}
+    if found:
+        store.setdefault(model_id, {}).update(found)
 
 
 def _patch(base: ModelSpec, raw: dict) -> ModelSpec:
     changes = {k: v for k, v in raw.items() if k in _SPEC_FIELDS and k != "id"}
     return replace(base, **changes)
 
-
-# Side-table for non-schema keys (arch_source, notes on provenance).
-_EXTRAS: Dict[str, dict] = {}
-
-
-def arch_source(model_id: str) -> str:
-    """'measured' or 'estimated' — whether the architecture figures are trustworthy."""
-    return str(_EXTRAS.get(model_id, {}).get("arch_source", "measured"))

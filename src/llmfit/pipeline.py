@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import datetime
 from pathlib import Path
-from typing import List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence
 
 from llmfit.catalog.catalog import Catalog
 from llmfit.gguf import apply_to_spec, read_gguf_info
@@ -28,6 +28,7 @@ from llmfit.types import (
     RuntimeConfig,
     SetupResult,
     Severity,
+    Task,
     UseCaseProfile,
 )
 from llmfit.util.errors import LlmfitError
@@ -134,8 +135,93 @@ class Pipeline:
                 gguf_path=gguf_path, requested=self.profile.clients,
             )
 
+        # A RAG setup is only half-built without a retriever, so this runs after
+        # the chat model is verified rather than being left as advice.
+        if self.profile.needs_embeddings or Task.RAG in self.profile.tasks:
+            self.console.step("Setting up the embedding model for retrieval")
+            result.embedding = self._setup_embedding(runtime)
+
         result.finished_at = _now()
         return result
+
+    # ------------------------------------------------------------- embedding
+
+    def _setup_embedding(self, runtime: Runtime) -> Dict[str, Any]:
+        """Provision and verify the companion retriever.
+
+        Deliberately non-fatal: a working chat model with a broken retriever is
+        still a useful outcome, so this reports its own status instead of
+        failing the run. But it is *verified* — an embedding endpoint that
+        returns vectors which do not separate meaning is worse than none, since
+        it fails silently at retrieval time.
+        """
+        spec = plan_embedding_model(self.profile, self.hardware, self.catalog)
+        if spec is None:
+            return {"ok": False, "reason": "no embedding model in the catalog"}
+
+        quant = spec.recommended_quants[0] if spec.recommended_quants else "F16"
+        record: Dict[str, Any] = {"model": spec.id, "name": spec.name, "quant": quant}
+
+        config = RuntimeConfig(
+            runtime=runtime.name,
+            model_id=spec.id,
+            quant=quant,
+            # Embedding models are small and the window is the document chunk
+            # size; there is nothing to gain from a larger one.
+            context_tokens=min(spec.max_context, 8192),
+            total_layers=spec.layers,
+            gpu_layers=spec.layers if self.hardware.gpus else 0,
+            batch_size=512,
+            ubatch_size=512,
+            port=self._free_port(),
+            served_name=spec.id,
+            extra={"llamacpp_flags": ["--embeddings", "--pooling", "mean"]},
+        )
+
+        try:
+            config = runtime.ensure_model(spec, config, self.console)
+            endpoint = runtime.start(spec, config, self.console)
+        except (RuntimeUnavailable, LlmfitError) as exc:
+            self.console.warn(f"could not start the embedding model: {exc}")
+            return {**record, "ok": False, "reason": str(exc)}
+
+        try:
+            harness = Harness(
+                client=OpenAIClient(endpoint), spec=spec, config=config,
+                profile=self.profile, hardware=self.hardware, console=self.console,
+                server_log=endpoint.log_path,
+            )
+            checks = harness.run(["health", "embeddings"])
+            ok = not any(c.blocking for c in checks)
+            record.update({
+                "ok": ok,
+                "base_url": f"{endpoint.base_url.rstrip('/')}/v1",
+                "checks": [c.to_dict() for c in checks],
+                "dimensions": next(
+                    (c.metrics.get("dim") for c in checks if c.name == "embeddings"), None
+                ),
+            })
+            if ok and self.register:
+                gguf = runtime.local_model_path(spec, config)
+                record["registrations"] = register_everywhere(
+                    spec, config, endpoint, self.console, gguf_path=gguf,
+                    requested=self.profile.clients, write_snippets=False,
+                )
+        finally:
+            # The embedding server is left running only if the user's runtime
+            # owns it (Ollama, LM Studio); ones we spawned are ours to stop.
+            if endpoint.started_by_us:
+                runtime.stop(endpoint)
+                record["note"] = (
+                    "the embedding server was stopped after verification; start it "
+                    "again with the command in the report"
+                )
+        return record
+
+    def _free_port(self) -> int:
+        from llmfit.util import http
+
+        return http.find_free_port("127.0.0.1", 11500)
 
     # ---------------------------------------------------------- provisioning
 
