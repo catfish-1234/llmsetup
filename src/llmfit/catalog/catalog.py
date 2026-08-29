@@ -11,7 +11,7 @@ from __future__ import annotations
 import os
 from dataclasses import replace
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 import yaml
 
@@ -234,6 +234,7 @@ def _to_spec(raw: dict, path: Path) -> ModelSpec:
     fields = {k: v for k, v in raw.items() if k in _SPEC_FIELDS}
     fields.setdefault("name", raw["id"])
     fields.setdefault("publisher", "unknown")
+    fields = _coerce_types(fields, raw["id"], path)
     try:
         spec = ModelSpec(**fields)
     except TypeError as exc:
@@ -249,5 +250,71 @@ def _record_extras(store: Dict[str, dict], model_id: str, raw: dict) -> None:
 
 def _patch(base: ModelSpec, raw: dict) -> ModelSpec:
     changes = {k: v for k, v in raw.items() if k in _SPEC_FIELDS and k != "id"}
+    changes = _coerce_types(changes, base.id, Path("<overlay>"))
     return replace(base, **changes)
+
+
+#: Fields the memory model does arithmetic on. A string here does not fail at
+#: load time — it fails several layers down inside the fit maths, with an error
+#: that says nothing about the catalog. Types are enforced at the boundary.
+_NUMERIC_FIELDS = {
+    "params_b": float, "active_params_b": float, "layers": int,
+    "hidden_size": int, "kv_heads": int, "head_dim": int, "max_context": int,
+    "quality_tier": int, "max_disk_gb": float,
+}
+_BOOL_FIELDS = (
+    "commercial_ok", "supports_tools", "supports_vision", "supports_json",
+    "is_reasoning", "is_embedding",
+)
+_LIST_FIELDS = ("tasks", "languages", "recommended_quants")
+
+
+def _coerce_types(fields: Dict[str, Any], model_id: str, path: Path) -> Dict[str, Any]:
+    """Validate and normalise an entry's field types.
+
+    Catalogs are extended by users and fetched automatically, so an entry can
+    carry anything YAML can express. Rejecting a bad value here, naming the file
+    and the field, beats a TypeError deep in the planner.
+    """
+    out = dict(fields)
+
+    for name, caster in _NUMERIC_FIELDS.items():
+        if name not in out or out[name] is None:
+            continue
+        value = out[name]
+        if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+            raise CatalogError(
+                f"{model_id}.{name} must be a number, got {value!r} in {path}"
+            )
+        try:
+            out[name] = caster(value)
+        except (TypeError, ValueError):
+            raise CatalogError(
+                f"{model_id}.{name} must be a number, got {value!r} in {path}"
+            ) from None
+        if out[name] <= 0:
+            raise CatalogError(
+                f"{model_id}.{name} must be positive, got {out[name]} in {path}"
+            )
+
+    for name in _BOOL_FIELDS:
+        if name in out and out[name] is not None:
+            out[name] = bool(out[name])
+
+    for name in _LIST_FIELDS:
+        if name in out and out[name] is not None:
+            value = out[name]
+            if isinstance(value, str):
+                value = [value]
+            if not isinstance(value, (list, tuple)):
+                raise CatalogError(
+                    f"{model_id}.{name} must be a list, got {value!r} in {path}"
+                )
+            out[name] = [str(item) for item in value]
+
+    for name in ("id", "name", "publisher", "license", "notes"):
+        if name in out and out[name] is not None:
+            out[name] = str(out[name])
+
+    return out
 

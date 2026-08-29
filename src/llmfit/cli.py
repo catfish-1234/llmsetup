@@ -177,9 +177,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_catalog = sub.add_parser("catalog", help="inspect or extend the model catalog")
     common(p_catalog)
     p_catalog.add_argument(
-        "action", choices=["list", "show", "path", "add", "refresh"],
+        "action",
+        choices=["list", "show", "path", "add", "refresh", "update", "auto-update"],
         default="list", nargs="?",
-        help="list | show <id> | path | add <id> | refresh",
+        help="list | show <id> | path | add <id> | refresh | update | auto-update",
     )
     p_catalog.add_argument("model_id", nargs="?")
     p_catalog.add_argument("--gguf", type=Path,
@@ -204,6 +205,11 @@ def build_parser() -> argparse.ArgumentParser:
                            help="add: a recommended quantization (repeatable)")
     p_catalog.add_argument("--offline", action="store_true",
                            help="refresh: only check local files, skip the network")
+    p_catalog.add_argument("--url", help="update: fetch the catalog from this URL")
+    p_catalog.add_argument("--enable", action="store_true",
+                           help="auto-update: turn automatic updates back on")
+    p_catalog.add_argument("--disable", action="store_true",
+                           help="auto-update: turn automatic updates off for good")
     p_catalog.add_argument("--dry-run", action="store_true",
                            help="refresh: report drift without writing an overlay")
 
@@ -249,6 +255,7 @@ def cmd_plan(args, console: Console) -> int:
 
     hardware = _hardware(args)
     profile = _profile(args, console)
+    _auto_update(console, profile)
     catalog = load_catalog(extra_paths=getattr(args, "catalog", None))
     plan = build_plan(profile, hardware, catalog, runtime=args.runtime)
 
@@ -307,6 +314,7 @@ def cmd_plan(args, console: Console) -> int:
 def cmd_setup(args, console: Console) -> int:
     hardware = _hardware(args)
     profile = _profile(args, console)
+    _auto_update(console, profile)
     catalog = load_catalog(extra_paths=getattr(args, "catalog", None))
 
     if args.save_profile:
@@ -473,6 +481,51 @@ def cmd_catalog(args, console: Console) -> int:
                    f"{reloaded.arch_source(spec.id)} architecture)")
         return 0
 
+    if args.action == "update":
+        from llmfit.catalog.autoupdate import apply_update
+
+        result = apply_update(console, force=True, url=args.url)
+        if result.get("updated"):
+            console.ok(f"catalog updated: {result['models']} models from "
+                       f"{result['url']}")
+            console.info(console.dim(f"cached at {result['path']}"))
+        else:
+            console.warn(f"not updated: {result.get('reason')}")
+        if args.json:
+            print(json.dumps(result, indent=2))
+        return 0 if result.get("updated") else 1
+
+    if args.action == "auto-update":
+        from llmfit.catalog.autoupdate import (
+            disable_persistently,
+            enable_persistently,
+            status,
+        )
+
+        if args.disable:
+            console.ok(f"automatic catalog updates disabled "
+                       f"({disable_persistently()})")
+        elif args.enable:
+            enable_persistently()
+            console.ok("automatic catalog updates enabled")
+
+        state = status()
+        if args.json:
+            print(json.dumps(state, indent=2))
+            return 0
+        console.print(console.bold("Automatic catalog updates"))
+        console.info(f"enabled: {state['enabled']}")
+        console.info(f"source: {state['url']}")
+        console.info(f"every: {state['interval_hours']:g} hours")
+        console.info(f"last checked: {state['last_checked'] or 'never'}")
+        console.info(f"last updated: {state['last_updated'] or 'never'}")
+        if state.get("cached_models"):
+            console.info(f"cached catalog: {state['cached_models']} models "
+                         f"at {state['cached_catalog']}")
+        if state.get("last_error"):
+            console.warn(f"last error: {state['last_error']}")
+        return 0
+
     if args.action == "refresh":
         report = refresh(console, catalog, check_remote=not args.offline,
                          write_overlay=not args.dry_run)
@@ -546,6 +599,22 @@ def cmd_runtimes(args, console: Console) -> int:
 # --------------------------------------------------------------------------- #
 # helpers
 # --------------------------------------------------------------------------- #
+
+
+def _auto_update(args_console, profile) -> None:
+    """Refresh the catalog if it is due. Silent, bounded, and never fatal.
+
+    Runs before planning so a model released since install is available, but is
+    skipped for an offline profile and whenever the user has opted out.
+    """
+    from llmfit.catalog.autoupdate import maybe_update
+
+    result = maybe_update(args_console, offline=getattr(profile, "offline_only", False))
+    if result.get("updated"):
+        args_console.info(args_console.dim(
+            f"catalog auto-updated: {result['models']} models "
+            f"(dated {result.get('catalog_date', 'unknown')})"
+        ))
 
 
 def _hardware(args):
