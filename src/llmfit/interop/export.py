@@ -17,7 +17,7 @@ from llmfit.interop import ollama as ollama_target
 from llmfit.interop.openai_clients import snippets
 from llmfit.runtimes.base import Endpoint
 from llmfit.types import Client, ModelSpec, RuntimeConfig
-from llmfit.util.fs import app_dir, ensure_dir, write_text
+from llmfit.util.fs import app_dir, ensure_dir, safe_subpath, write_text
 from llmfit.util.log import Console
 
 
@@ -82,7 +82,7 @@ def register_everywhere(
     # --- OpenAI-compatible clients ------------------------------------------ #
     if endpoint:
         emitted = snippets(endpoint, spec, config)
-        directory = ensure_dir(app_dir() / "clients" / spec.id)
+        directory = ensure_dir(safe_subpath(app_dir() / "clients", spec.id))
         written = []
         if write_snippets:
             for client_id, snippet in emitted.items():

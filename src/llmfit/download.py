@@ -36,7 +36,8 @@ class RemoteFile:
 
     @property
     def url(self) -> str:
-        return f"{HF_ENDPOINT}/{self.repo}/resolve/main/{urllib.parse.quote(self.filename)}"
+        repo = urllib.parse.quote(validate_repo(self.repo), safe="/")
+        return f"{HF_ENDPOINT}/{repo}/resolve/main/{urllib.parse.quote(self.filename)}"
 
     @property
     def is_split(self) -> bool:
@@ -46,6 +47,27 @@ class RemoteFile:
     @property
     def split_group(self) -> str:
         return re.sub(r"-\d{5}-of-\d{5}\.gguf$", "", self.filename)
+
+
+#: A Hugging Face repo id: `owner/name`, or a bare `name` for a canonical repo.
+#: Anchored and dot-restricted so a catalog value cannot smuggle in a traversal.
+_REPO_RE = re.compile(r"^[A-Za-z0-9][\w.-]*(?:/[A-Za-z0-9][\w.-]*)?$")
+
+
+def validate_repo(repo: str) -> str:
+    """Reject anything that is not a plausible Hugging Face repo id.
+
+    Catalog YAML is user-extensible and, in the case of a refreshed catalog,
+    may be fetched. Validating the shape here means a hostile value fails loudly
+    at the boundary instead of being quoted into a URL and hoping for the best.
+    """
+    text = str(repo or "").strip()
+    if not _REPO_RE.match(text) or ".." in text:
+        raise ProvisionError(
+            f"invalid model repository id: {repo!r}",
+            hint="expected the form `owner/name`; check the catalog entry",
+        )
+    return text
 
 
 def _auth_headers() -> dict:
@@ -59,7 +81,9 @@ def _auth_headers() -> dict:
 
 def list_repo_files(repo: str, timeout: float = 30.0) -> List[RemoteFile]:
     """List files in a HF repo. Raises ProvisionError with an actionable hint."""
-    url = f"{HF_ENDPOINT}/api/models/{repo}"
+    # Validated then quoted: the value comes from catalog YAML, and an unchecked
+    # one with ".." or a query character can redirect the request off /api/models/.
+    url = f"{HF_ENDPOINT}/api/models/{urllib.parse.quote(validate_repo(repo), safe='/')}"
     req = urllib.request.Request(url, headers=_auth_headers())
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:

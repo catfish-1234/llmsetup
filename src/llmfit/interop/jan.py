@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 from llmfit.types import ModelSpec, RuntimeConfig
-from llmfit.util.fs import link_or_copy, write_json
+from llmfit.util.fs import link_or_copy, safe_subpath, write_json
 
 
 def data_dir() -> Path:
@@ -38,7 +38,7 @@ def register_in_jan(spec: ModelSpec, gguf_path: Path,
     if not is_installed():
         return {"target": "jan", "ok": False, "note": "Jan is not installed; skipped"}
 
-    folder = data_dir() / "models" / spec.id
+    folder = safe_subpath(data_dir() / "models", spec.id)
     method, linked = link_or_copy(gguf_path, folder / gguf_path.name)
 
     descriptor = {

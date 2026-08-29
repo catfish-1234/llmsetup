@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from llmfit.catalog.catalog import arch_source, load_catalog
+from llmfit.catalog.catalog import load_catalog
 from llmfit.types import Task, UseCaseProfile
 from llmfit.util.errors import CatalogError
 
@@ -67,7 +67,29 @@ class TestIntegrity:
         """Anything not taken from a published config must say so, because the
         planner surfaces that caveat to the user."""
         for model in catalog.models:
-            assert arch_source(model.id) in ("measured", "estimated")
+            assert catalog.arch_source(model.id) in ("measured", "estimated")
+        # At least one entry is genuinely marked estimated, otherwise this test
+        # would pass just as happily against a catalog with no provenance at all.
+        assert any(catalog.arch_source(m.id) == "estimated" for m in catalog.models)
+
+    def test_provenance_is_per_catalog_not_global(self, tmp_path):
+        """Two Catalog objects in one process must not report each other's
+        provenance — the reason this moved off a module global."""
+        override = tmp_path / "override.yaml"
+        override.write_text("models:\n  - id: qwen3.8-27b\n    arch_source: measured\n")
+        bundled = load_catalog(include_user_dir=False)
+        patched = load_catalog(extra_paths=[override], include_user_dir=False)
+        assert bundled.arch_source("qwen3.8-27b") == "estimated"
+        assert patched.arch_source("qwen3.8-27b") == "measured"
+
+    def test_restrict_to_returns_a_consistent_view(self, catalog):
+        """`--model` and `doctor` narrow the catalog; the index must stay in step."""
+        narrowed = catalog.restrict_to("qwen3-8b")
+        assert [m.id for m in narrowed.models] == ["qwen3-8b"]
+        assert narrowed.require("qwen3-8b") is not None
+        assert narrowed.get("gemma-3-27b") is None
+        # The original is untouched.
+        assert len(catalog) > 1
 
 
 class TestFiltering:

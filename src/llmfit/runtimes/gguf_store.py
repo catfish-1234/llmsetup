@@ -20,13 +20,18 @@ from llmfit.download import (
 )
 from llmfit.types import ModelSpec
 from llmfit.util.errors import ProvisionError
-from llmfit.util.fs import ensure_dir, model_store
+from llmfit.util.fs import ensure_dir, model_store, safe_subpath
 from llmfit.util.log import Console
 
 
 def store_path(spec: ModelSpec, quant: str) -> Path:
-    """Where a model's weights live. Mirrors publisher/model so it reads like HF."""
-    return model_store() / spec.publisher / spec.id / quant
+    """Where a model's weights live. Mirrors publisher/model so it reads like HF.
+
+    Every component is sanitised: these values come from catalog YAML that users
+    can extend or share, and an unsanitised id would let an entry place a
+    multi-gigabyte download anywhere on disk.
+    """
+    return safe_subpath(model_store(), spec.publisher, spec.id, quant)
 
 
 def find_local(spec: ModelSpec, quant: str) -> Optional[Path]:

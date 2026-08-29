@@ -73,14 +73,35 @@ class GgufInfo:
 
 
 class _Reader:
-    def __init__(self, handle):
+    """Bounds-checked reader over a GGUF header.
+
+    Every length in the header is an attacker-controlled uint64. Reading one
+    without checking it against the real file size lets a 58-byte file ask for a
+    2^61-byte allocation, which raises OverflowError or MemoryError rather than
+    the ValueError the caller is prepared for. So sizes are validated against
+    the bytes that actually exist before any allocation happens.
+    """
+
+    def __init__(self, handle, file_size: int):
         self.handle = handle
+        self.file_size = file_size
+
+    def _check(self, size: int) -> None:
+        if size < 0 or size > self.file_size:
+            raise ValueError(
+                f"GGUF header declares {size} bytes but the file is {self.file_size}"
+            )
 
     def raw(self, size: int) -> bytes:
+        self._check(size)
         data = self.handle.read(size)
         if len(data) != size:
             raise ValueError("unexpected end of GGUF header")
         return data
+
+    def skip(self, size: int) -> None:
+        self._check(size)
+        self.handle.seek(size, 1)
 
     def scalar(self, vtype: int) -> Any:
         fmt, size = _FIXED[vtype]
@@ -91,6 +112,14 @@ class _Reader:
         if length > 32 * 1024 * 1024:
             raise ValueError("implausible string length in GGUF header")
         return self.raw(length).decode("utf-8", "replace")
+
+    def _checked_count(self, count: int, item_bytes: int) -> int:
+        """Reject an array whose declared size cannot fit in the file."""
+        if count < 0 or (item_bytes and count > self.file_size // max(1, item_bytes)):
+            raise ValueError(
+                f"GGUF array declares {count} items, more than the file can hold"
+            )
+        return count
 
     def value(self, vtype: int) -> Any:
         if vtype in _FIXED:
@@ -107,6 +136,7 @@ class _Reader:
 
         if item_type in _FIXED:
             _, size = _FIXED[item_type]
+            self._checked_count(count, size)
             data = self.raw(size * count)
             if count <= _MAX_ARRAY_MATERIALISE:
                 fmt, _ = _FIXED[item_type]
@@ -114,12 +144,15 @@ class _Reader:
             return f"<{count} values>"
 
         if item_type == STRING:
+            # Each string costs at least its 8-byte length prefix, so the count
+            # is bounded by the file size even before the contents.
+            self._checked_count(count, 8)
             if count <= _MAX_ARRAY_MATERIALISE:
                 return [self.string() for _ in range(count)]
             # Skip a large string array (the vocabulary) without decoding it.
             for _ in range(count):
                 length = struct.unpack("<Q", self.raw(8))[0]
-                self.handle.seek(length, 1)
+                self.skip(length)
             return f"<{count} strings>"
 
         raise ValueError(f"unsupported GGUF array item type {item_type}")
@@ -132,6 +165,7 @@ def read_gguf_info(path: Path) -> Optional[GgufInfo]:
     "use the catalog estimate", not crash the setup.
     """
     try:
+        file_size = path.stat().st_size
         with open(path, "rb", buffering=1024 * 256) as handle:
             if handle.read(4) != MAGIC:
                 return None
@@ -141,13 +175,15 @@ def read_gguf_info(path: Path) -> Optional[GgufInfo]:
             if kv_count > 100_000:
                 return None
 
-            reader = _Reader(handle)
+            reader = _Reader(handle, file_size)
             metadata: Dict[str, Any] = {}
             for _ in range(kv_count):
                 key = reader.string()
                 vtype = struct.unpack("<I", reader.raw(4))[0]
                 metadata[key] = reader.value(vtype)
-    except (OSError, ValueError, struct.error):
+    except (OSError, ValueError, struct.error, OverflowError, MemoryError):
+        # A corrupt or hostile file must degrade to "use the catalog estimate",
+        # never take down the setup run.
         return None
 
     arch = str(metadata.get("general.architecture", "unknown"))

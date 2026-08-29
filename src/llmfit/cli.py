@@ -174,11 +174,38 @@ def build_parser() -> argparse.ArgumentParser:
     p_export.add_argument("--gguf", type=Path, help="path to an existing GGUF file")
     p_export.add_argument("--base-url", default="http://127.0.0.1:11434")
 
-    p_catalog = sub.add_parser("catalog", help="inspect the model catalog")
+    p_catalog = sub.add_parser("catalog", help="inspect or extend the model catalog")
     common(p_catalog)
-    p_catalog.add_argument("action", choices=["list", "show", "path"], default="list",
-                           nargs="?")
+    p_catalog.add_argument(
+        "action", choices=["list", "show", "path", "add", "refresh"],
+        default="list", nargs="?",
+        help="list | show <id> | path | add <id> | refresh",
+    )
     p_catalog.add_argument("model_id", nargs="?")
+    p_catalog.add_argument("--gguf", type=Path,
+                           help="add: read the architecture from this local GGUF")
+    p_catalog.add_argument("--params", type=float,
+                           help="add: parameter count in billions")
+    p_catalog.add_argument("--gguf-repo", help="add: Hugging Face repo carrying GGUFs")
+    p_catalog.add_argument("--hf-repo", help="add: safetensors repo")
+    p_catalog.add_argument("--ollama-name", help="add: pullable Ollama tag")
+    p_catalog.add_argument("--publisher", help="add: publisher name")
+    p_catalog.add_argument("--model-name", help="add: human-readable name")
+    p_catalog.add_argument("--license", dest="license_name", default="unknown",
+                           help="add: licence identifier")
+    p_catalog.add_argument("--task", action="append", dest="model_tasks",
+                           help="add: a task this model suits (repeatable)")
+    p_catalog.add_argument("--max-context", type=int, help="add: context window")
+    p_catalog.add_argument("--supports-tools", action="store_true",
+                           help="add: the model does tool calling")
+    p_catalog.add_argument("--supports-vision", action="store_true",
+                           help="add: the model accepts images")
+    p_catalog.add_argument("--quant", action="append", dest="model_quants",
+                           help="add: a recommended quantization (repeatable)")
+    p_catalog.add_argument("--offline", action="store_true",
+                           help="refresh: only check local files, skip the network")
+    p_catalog.add_argument("--dry-run", action="store_true",
+                           help="refresh: report drift without writing an overlay")
 
     p_runtimes = sub.add_parser("runtimes", help="show which engines are installed")
     common(p_runtimes)
@@ -289,9 +316,7 @@ def cmd_setup(args, console: Console) -> int:
     if args.model:
         # An explicit model choice still gets tuned and verified; it just skips
         # the ranking. Validate it here so the error is immediate.
-        catalog.require(args.model)
-        catalog.models = [m for m in catalog.models if m.id == args.model]
-        catalog._by_id = {m.id: m for m in catalog.models}
+        catalog = catalog.restrict_to(args.model)
         if args.quant:
             catalog.models[0].recommended_quants = [args.quant]
 
@@ -377,8 +402,7 @@ def cmd_doctor(args, console: Console) -> int:
         raise LlmfitError(f"{path} does not record which model was set up")
 
     console.step(f"Re-testing {model_id}")
-    catalog.models = [m for m in catalog.models if m.id == model_id] or catalog.models
-    catalog._by_id = {m.id: m for m in catalog.models}
+    catalog = catalog.restrict_to(model_id)
 
     pipeline = Pipeline(profile, hardware, catalog, console,
                         runtime_name=saved.get("runtime"))
@@ -421,13 +445,47 @@ def cmd_export(args, console: Console) -> int:
 
 
 def cmd_catalog(args, console: Console) -> int:
+    from llmfit.catalog.refresh import add_model, refresh, user_catalog_dir
+
     catalog = load_catalog()
+
+    if args.action == "add":
+        if not args.model_id:
+            raise LlmfitError(
+                "`catalog add` needs a model id",
+                hint="llmfit catalog add my-model --gguf ./model.gguf",
+            )
+        path = add_model(
+            console, args.model_id, gguf_path=args.gguf, gguf_repo=args.gguf_repo,
+            ollama_name=args.ollama_name, hf_repo=args.hf_repo, params_b=args.params,
+            publisher=args.publisher, name=args.model_name, tasks=args.model_tasks,
+            license_name=args.license_name, context=args.max_context,
+            supports_tools=args.supports_tools, supports_vision=args.supports_vision,
+            quants=args.model_quants,
+        )
+        # Prove the entry actually loads rather than just claiming it was written.
+        reloaded = load_catalog()
+        spec = reloaded.get(args.model_id)
+        if spec is None:
+            raise LlmfitError(f"wrote {path} but {args.model_id} did not load back")
+        console.ok(f"{spec.name} is now in the catalog "
+                   f"({spec.params_b:g}B, {spec.layers} layers, "
+                   f"{reloaded.arch_source(spec.id)} architecture)")
+        return 0
+
+    if args.action == "refresh":
+        report = refresh(console, catalog, check_remote=not args.offline,
+                         write_overlay=not args.dry_run)
+        if args.json:
+            print(json.dumps(report, indent=2))
+        return 0
 
     if args.action == "path":
         for source in catalog.sources:
             console.print(source)
         console.info(console.dim(
-            f"add your own entries in {app_dir() / 'catalog.d'}/*.yaml"))
+            f"add your own entries in {user_catalog_dir()}/*.yaml, "
+            f"or run `llmfit catalog add <id>`"))
         return 0
 
     if args.action == "show":

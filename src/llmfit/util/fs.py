@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import tempfile
 from pathlib import Path
@@ -43,6 +44,44 @@ def free_bytes(path: Path) -> int:
         return 0
 
 
+#: Characters allowed in a path component derived from catalog data.
+_SAFE_COMPONENT = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def safe_component(value: str, fallback: str = "unknown") -> str:
+    """Make a catalog-supplied string safe to use as one path component.
+
+    Model ids, publishers and quant names come from YAML that a user can extend,
+    share, or (in future) fetch. Interpolating them straight into a path lets an
+    entry like ``id: ../../../../etc/cron.d/x`` place a multi-gigabyte download
+    anywhere the process can write. Everything outside a conservative allowlist
+    is collapsed to a dash, and the traversal-significant names are rejected
+    outright rather than merely escaped.
+    """
+    cleaned = _SAFE_COMPONENT.sub("-", str(value or "")).strip("-. ")
+    if not cleaned or set(cleaned) <= {"."}:
+        return fallback
+    return cleaned[:128]
+
+
+def safe_subpath(root: Path, *components: str) -> Path:
+    """Join ``components`` under ``root``, guaranteeing the result stays inside.
+
+    Belt and braces: each component is sanitised, and the resolved path is then
+    checked against the root. The second check catches anything the first misses
+    (symlinked roots, platform-specific path quirks) rather than trusting the
+    sanitiser alone.
+    """
+    candidate = root.joinpath(*(safe_component(c) for c in components))
+    root_resolved = root.resolve() if root.exists() else root.absolute()
+    resolved = candidate.resolve() if candidate.exists() else candidate.absolute()
+    if root_resolved != resolved and root_resolved not in resolved.parents:
+        raise ValueError(
+            f"refusing to build a path outside {root}: {'/'.join(map(str, components))}"
+        )
+    return candidate
+
+
 def link_or_copy(src: Path, dst: Path) -> Tuple[str, Path]:
     """Materialise ``src`` at ``dst`` as cheaply as the filesystem allows.
 
@@ -56,6 +95,13 @@ def link_or_copy(src: Path, dst: Path) -> Tuple[str, Path]:
     if dst.exists() or dst.is_symlink():
         if _same_file(src, dst):
             return "existing", dst
+        if dst.is_dir() and not dst.is_symlink():
+            # A directory where a weights file should be is not ours to remove;
+            # deleting it could destroy unrelated user data.
+            raise IsADirectoryError(
+                f"{dst} is a directory; expected a file or nothing. "
+                f"Move it aside and retry."
+            )
         dst.unlink()
 
     try:

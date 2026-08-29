@@ -1,5 +1,9 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+# setuptools floor is set by security, not features: 68.x carries PYSEC-2025-49,
+# PYSEC-2026-1918 and PYSEC-2026-3447. `wheel` is deliberately absent — modern
+# setuptools vendors what it needs, and listing it only pinned an extra package
+# with its own advisories (CVE-2026-24049).
+requires = ["setuptools>=78.1.1"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -20,7 +24,7 @@ classifiers = [
 ]
 # Deliberately near-zero dependency: this tool runs on whatever machine the user
 # already has. PyYAML is the only runtime dep (human-editable model catalog).
-dependencies = ["PyYAML>=5.4"]
+dependencies = ["PyYAML>=6.0"]
 
 [project.optional-dependencies]
 dev = ["pytest>=7", "pytest-cov>=4"]
