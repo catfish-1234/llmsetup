@@ -112,7 +112,8 @@ def add_model(
     if params_b is None:
         raise CatalogError(
             "cannot determine the parameter count",
-            hint="pass --params (in billions), or --gguf pointing at a local file",
+            hint=("pass --params (in billions). If you gave --gguf, the file is "
+                  "too small for its size to imply a plausible parameter count."),
         )
     entry["params_b"] = round(float(params_b), 3)
 
@@ -127,18 +128,28 @@ def add_model(
     return _append_entry(entry, console)
 
 
+#: Smallest parameter count that could plausibly be a real model, in billions.
+#: Below this the file-size estimate is noise (a truncated download, a test
+#: fixture, a stub), and a bogus figure is worse than asking the user for one.
+_MIN_PLAUSIBLE_PARAMS_B = 0.05
+
+
 def _params_from_file(path: Path, layers: Optional[int]) -> Optional[float]:
     """Estimate parameter count from file size, assuming ~4.85 bits/weight.
 
-    Rough, and labelled as such — but a wrong-by-10% parameter count is far less
-    harmful than no entry at all, and the architecture fields that actually drive
-    the KV maths came from the header exactly.
+    Rough, and labelled as such — a wrong-by-10% parameter count is far less
+    harmful than no entry, and the architecture fields that actually drive the
+    KV maths were read from the header exactly. But an estimate below
+    :data:`_MIN_PLAUSIBLE_PARAMS_B` means the file is not a real model, so this
+    returns None and the caller asks for --params rather than inventing a
+    number the planner would then size memory against.
     """
     try:
         size = path.stat().st_size
     except OSError:
         return None
-    return round(size * 8 / 4.85 / 1e9, 2)
+    estimate = round(size * 8 / 4.85 / 1e9, 2)
+    return estimate if estimate >= _MIN_PLAUSIBLE_PARAMS_B else None
 
 
 def _append_entry(entry: Dict[str, Any], console: Console) -> Path:

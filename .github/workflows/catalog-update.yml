@@ -1,0 +1,91 @@
+name: Catalog auto-update
+
+# Keeps the shipped model catalog current without anyone pushing by hand.
+# Installed copies of llmfit pull this file on their own cadence, so a model
+# that lands here reaches users without a release.
+on:
+  schedule:
+    # 06:00 UTC on Mondays and Thursdays. Open-weight releases cluster around
+    # midweek; twice a week keeps the catalog fresh without churning the repo.
+    - cron: "0 6 * * 1,4"
+  workflow_dispatch:
+    inputs:
+      max_new:
+        description: "Maximum models to add in this run"
+        default: "8"
+      min_downloads:
+        description: "Popularity floor for a discovered model"
+        default: "5000"
+      dry_run:
+        description: "Report what would change without committing"
+        type: boolean
+        default: false
+
+# Never let two updates race on the same file.
+concurrency:
+  group: catalog-update
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - name: Discover and merge new models
+        id: update
+        run: |
+          python scripts/update_catalog.py \
+            --max-new "${{ github.event.inputs.max_new || '8' }}" \
+            --min-downloads "${{ github.event.inputs.min_downloads || '5000' }}" \
+            ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
+
+      - name: Check whether the catalog changed
+        id: diff
+        run: |
+          if git diff --quiet -- src/llmfit/catalog/data/models.yaml; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No catalog changes."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            git --no-pager diff --stat -- src/llmfit/catalog/data/models.yaml
+          fi
+
+      # The full suite gates the commit. The update script already validated the
+      # catalog, but the tests are the same gate a human change goes through and
+      # a broken catalog must never reach main.
+      - name: Run the test suite against the updated catalog
+        if: steps.diff.outputs.changed == 'true'
+        run: pytest -q
+
+      - name: Verify the CLI still plans with it
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          llmfit catalog list
+          llmfit plan --vram 24 --gpu-vendor nvidia --task coding --yes
+          llmfit plan --vram 8  --gpu-vendor nvidia --task chat --yes
+          llmfit plan --cpu-only --ram 16 --task chat --yes
+
+      - name: Commit
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/llmfit/catalog/data/models.yaml
+          git commit -m "Auto-update model catalog
+
+          Discovered by scripts/update_catalog.py from the Hugging Face Hub.
+          Architecture fields are read from each model's config.json, and the
+          catalog was validated (loads, plausible values, planning works) plus
+          the full test suite before this commit."
+          git push
