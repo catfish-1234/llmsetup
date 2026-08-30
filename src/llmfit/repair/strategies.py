@@ -378,6 +378,29 @@ def _enable_embeddings_flag(state: RepairState) -> Optional[Outcome]:
     )
 
 
+def _disable_speculation(state: RepairState) -> Optional[Outcome]:
+    """Drop the draft model when it turns out to be incompatible.
+
+    Speculative decoding is an optimisation. A vocabulary mismatch between draft
+    and target is fatal to it but irrelevant to the model itself, so the right
+    move is to lose the speedup and keep the setup.
+    """
+    advanced = getattr(state.config, "advanced", None)
+    plan = getattr(advanced, "speculative", None)
+    if plan is None or not plan.enabled:
+        return None
+    before = {"draft_model": plan.draft_model_id}
+    plan.draft_model_id = None
+    plan.draft_path = None
+    plan.rationale = "disabled: the draft model was not compatible with this target"
+    return Outcome(
+        "dropped the speculative draft model; it was not compatible with the "
+        "target's vocabulary, and speculation is an optimisation rather than a "
+        "requirement",
+        cost="low", before=before, after={"draft_model": None},
+    )
+
+
 def _restart_server(state: RepairState) -> Optional[Outcome]:
     """A crashed or unreachable server gets exactly one free restart."""
     if state.config.extra.get("restarted_once"):
@@ -417,6 +440,9 @@ STRATEGIES: List[RepairStrategy] = [
     RepairStrategy("reduce_batch", _MEMORY_SIGNATURES, "low", _reduce_batch),
     RepairStrategy("quantize_kv_cache", (*_MEMORY_SIGNATURES, sig.CONTEXT_EXCEEDED),
                    "low", _quantize_kv),
+    RepairStrategy("disable_speculation",
+                   (sig.DRAFT_INCOMPATIBLE, sig.CRASH_DURING_LOAD), "low",
+                   _disable_speculation),
     RepairStrategy("restart_server",
                    (sig.SERVER_UNREACHABLE, sig.CRASH_DURING_LOAD, sig.MODEL_NOT_LOADED),
                    "low", _restart_server),

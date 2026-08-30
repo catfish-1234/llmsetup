@@ -78,7 +78,50 @@ class VllmRuntime(Runtime):
             # Without these, tool calls come back as prose instead of structured calls.
             cmd += ["--enable-auto-tool-choice",
                     "--tool-call-parser", str(config.extra.get("tool_parser", "hermes"))]
+        cmd += self._advanced_flags(config)
         return cmd
+
+    def _advanced_flags(self, config: RuntimeConfig) -> List[str]:
+        """vLLM's own names for the deep settings."""
+        advanced = config.advanced
+        if advanced is None:
+            return []
+        import json
+
+        flags: List[str] = []
+
+        serving = advanced.serving
+        if serving.prefix_caching:
+            # Prefix reuse is the biggest single win for agent and RAG traffic,
+            # where a long system prompt or document repeats every turn.
+            flags.append("--enable-prefix-caching")
+        if serving.chunked_prefill:
+            flags.append("--enable-chunked-prefill")
+            if serving.max_batched_tokens:
+                flags += ["--max-num-batched-tokens", str(serving.max_batched_tokens)]
+
+        rope = advanced.rope
+        if rope.enabled:
+            flags += ["--rope-scaling", json.dumps({
+                "rope_type": rope.scaling_type,
+                "factor": rope.factor,
+                "original_max_position_embeddings": rope.original_context,
+            })]
+
+        spec_plan = advanced.speculative
+        if spec_plan.enabled and spec_plan.draft_path:
+            # vLLM cannot combine draft-model speculation with chunked prefill,
+            # so the two are never emitted together.
+            if "--enable-chunked-prefill" in flags:
+                flags.remove("--enable-chunked-prefill")
+                if "--max-num-batched-tokens" in flags:
+                    index = flags.index("--max-num-batched-tokens")
+                    del flags[index:index + 2]
+            flags += ["--speculative-config", json.dumps({
+                "model": spec_plan.draft_path,
+                "num_speculative_tokens": spec_plan.max_draft_tokens,
+            })]
+        return flags
 
     def start(self, spec: ModelSpec, config: RuntimeConfig, console: Console) -> Endpoint:
         if not self.is_available():

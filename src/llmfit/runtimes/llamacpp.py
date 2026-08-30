@@ -80,9 +80,101 @@ class LlamaCppRuntime(Runtime):
             cmd.append("--no-mmap")
         if spec.is_embedding:
             cmd.append("--embeddings")
+
+        cmd += self._advanced_flags(spec, config)
+
         for flag in config.extra.get("llamacpp_flags", []):
             cmd.append(str(flag))
         return cmd
+
+    def _advanced_flags(self, spec: ModelSpec, config: RuntimeConfig) -> List[str]:
+        """Deep settings: placement, drafting, thinking budget, sampler chain.
+
+        Everything here is off unless the tuner decided it was worth turning on,
+        so a simple setup still produces a simple command line.
+        """
+        advanced = config.advanced
+        if advanced is None:
+            return []
+        flags: List[str] = []
+
+        # --- placement ---------------------------------------------------- #
+        offload = advanced.offload
+        if offload.moe_offload_enabled:
+            # Moves only routed expert weights to system RAM; attention, the
+            # router and the KV cache stay on the GPU.
+            flags += ["--n-cpu-moe", str(offload.n_cpu_moe)]
+        if offload.tensor_split:
+            flags += ["--tensor-split", ",".join(str(v) for v in offload.tensor_split)]
+            flags += ["--main-gpu", str(offload.main_gpu)]
+        if offload.split_mode != "layer":
+            flags += ["--split-mode", offload.split_mode]
+        for pattern in offload.override_tensors:
+            flags += ["--override-tensor", pattern]
+
+        # --- speculative decoding ----------------------------------------- #
+        spec_plan = advanced.speculative
+        if spec_plan.enabled and spec_plan.draft_path:
+            flags += [
+                "--model-draft", spec_plan.draft_path,
+                "--draft-max", str(spec_plan.max_draft_tokens),
+                "--draft-min", str(spec_plan.min_draft_tokens),
+                "--gpu-layers-draft", str(spec_plan.draft_gpu_layers),
+            ]
+
+        # --- reasoning budget --------------------------------------------- #
+        reasoning = advanced.reasoning
+        if reasoning.supported:
+            flags += ["--reasoning", "on" if reasoning.enabled else "off"]
+            if reasoning.enabled and reasoning.preserve:
+                flags.append("--reasoning-preserve")
+
+        # --- RoPE / context extension ------------------------------------- #
+        rope = advanced.rope
+        if rope.enabled:
+            flags += ["--rope-scaling", rope.scaling_type,
+                      "--rope-scale", str(rope.factor)]
+            if rope.original_context:
+                flags += ["--yarn-orig-ctx", str(rope.original_context)]
+            if rope.yarn_ext_factor is not None:
+                flags += ["--yarn-ext-factor", str(rope.yarn_ext_factor)]
+
+        # --- sampler chain ------------------------------------------------- #
+        sampler = advanced.sampler
+        if sampler.dry_enabled:
+            flags += ["--dry-multiplier", str(sampler.dry_multiplier),
+                      "--dry-base", str(sampler.dry_base),
+                      "--dry-allowed-length", str(sampler.dry_allowed_length),
+                      "--dry-penalty-last-n", str(sampler.dry_penalty_last_n)]
+        if sampler.xtc_enabled:
+            flags += ["--xtc-probability", str(sampler.xtc_probability),
+                      "--xtc-threshold", str(sampler.xtc_threshold)]
+        if sampler.top_n_sigma >= 0:
+            flags += ["--top-nsigma", str(sampler.top_n_sigma)]
+        if sampler.typical_p < 1.0:
+            flags += ["--typical", str(sampler.typical_p)]
+        if sampler.mirostat_enabled:
+            flags += ["--mirostat", str(sampler.mirostat),
+                      "--mirostat-lr", str(sampler.mirostat_eta),
+                      "--mirostat-ent", str(sampler.mirostat_tau)]
+        flags += ["--repeat-last-n", str(sampler.penalty_last_n)]
+        if sampler.frequency_penalty:
+            flags += ["--frequency-penalty", str(sampler.frequency_penalty)]
+        if sampler.presence_penalty:
+            flags += ["--presence-penalty", str(sampler.presence_penalty)]
+        flags += ["--samplers", ";".join(sampler.normalised_order())]
+
+        # --- serving ------------------------------------------------------- #
+        serving = advanced.serving
+        if serving.continuous_batching:
+            flags.append("--cont-batching")
+        if serving.prefix_caching and serving.cache_reuse_tokens:
+            flags += ["--cache-reuse", str(serving.cache_reuse_tokens)]
+        if serving.defrag_threshold:
+            flags += ["--defrag-thold", str(serving.defrag_threshold)]
+        for adapter in serving.lora_adapters:
+            flags += ["--lora", adapter]
+        return flags
 
     def start(self, spec: ModelSpec, config: RuntimeConfig, console: Console) -> Endpoint:
         if not self.is_available():

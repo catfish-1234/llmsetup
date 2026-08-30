@@ -136,6 +136,25 @@ neighbours). The retriever is verified like everything else, and a failure there
 is reported rather than dressed up: a chat model makes a poor retriever, and
 silently shipping one would degrade retrieval invisibly.
 
+### Deep configuration
+
+Past the obvious knobs, the tuner plans the settings that actually separate "it
+runs" from "it runs well" — and each is reported with why it was chosen:
+
+| | |
+|---|---|
+| **MoE expert offload** | A mixture-of-experts model is ~96% routed expert weights, and only a few experts fire per token. Those stacks go to system RAM while attention and the KV cache stay on the GPU. This is what makes a 117B model runnable on a 12 GB card — and it costs far less speed than moving whole layers, because only *active* parameters cross. |
+| **Speculative decoding** | A small draft model guesses ahead and the target verifies in one pass. llmfit picks the draft from the catalog — same vocabulary, ≥5x smaller — and only when the task has predictable output and there is memory to spare. |
+| **Reasoning budget** | `--reasoning on/off` and effort tiers. Suppressing the thinking block takes time-to-first-token from seconds to a fraction of one, so extraction and translation get it off while agents keep it. |
+| **Full sampler chain** | DRY, XTC, top-n-sigma, typical-p, mirostat, penalty windows — and the *order* they run in, which changes output as much as the values. Code gets no repetition penalties at all, because repeated tokens in code are usually correct. |
+| **RoPE / YaRN** | Context past the trained window, planned only when you ask for more than the model natively has, with the quality cost stated. |
+| **Multi-GPU** | Tensor split proportional to VRAM, with the largest card holding the KV cache. |
+| **Serving** | Continuous batching, prefix caching (the biggest win for agents and RAG, where a long prefix repeats every turn), chunked prefill. |
+
+A simple setup still produces a simple command line: everything here stays off
+unless the tuner decided it was worth turning on, and the report lists only the
+decisions that were actually made.
+
 ### Repair
 
 Diagnosis maps a signature to **ranked, costed** remediations. The loop applies
@@ -173,6 +192,8 @@ Weights live **once**, in a shared store; every app is *linked* against it
   official tag where one exists, so tuning costs no extra disk
 - **Jan** — model folder plus `model.json`
 - **Open WebUI, Continue, Aider, Zed, Cursor** — ready-to-paste config snippets
+- **llama-swap** — a generated config so one endpoint serves several models on
+  demand, each with the command llmfit tuned for it
 
 ## Terminal or a window — both
 
@@ -211,7 +232,8 @@ llmfit catalog list     # what models are known
 llmfit catalog add      # teach it about a model it doesn't know
 llmfit catalog refresh  # check the catalog against reality
 llmfit catalog update   # pull the newest catalog now
-llmfit runtimes         # which engines are installed
+llmfit runtimes         # which engines are installed (llama.cpp, Ollama,
+                        #   vLLM, LM Studio, MLX, TabbyAPI/ExLlamaV2)
 llmfit ui               # the local web interface
 ```
 
@@ -341,7 +363,7 @@ The 3.9 floor is tested, not assumed: CI runs the full suite on 3.9, 3.10, 3.11,
 
 ```bash
 pip install -e ".[dev]"
-pytest                       # 374 tests, no GPU or network required
+pytest                       # 427 tests, no GPU or network required
 ruff check src/ tests/
 ```
 
