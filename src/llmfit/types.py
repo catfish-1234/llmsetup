@@ -499,6 +499,9 @@ class SetupResult:
     registrations: List[Dict[str, Any]] = field(default_factory=list)
     #: Companion embedding model for RAG: what was set up, and whether it works.
     embedding: Optional[Dict[str, Any]] = None
+    #: Machine-level adjustments (an OS limit, an env var) that llmfit will not
+    #: apply on the user's behalf but that this setup wants.
+    platform_actions: List[Dict[str, Any]] = field(default_factory=list)
     started_at: Optional[str] = None
     finished_at: Optional[str] = None
 
@@ -532,6 +535,7 @@ class SetupResult:
             "repairs": [r.to_dict() for r in self.repairs],
             "registrations": self.registrations,
             "embedding": self.embedding,
+            "platform_actions": self.platform_actions,
             "succeeded": self.succeeded,
             "verified": self.checks_ran,
             "started_at": self.started_at,
