@@ -86,6 +86,18 @@ class Pipeline:
             profile=self.profile, hardware=self.hardware, plan=plan,
             config=config, started_at=started,
         )
+
+        from llmfit.tuning.platform_tuning import plan_platform
+
+        result.platform_actions = [
+            action.to_dict() for action in plan_platform(
+                self.hardware, config,
+                estimate_bytes=candidate.estimate.total,
+            )
+        ]
+        for action in result.platform_actions:
+            if not action["optional"]:
+                self.console.warn(f"{action['title']}: {action['command']}")
         if self.dry_run:
             self.console.info("--dry-run: stopping before download and launch")
             result.finished_at = _now()

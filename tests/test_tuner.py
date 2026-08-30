@@ -92,41 +92,65 @@ class TestFlashAttention:
 
 
 class TestSampling:
-    def test_code_is_sampled_near_deterministically(self, catalog):
-        model = catalog.require("qwen3-coder-30b-a3b")
+    def test_code_is_sampled_near_deterministically_where_the_publisher_allows(
+            self, catalog):
+        """Mistral publishes 0.15 and does not warn against low temperatures, so
+        code gets the deterministic end of what the publisher sanctions."""
+        model = catalog.require("mistral-small-3.2-24b")
         sampling = sampling_for(model, UseCaseProfile(tasks=[Task.CODING]))
         assert sampling.temperature <= 0.3
+
+    def test_the_published_temperature_survives_a_deterministic_task(self, catalog):
+        """Qwen3 warns against greedy decoding. Lowering its temperature for code
+        because "code wants determinism" is exactly the generic-wisdom override
+        that makes local output quietly worse than the model's benchmarks."""
+        model = catalog.require("qwen3-coder-30b-a3b")
+        sampling = sampling_for(model, UseCaseProfile(tasks=[Task.CODING]))
+        assert sampling.temperature == 0.7
+        assert "warns against greedy decoding" in sampling.rationale
 
     def test_creative_writing_is_sampled_loosely(self, catalog):
         model = catalog.require("gemma-3-27b")
         sampling = sampling_for(model, UseCaseProfile(tasks=[Task.CREATIVE]))
         assert sampling.temperature >= 0.9
 
-    def test_extraction_is_fully_deterministic_on_a_non_reasoning_model(self, catalog):
+    def test_extraction_uses_the_lowest_temperature_the_publisher_allows(self, catalog):
         model = catalog.require("mistral-small-3.2-24b")
         assert not model.is_reasoning
         sampling = sampling_for(model, UseCaseProfile(tasks=[Task.EXTRACT]))
-        assert sampling.temperature == 0.0
+        assert sampling.temperature <= 0.2
+        assert sampling.source == "Mistral Small 3.x model card"
 
-    def test_the_reasoning_floor_overrides_even_deterministic_tasks(self, catalog):
-        """Deliberate: a reasoning model at temperature 0 does not produce
-        crisper extraction, it produces a repetition loop. The floor wins, and
-        the rationale says why."""
+    def test_a_reasoning_model_is_never_sampled_greedily(self, catalog):
+        """A reasoning model at temperature 0 does not produce crisper
+        extraction, it produces a repetition loop."""
         model = catalog.require("qwen3-8b")
         assert model.is_reasoning
-        sampling = sampling_for(model, UseCaseProfile(tasks=[Task.EXTRACT]))
-        assert sampling.temperature >= 0.6
-        assert "reasoning" in sampling.rationale
+        for thinking in (True, False):
+            sampling = sampling_for(model, UseCaseProfile(tasks=[Task.EXTRACT]),
+                                    thinking=thinking)
+            assert sampling.temperature >= 0.6
 
-    def test_reasoning_models_are_lifted_off_greedy_sampling(self, catalog):
-        """Reasoning models loop when sampled too tightly, so the task's low
-        temperature is raised to the family floor rather than applied blindly."""
+    def test_thinking_and_instruct_modes_get_different_published_values(self, catalog):
+        """The two modes are tuned differently, and applying a thinking-mode
+        temperature to a run with thinking disabled is simply the wrong setting."""
+        model = catalog.require("qwen3-8b")
+        thinking = sampling_for(model, UseCaseProfile(tasks=[Task.CHAT]), thinking=True)
+        instruct = sampling_for(model, UseCaseProfile(tasks=[Task.CHAT]), thinking=False)
+        assert (thinking.temperature, thinking.top_p) != \
+               (instruct.temperature, instruct.top_p)
+        assert "thinking" in thinking.source.lower()
+
+    def test_r1_distills_follow_deepseek_guidance(self, catalog):
+        """R1 distills inherit Qwen2.5's tokenizer and DeepSeek's sampling
+        guidance, which is a narrow band with no repeat penalty."""
         reasoning = catalog.require("deepseek-r1-distill-qwen-32b")
         assert reasoning.is_reasoning
-        sampling = sampling_for(reasoning, UseCaseProfile(tasks=[Task.EXTRACT]))
+        sampling = sampling_for(reasoning, UseCaseProfile(tasks=[Task.EXTRACT]),
+                                thinking=True)
         assert sampling.temperature >= 0.6
         assert sampling.repeat_penalty == 1.0
-        assert "reasoning" in sampling.rationale
+        assert "DeepSeek" in sampling.source
 
     def test_rationale_is_always_populated(self, catalog):
         for task in Task:

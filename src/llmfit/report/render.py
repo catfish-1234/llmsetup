@@ -86,6 +86,7 @@ def render_terminal(result: SetupResult, console: Console) -> None:
     console.info(f"runtime: {plan.runtime} — {plan.runtime_reason}")
 
     _render_advanced(result, console)
+    _render_platform(result, console)
     _render_checks(result.checks, console)
     _render_embedding(result, console)
     _render_repairs(result, console)
@@ -131,6 +132,27 @@ def _render_advanced(result: SetupResult, console: Console) -> None:
     for line in lines:
         setting, _, reason = line.partition(": ")
         console.info(f"{setting}: {reason}")
+
+
+def _render_platform(result: SetupResult, console: Console) -> None:
+    """Machine-level steps llmfit will not take on the user's behalf.
+
+    These change the machine outside the scope of setting up a model — an OS
+    limit, a shell environment — so they are surfaced with the exact command
+    rather than applied silently.
+    """
+    actions = result.platform_actions
+    if not actions:
+        return
+    console.print()
+    console.print(console.bold("Your machine needs these too"))
+    for action in actions:
+        marker = console.warn if not action["optional"] else console.info
+        marker(f"{action['title']}"
+               + ("  (required)" if not action["optional"] else "  (optional)"))
+        console.info(console.dim(f"    {action['reason']}"))
+        if action.get("command"):
+            console.info(f"    $ {action['command']}")
 
 
 def _render_checks(checks: List[CheckResult], console: Console) -> None:
@@ -333,6 +355,19 @@ def render_markdown(result: SetupResult) -> str:
             lines.append(f"- **{check.name}**: {check.message}")
             if check.detail:
                 lines.append(f"  ```\n  {check.detail.strip()[:500]}\n  ```")
+        lines.append("")
+
+    if result.platform_actions:
+        lines.append("## Machine-level steps")
+        lines.append("")
+        lines.append("llmfit does not apply these — they change the machine "
+                     "outside the scope of setting up a model:")
+        lines.append("")
+        for action in result.platform_actions:
+            tag = "**required**" if not action["optional"] else "optional"
+            lines.append(f"- {tag} — **{action['title']}**: {action['reason']}")
+            if action.get("command"):
+                lines.append(f"  ```bash\n  {action['command']}\n  ```")
         lines.append("")
 
     advanced = getattr(result.config, "advanced", None)

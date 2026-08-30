@@ -78,10 +78,18 @@ def tune(
     # 3. Memory locking / mapping.
     mlock, mmap = _memory_mapping(hardware, candidate, gpu_layers, decisions)
 
-    sampling = sampling_for(spec, profile)
+    # Sampling depends on whether thinking is actually on: the publishers that
+    # state both modes give different values for each, and a thinking-mode
+    # temperature applied to a run with thinking disabled is simply the wrong
+    # setting. So the reasoning decision is made first and fed in.
+    from llmfit.tuning.advanced import plan_reasoning
+
+    reasoning_plan = plan_reasoning(spec, profile)
+    sampling = sampling_for(spec, profile, thinking=reasoning_plan.enabled)
     decisions.append(TuningDecision(
         "sampling",
-        f"temp={sampling.temperature} top_p={sampling.top_p} top_k={sampling.top_k}",
+        f"temp={sampling.temperature} top_p={sampling.top_p} top_k={sampling.top_k}"
+        + (f" presence={sampling.presence_penalty}" if sampling.presence_penalty else ""),
         sampling.rationale,
     ))
 
@@ -107,7 +115,9 @@ def tune(
         min_p=sampling.min_p,
         repeat_penalty=sampling.repeat_penalty,
         served_name=spec.id,
-        extra={"stop": sampling.stop},
+        extra={"stop": sampling.stop,
+               "presence_penalty": sampling.presence_penalty,
+               "sampling_source": sampling.source},
     )
     _runtime_specific(config, candidate, hardware, profile, decisions)
 
@@ -116,6 +126,7 @@ def tune(
     if catalog is not None:
         from llmfit.tuning.advanced import plan_advanced
 
+        candidate._presence_penalty = sampling.presence_penalty
         config.advanced = plan_advanced(
             candidate, hardware, profile, catalog, context,
             gpu_layers, _bpw(candidate), runtime,
