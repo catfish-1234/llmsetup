@@ -54,7 +54,10 @@ def plan_advanced(
                                      offload, context_tokens, bpw),
         reasoning=plan_reasoning(spec, profile),
         rope=plan_rope(spec, context_tokens),
-        sampler=plan_sampler(spec, profile),
+        sampler=plan_sampler(spec, profile,
+                             presence_penalty=float(
+                                 getattr(candidate, "_presence_penalty", 0.0)
+                                 or 0.0)),
         serving=plan_serving(profile, runtime, hardware),
     )
 
@@ -325,11 +328,22 @@ def plan_rope(spec: ModelSpec, context_tokens: int) -> RopePlan:
 # --------------------------------------------------------------------------- #
 
 
-def plan_sampler(spec: ModelSpec, profile: UseCaseProfile) -> SamplerChain:
-    """The full decoding stack, chosen per task and model family."""
+def plan_sampler(spec: ModelSpec, profile: UseCaseProfile,
+                 presence_penalty: float = 0.0) -> SamplerChain:
+    """The full decoding stack, chosen per task and model family.
+
+    ``presence_penalty`` comes from the publisher's recommendation upstream and
+    is carried through rather than recomputed — a family that asks for 1.5 must
+    not have it silently reset to 0 here.
+    """
     task = profile.primary_task
     chain = SamplerChain()
+    chain.presence_penalty = presence_penalty
     notes: List[str] = []
+    if presence_penalty:
+        notes.append(
+            f"presence penalty {presence_penalty} as the publisher specifies"
+        )
 
     if task in (Task.CODING, Task.AGENT, Task.EXTRACT):
         # Deterministic work: no truncation games, and repetition in code is
