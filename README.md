@@ -174,6 +174,30 @@ Weights live **once**, in a shared store; every app is *linked* against it
 - **Jan** — model folder plus `model.json`
 - **Open WebUI, Continue, Aider, Zed, Cursor** — ready-to-paste config snippets
 
+## Terminal or a window — both
+
+The engine is a CLI. `llmfit ui` puts a local page in front of it:
+
+```bash
+llmfit ui        # opens http://127.0.0.1:8765
+```
+
+It shows what it detected about your machine, asks the same questions the
+terminal wizard asks, and lays each recommendation out with its memory broken
+into weights, KV cache and overhead against what your machine can actually
+spare — which is the number that decides everything else.
+
+It is a page, not an Electron app, and that is deliberate: no Node toolchain, no
+build step, no per-platform packaging or code signing, no separate self-updater.
+It ships in the same `pip install`, works everywhere the CLI does, and fetches
+nothing — no CDN, no fonts, no analytics — because a tool for running models
+locally should work with the network off.
+
+The UI plans and explains; it hands the download over as a command rather than
+starting one behind a button, so the irreversible step stays explicit and the
+terminal stays the source of truth. The two can't drift, because the page is a
+thin client over the same functions.
+
 ## Commands
 
 ```bash
@@ -188,6 +212,7 @@ llmfit catalog add      # teach it about a model it doesn't know
 llmfit catalog refresh  # check the catalog against reality
 llmfit catalog update   # pull the newest catalog now
 llmfit runtimes         # which engines are installed
+llmfit ui               # the local web interface
 ```
 
 Every stage runs standalone, so you can inspect the reasoning before committing
@@ -316,7 +341,7 @@ The 3.9 floor is tested, not assumed: CI runs the full suite on 3.9, 3.10, 3.11,
 
 ```bash
 pip install -e ".[dev]"
-pytest                       # 354 tests, no GPU or network required
+pytest                       # 374 tests, no GPU or network required
 ruff check src/ tests/
 ```
 
