@@ -76,7 +76,8 @@ class Pipeline:
             self.console.warn(warning)
 
         self.console.step("Tuning")
-        tuned = tune(candidate, self.hardware, self.profile, plan.runtime)
+        tuned = tune(candidate, self.hardware, self.profile, plan.runtime,
+                     catalog=self.catalog)
         config = tuned.config
         for line in tuned.explain():
             self.console.info(self.console.dim(line))
@@ -99,6 +100,7 @@ class Pipeline:
                 hint=runtime.install_hint(),
             )
         config = runtime.ensure_model(candidate.model, config, self.console)
+        self._ensure_draft_model(runtime, config)
 
         # Ground truth beats the catalog: correct the plan from the real file.
         self._correct_from_gguf(candidate, config, plan)
@@ -224,6 +226,38 @@ class Pipeline:
         return http.find_free_port("127.0.0.1", 11500)
 
     # ---------------------------------------------------------- provisioning
+
+    def _ensure_draft_model(self, runtime: Runtime, config: RuntimeConfig) -> None:
+        """Fetch the speculative draft model, if one was planned.
+
+        Failing to get the draft is not fatal: speculation is an optimisation,
+        so it is disabled and reported rather than blocking a working setup.
+        """
+        plan = getattr(config.advanced, "speculative", None)
+        if plan is None or not plan.enabled or not runtime.uses_gguf:
+            return
+
+        spec = self.catalog.get(plan.draft_model_id)
+        if spec is None:
+            plan.draft_model_id = None
+            return
+
+        self.console.info(
+            f"fetching {spec.name} as a speculative draft model "
+            f"(~{plan.expected_speedup:.2f}x on predictable output)"
+        )
+        try:
+            from llmfit.runtimes.gguf_store import fetch_gguf
+
+            plan.draft_path = str(fetch_gguf(spec, plan.draft_quant, self.console))
+        except LlmfitError as exc:
+            self.console.warn(
+                f"could not fetch the draft model ({exc.message}); continuing "
+                f"without speculative decoding"
+            )
+            plan.draft_model_id = None
+            plan.draft_path = None
+            plan.rationale = f"disabled: the draft model could not be fetched ({exc.message})"
 
     def _correct_from_gguf(self, candidate, config: RuntimeConfig, plan) -> None:
         """Replace catalog estimates with the architecture stated in the file."""

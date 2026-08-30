@@ -41,6 +41,8 @@ THROUGHPUT_TOO_LOW = "throughput_too_low"
 LATENCY_TOO_HIGH = "latency_too_high"
 REQUEST_TIMEOUT = "request_timeout"
 
+DRAFT_INCOMPATIBLE = "draft_incompatible"
+
 # --- unknown --------------------------------------------------------------- #
 UNKNOWN_ERROR = "unknown_error"
 
@@ -48,6 +50,11 @@ UNKNOWN_ERROR = "unknown_error"
 # Ordered most-specific first: an OOM message often also contains the word
 # "error", so generic patterns must never win.
 _PATTERNS = [
+    (DRAFT_INCOMPATIBLE, re.compile(
+        r"draft model.*(?:vocab|tokenizer|incompatible)|"
+        r"vocab.*(?:mismatch|differ).*draft|"
+        r"the draft model.*not compatible|"
+        r"speculative.*(?:vocab|incompatible)", re.I)),
     (OUT_OF_MEMORY, re.compile(
         r"out of memory|cuda(?:_| )error(?:.*)?out of memory|oom|"
         r"failed to allocate|cudamalloc|hipmalloc|insufficient memory|"
