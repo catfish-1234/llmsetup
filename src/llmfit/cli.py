@@ -51,7 +51,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     handler = {
         "setup": cmd_setup, "detect": cmd_detect, "plan": cmd_plan,
         "verify": cmd_verify, "doctor": cmd_doctor, "export": cmd_export,
-        "catalog": cmd_catalog, "runtimes": cmd_runtimes,
+        "catalog": cmd_catalog, "runtimes": cmd_runtimes, "ui": cmd_ui,
     }.get(args.command)
 
     if handler is None:
@@ -215,6 +215,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_runtimes = sub.add_parser("runtimes", help="show which engines are installed")
     common(p_runtimes)
+
+    p_ui = sub.add_parser("ui", help="open the local web interface")
+    common(p_ui)
+    p_ui.add_argument("--port", type=int, default=8765)
+    p_ui.add_argument("--no-browser", action="store_true",
+                      help="print the URL instead of opening a browser")
 
     return parser
 
@@ -571,6 +577,19 @@ def cmd_catalog(args, console: Console) -> int:
                       f"{spec.max_context // 1024:>6d}K {caps:12s} {spec.license}")
     console.print()
     console.info(console.dim("caps: T=tools V=vision J=json R=reasoning E=embedding"))
+    return 0
+
+
+def cmd_ui(args, console: Console) -> int:
+    """Serve the local web interface.
+
+    Bound to loopback only. The UI plans and explains; it hands the actual
+    download over as a command rather than starting one behind a button, so the
+    irreversible step stays explicit.
+    """
+    from llmfit.ui.server import serve
+
+    serve(console, port=args.port, open_browser=not args.no_browser)
     return 0
 
 
