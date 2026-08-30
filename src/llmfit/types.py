@@ -251,7 +251,20 @@ class ModelSpec:
     mlx_repo: Optional[str] = None
     chat_template: Optional[str] = None
     recommended_quants: List[str] = field(default_factory=lambda: ["Q4_K_M"])
+    #: Models sharing a vocabulary. Speculative decoding requires the draft and
+    #: target to tokenize identically, which publisher alone does not imply —
+    #: a distill, for instance, inherits its base model's tokenizer.
+    tokenizer_family: Optional[str] = None
+    #: True for small models worth using as a speculative draft.
+    draft_capable: bool = False
     notes: str = ""
+
+    @property
+    def family(self) -> str:
+        """Vocabulary family, explicit where stated and derived otherwise."""
+        if self.tokenizer_family:
+            return self.tokenizer_family
+        return self.id.split("-")[0]
 
     @property
     def effective_head_dim(self) -> int:
@@ -376,6 +389,10 @@ class RuntimeConfig:
     seed: Optional[int] = None
     model_path: Optional[str] = None
     served_name: Optional[str] = None
+    #: Deep settings: sampler chain, reasoning budget, speculative decoding,
+    #: tensor placement, RoPE scaling and serving behaviour. Typed rather than
+    #: stuffed into `extra` so they are testable and can be reported on.
+    advanced: Optional[Any] = None
     extra: Dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -392,7 +409,10 @@ class RuntimeConfig:
         return _copy.deepcopy(self)
 
     def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
+        d = asdict(self)
+        if self.advanced is not None and hasattr(self.advanced, "to_dict"):
+            d["advanced"] = self.advanced.to_dict()
+        return d
 
 
 # --------------------------------------------------------------------------- #

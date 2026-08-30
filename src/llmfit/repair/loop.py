@@ -126,6 +126,7 @@ class RepairLoop:
         tuned = tune(
             new_candidate, self.state.hardware, self.state.profile,
             self.state.config.runtime, port=self.state.config.port,
+            catalog=self.state.catalog,
         )
         # Preserve the shrunken budget: whatever forced the switch still applies.
         tuned.config.extra.update({

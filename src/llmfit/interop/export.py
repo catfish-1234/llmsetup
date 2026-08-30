@@ -23,10 +23,13 @@ from llmfit.util.log import Console
 
 def available_targets() -> Dict[str, bool]:
     """Which desktop apps are installed on this machine."""
+    from llmfit.interop import llama_swap
+
     return {
         "lm_studio": lmstudio_target.is_installed(),
         "ollama": ollama_target.is_installed(),
         "jan": jan_target.is_installed(),
+        "llama_swap": llama_swap.is_installed(),
     }
 
 
@@ -79,6 +82,12 @@ def register_everywhere(
             "note": f"already registered as `{config.served_name}` by the setup",
         })
 
+    # --- llama-swap ---------------------------------------------------------- #
+    # One endpoint that serves several models on demand — the right shape when
+    # VRAM fits one model at a time but the user wants a choice.
+    if gguf_path and Path(gguf_path).exists() and config.runtime == "llamacpp":
+        records.append(_guard("llama_swap", lambda: _llama_swap(spec, config)))
+
     # --- OpenAI-compatible clients ------------------------------------------ #
     if endpoint:
         emitted = snippets(endpoint, spec, config)
@@ -106,6 +115,14 @@ def register_everywhere(
         else:
             console.warn(f"{record['target']}: {record.get('note', 'skipped')}")
     return records
+
+
+def _llama_swap(spec: ModelSpec, config: RuntimeConfig) -> Dict[str, Any]:
+    from llmfit.interop.llama_swap import write_config
+    from llmfit.runtimes.registry import get_runtime
+
+    command = get_runtime(config.runtime).launch_command(spec, config)
+    return write_config([(spec, config, command)])
 
 
 def _guard(target: str, fn) -> Dict[str, Any]:
