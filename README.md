@@ -146,14 +146,35 @@ runs" from "it runs well" — and each is reported with why it was chosen:
 | **MoE expert offload** | A mixture-of-experts model is ~96% routed expert weights, and only a few experts fire per token. Those stacks go to system RAM while attention and the KV cache stay on the GPU. This is what makes a 117B model runnable on a 12 GB card — and it costs far less speed than moving whole layers, because only *active* parameters cross. |
 | **Speculative decoding** | A small draft model guesses ahead and the target verifies in one pass. llmfit picks the draft from the catalog — same vocabulary, ≥5x smaller — and only when the task has predictable output and there is memory to spare. |
 | **Reasoning budget** | `--reasoning on/off` and effort tiers. Suppressing the thinking block takes time-to-first-token from seconds to a fraction of one, so extraction and translation get it off while agents keep it. |
+| **Publisher-recommended sampling** | Model authors publish the settings they evaluated their own model with, and those beat any generic default. Qwen3 in thinking mode wants `temp 0.6 / top-p 0.95`; the same model with thinking off wants `0.7 / 0.8` and a presence penalty of 1.5; Gemma 3 wants `temp 1.0 / top-k 64`; Mistral wants `0.15`. llmfit starts from the card for the family *and the mode it will actually run in*, then lets the task adjust only within what the publisher sanctioned — and refuses an adjustment the card explicitly warns against, such as greedy decoding on a Qwen3 reasoning model, which sends it into infinite repetition. Every entry cites its source. |
 | **Full sampler chain** | DRY, XTC, top-n-sigma, typical-p, mirostat, penalty windows — and the *order* they run in, which changes output as much as the values. Code gets no repetition penalties at all, because repeated tokens in code are usually correct. |
 | **RoPE / YaRN** | Context past the trained window, planned only when you ask for more than the model natively has, with the quality cost stated. |
 | **Multi-GPU** | Tensor split proportional to VRAM, with the largest card holding the KV cache. |
+| **Dynamic quantizations** | Not every layer deserves the same precision. Dynamic/imatrix builds (`UD-Q4_K_XL`) keep the layers that hurt most under quantization at higher precision and squeeze the rest, and measure better than the plain K-quant of the same size. llmfit prefers them when the repo publishes one and falls back cleanly when it doesn't — while still honouring an explicit quant you asked for. |
 | **Serving** | Continuous batching, prefix caching (the biggest win for agents and RAG, where a long prefix repeats every turn), chunked prefill. |
 
 A simple setup still produces a simple command line: everything here stays off
 unless the tuner decided it was worth turning on, and the report lists only the
 decisions that were actually made.
+
+### The machine, not just the engine
+
+Some of the biggest wins are not flags at all — they are settings on the machine
+that the engine cannot reach, and llmfit reports them as explicit, opt-in steps
+with the reason attached rather than running them behind your back:
+
+- **Apple Silicon** — macOS caps how much unified memory the GPU may wire down
+  (roughly 65–75% of RAM). A model that fits in principle will fall back to CPU
+  without `sudo sysctl iogpu.wired_limit_mb=N`. llmfit raises it only when the
+  plan actually exceeds the default budget, and never above 85% of RAM, so the
+  OS keeps room to breathe.
+- **AMD** — ROCm ships kernels for a subset of GFX targets. Cards that need
+  `HSA_OVERRIDE_GFX_VERSION` to run at all (RDNA1/2, the 780M-class iGPUs) get
+  the right value; cards that are natively supported are left alone, because
+  setting it there makes things worse.
+- **NUMA** — on a multi-socket Linux box doing CPU-resident work, memory
+  interleaving is worth real throughput. Suggested only there — never on Apple
+  unified memory, where the idea does not apply.
 
 ### Repair
 
@@ -363,7 +384,7 @@ The 3.9 floor is tested, not assumed: CI runs the full suite on 3.9, 3.10, 3.11,
 
 ```bash
 pip install -e ".[dev]"
-pytest                       # 427 tests, no GPU or network required
+pytest                       # 462 tests, no GPU or network required
 ruff check src/ tests/
 ```
 

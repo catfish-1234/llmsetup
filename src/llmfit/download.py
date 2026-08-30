@@ -115,7 +115,34 @@ def list_repo_files(repo: str, timeout: float = 30.0) -> List[RemoteFile]:
     return files
 
 
-def pick_gguf(files: List[RemoteFile], quant: str) -> Optional[RemoteFile]:
+#: Prefixes marking a per-layer optimised ("dynamic") quantization. These pick
+#: a different precision for each tensor rather than one setting for the whole
+#: model, and measure lower KL divergence than a plain K-quant of the same size.
+#: Preferring them is free quality: same bytes, closer to the original weights.
+_DYNAMIC_PREFIXES = ("ud-", "iq")
+
+#: Suffixes a dynamic build uses in place of the plain K-quant name.
+_DYNAMIC_SUFFIXES = ("_xl", "_l", "_m", "_s")
+
+
+def dynamic_variants(quant: str) -> List[str]:
+    """Dynamic-quant names to try before falling back to ``quant`` itself.
+
+    ``Q4_K_M`` becomes ``UD-Q4_K_XL`` then ``UD-Q4_K_M``: the XL build spends its
+    extra bits on the tensors that matter most, so it is the better choice at
+    effectively the same size.
+    """
+    upper = quant.upper()
+    if upper.startswith(("UD-", "IQ")):
+        return [quant]
+    base = upper.rsplit("_", 1)[0] if "_" in upper else upper
+    candidates = [f"UD-{base}_XL", f"UD-{upper}"]
+    # Never return a name identical to the input; the caller adds that itself.
+    return [c for c in candidates if c.upper() != upper]
+
+
+def pick_gguf(files: List[RemoteFile], quant: str,
+              prefer_dynamic: bool = True) -> Optional[RemoteFile]:
     """Choose the GGUF matching ``quant``.
 
     Repos are inconsistent: ``Q4_K_M``, ``q4_k_m``, and ``Q4_K_M-00001-of-00002``
@@ -126,6 +153,14 @@ def pick_gguf(files: List[RemoteFile], quant: str) -> Optional[RemoteFile]:
     ggufs = [f for f in files if f.filename.lower().endswith(".gguf")]
     if not ggufs:
         return None
+
+    # A per-layer optimised build of the same nominal size is strictly better,
+    # so try those names first and fall back to the plain quant.
+    if prefer_dynamic:
+        for variant in dynamic_variants(quant):
+            match = pick_gguf(files, variant, prefer_dynamic=False)
+            if match is not None:
+                return match
 
     wanted = quant.lower()
     exact = []
