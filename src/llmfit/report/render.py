@@ -65,6 +65,12 @@ def render_terminal(result: SetupResult, console: Console) -> None:
             f"(weights {gb(estimate.weights)} + KV cache {gb(estimate.kv_cache)} "
             f"+ overhead {gb(estimate.overhead)})"
         )
+        resident = _gpu_resident_bytes(result)
+        if resident is not None:
+            console.info(
+                f"of which {gb(resident)} is resident on the GPU — the rest is "
+                f"expert weights held in system RAM"
+            )
     console.info(
         f"context: {human_tokens(config.context_tokens)} tokens"
         + (f" x {config.parallel} slots" if config.parallel > 1 else "")
@@ -79,11 +85,52 @@ def render_terminal(result: SetupResult, console: Console) -> None:
                  f"top_k {config.top_k}, repeat penalty {config.repeat_penalty}")
     console.info(f"runtime: {plan.runtime} — {plan.runtime_reason}")
 
+    _render_advanced(result, console)
     _render_checks(result.checks, console)
     _render_embedding(result, console)
     _render_repairs(result, console)
     _render_registrations(result, console)
     _render_next_steps(result, console)
+
+
+def _gpu_resident_bytes(result: SetupResult):
+    """Weights actually on the accelerator, when experts were offloaded.
+
+    Without this the headline figure describes the model rather than the
+    machine, and reads as impossible on the card it was planned for.
+    """
+    advanced = getattr(result.config, "advanced", None)
+    offload = getattr(advanced, "offload", None)
+    if offload is None or not offload.moe_offload_enabled or result.plan.best is None:
+        return None
+
+    from llmfit.planner import moe
+
+    candidate = result.plan.best
+    params = candidate.model.params_b * 1e9
+    bpw = (candidate.estimate.weights * 8) / params if params else 4.85
+    return moe.resident_bytes_with_offload(
+        candidate.model, bpw, offload.n_cpu_moe
+    ) + candidate.estimate.kv_cache + candidate.estimate.overhead
+
+
+def _render_advanced(result: SetupResult, console: Console) -> None:
+    """The deep settings, each with why it was chosen.
+
+    Only non-default decisions appear: a simple setup should not be buried in a
+    wall of knobs that were left alone.
+    """
+    advanced = getattr(result.config, "advanced", None)
+    if advanced is None:
+        return
+    lines = advanced.explain()
+    if not lines:
+        return
+    console.print()
+    console.print(console.bold("Deep configuration"))
+    for line in lines:
+        setting, _, reason = line.partition(": ")
+        console.info(f"{setting}: {reason}")
 
 
 def _render_checks(checks: List[CheckResult], console: Console) -> None:
@@ -286,6 +333,17 @@ def render_markdown(result: SetupResult) -> str:
             lines.append(f"- **{check.name}**: {check.message}")
             if check.detail:
                 lines.append(f"  ```\n  {check.detail.strip()[:500]}\n  ```")
+        lines.append("")
+
+    advanced = getattr(result.config, "advanced", None)
+    if advanced is not None and advanced.explain():
+        lines.append("## Deep configuration")
+        lines.append("")
+        lines.append("Settings beyond the defaults, and why each was chosen:")
+        lines.append("")
+        for entry in advanced.explain():
+            setting, _, reason = entry.partition(": ")
+            lines.append(f"- **{setting}** — {reason}")
         lines.append("")
 
     if result.embedding:

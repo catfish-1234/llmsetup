@@ -44,7 +44,14 @@ def _ensure_loaded() -> None:
     if _REGISTRY:
         return
     # Imported here to avoid a circular import at module load.
-    from llmfit.runtimes import llamacpp, lmstudio, mlx, ollama, vllm  # noqa: F401
+    from llmfit.runtimes import (  # noqa: F401
+        llamacpp,
+        lmstudio,
+        mlx,
+        ollama,
+        tabby,
+        vllm,
+    )
 
 
 def choose_runtime(
@@ -92,7 +99,7 @@ def _preference_order(hardware: HardwareProfile, profile: UseCaseProfile) -> Lis
         # have far broader model coverage and are what most Mac users have.
         order = ["ollama", "llamacpp", "mlx", "lmstudio"]
     elif hardware.accelerator is Accelerator.NVIDIA:
-        order = ["ollama", "llamacpp", "vllm", "lmstudio"]
+        order = ["ollama", "llamacpp", "vllm", "tabby", "lmstudio"]
     elif hardware.accelerator in (Accelerator.AMD, Accelerator.INTEL):
         # llama.cpp's Vulkan/ROCm backends are the most reliable path here.
         order = ["llamacpp", "ollama", "lmstudio"]

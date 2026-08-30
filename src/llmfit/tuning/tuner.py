@@ -51,6 +51,7 @@ def tune(
     profile: UseCaseProfile,
     runtime: str,
     port: int = 11435,
+    catalog=None,
 ) -> "TunedConfig":
     """Produce a launch-ready :class:`RuntimeConfig` plus the reasoning behind it."""
     spec = candidate.model
@@ -109,6 +110,23 @@ def tune(
         extra={"stop": sampling.stop},
     )
     _runtime_specific(config, candidate, hardware, profile, decisions)
+
+    # Deep settings last: they depend on the offload decision above, and the
+    # speculative planner needs to know what memory is left over.
+    if catalog is not None:
+        from llmfit.tuning.advanced import plan_advanced
+
+        config.advanced = plan_advanced(
+            candidate, hardware, profile, catalog, context,
+            gpu_layers, _bpw(candidate), runtime,
+        )
+        # MoE expert offload can keep every layer on the GPU where partial layer
+        # offload would otherwise have been forced.
+        if config.advanced.offload.moe_offload_enabled:
+            config.gpu_layers = config.advanced.offload.gpu_layers
+        for line in config.advanced.explain():
+            setting, _, reason = line.partition(": ")
+            decisions.append(TuningDecision(setting, "planned", reason))
 
     final = estimate_memory(
         spec, (candidate.estimate.weights * 8) / (spec.params_b * 1e9),
