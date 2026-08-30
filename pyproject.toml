@@ -39,7 +39,7 @@ Homepage = "https://github.com/catfish-1234/open-source-llm"
 where = ["src"]
 
 [tool.setuptools.package-data]
-llmfit = ["catalog/data/*.yaml", "interop/templates/*"]
+llmfit = ["catalog/data/*.yaml", "ui/static/*.html"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
