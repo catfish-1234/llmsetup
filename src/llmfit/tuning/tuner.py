@@ -218,10 +218,15 @@ def _offload(candidate, hardware, profile, runtime, budget, parallel, ubatch,
         ))
         return spec.layers, context, kv_type
 
-    # Try a cheaper KV cache before giving up any context.
-    from llmfit.planner.memory import KV_QUALITY_ORDER
+    # Try a cheaper KV cache before giving up any context -- but only down to
+    # the rung where that is still a free saving. Below it, a quantized cache
+    # changes answers unpredictably and, on long context, is slower too; a
+    # shorter context is the honest trade at that point.
+    from llmfit.planner.memory import KV_QUALITY_ORDER, KV_SAFE_FLOOR
 
-    for candidate_kv in KV_QUALITY_ORDER[KV_QUALITY_ORDER.index(kv_type) + 1:]:
+    floor = KV_QUALITY_ORDER.index(KV_SAFE_FLOOR)
+    for candidate_kv in KV_QUALITY_ORDER[
+            KV_QUALITY_ORDER.index(kv_type) + 1:floor + 1]:
         trial = estimate_memory(spec, bpw, context, quant=candidate.quant,
                                 kv_quant=candidate_kv, runtime=runtime,
                                 ubatch=ubatch, parallel=parallel)
@@ -237,8 +242,9 @@ def _offload(candidate, hardware, profile, runtime, budget, parallel, ubatch,
                 "gpu_layers", f"{spec.layers} (all)", "fits once the KV cache is quantized"))
             return spec.layers, context, candidate_kv
 
-    # Next: shrink context to whatever genuinely fits.
-    kv_type = KV_QUALITY_ORDER[-1] if kv_type == "f16" else kv_type
+    # Next: shrink context to whatever genuinely fits, with the cache at the
+    # cheapest dtype that costs nothing.
+    kv_type = KV_SAFE_FLOOR if kv_type == "f16" else kv_type
     fitted_ctx = max_context_for_budget(
         spec, bpw, budget, kv_quant=kv_type, runtime=runtime,
         ubatch=ubatch, parallel=parallel,
