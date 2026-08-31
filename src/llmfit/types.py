@@ -388,6 +388,10 @@ class RuntimeConfig:
     repeat_penalty: float = 1.1
     seed: Optional[int] = None
     model_path: Optional[str] = None
+    #: Vision models are two files; this is the multimodal projector that turns
+    #: image embeddings into tokens the language model understands. Without it
+    #: the endpoint accepts images and quietly ignores them.
+    mmproj_path: Optional[str] = None
     served_name: Optional[str] = None
     #: Deep settings: sampler chain, reasoning budget, speculative decoding,
     #: tensor placement, RoPE scaling and serving behaviour. Typed rather than

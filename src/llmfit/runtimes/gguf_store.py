@@ -13,9 +13,11 @@ from typing import Optional
 
 from llmfit.download import (
     download_file,
+    is_projector,
     list_repo_files,
     make_progress_printer,
     pick_gguf,
+    pick_mmproj,
     sibling_shards,
 )
 from llmfit.types import ModelSpec
@@ -39,11 +41,56 @@ def find_local(spec: ModelSpec, quant: str) -> Optional[Path]:
     directory = store_path(spec, quant)
     if not directory.is_dir():
         return None
-    ggufs = sorted(directory.glob("*.gguf"))
+    ggufs = sorted(p for p in directory.glob("*.gguf") if not is_projector(p.name))
     if not ggufs:
         return None
     # For a split model, the first shard is the one runtimes are pointed at.
     return ggufs[0]
+
+
+def find_local_projector(spec: ModelSpec, quant: str) -> Optional[Path]:
+    """An already-downloaded multimodal projector for this (model, quant)."""
+    directory = store_path(spec, quant)
+    if not directory.is_dir():
+        return None
+    found = sorted(p for p in directory.glob("*.gguf") if is_projector(p.name))
+    return found[0] if found else None
+
+
+def fetch_projector(spec: ModelSpec, quant: str, console: Console) -> Optional[Path]:
+    """Fetch the vision projector next to the weights, if the repo has one.
+
+    A vision model is two files. Loading only the language model gives an
+    endpoint that accepts an image and then describes something that is not in
+    it -- the failure looks like a bad model rather than a missing file, which
+    is exactly why it is worth fetching up front rather than diagnosing later.
+
+    Returns ``None`` when the repo publishes no projector; the caller decides
+    whether that is fatal, because it only matters for a model that claims
+    vision.
+    """
+    existing = find_local_projector(spec, quant)
+    if existing:
+        console.ok(f"vision projector already present: {existing}")
+        return existing
+    if not spec.gguf_repo:
+        return None
+
+    try:
+        files = list_repo_files(spec.gguf_repo)
+    except Exception as exc:  # the projector is never worth aborting the run for
+        console.warn(f"could not list {spec.gguf_repo} for a vision projector: {exc}")
+        return None
+
+    chosen = pick_mmproj(files)
+    if chosen is None:
+        return None
+
+    directory = ensure_dir(store_path(spec, quant))
+    dest = directory / Path(chosen.filename).name
+    download_file(chosen, dest, make_progress_printer(console, Path(chosen.filename).name))
+    console.ok(f"vision projector ready: {dest}")
+    return dest
 
 
 def fetch_gguf(spec: ModelSpec, quant: str, console: Console) -> Path:

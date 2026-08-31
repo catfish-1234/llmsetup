@@ -18,6 +18,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from llmfit.download import is_projector
 from llmfit.types import ModelSpec, RuntimeConfig
 from llmfit.util.fs import link_or_copy, safe_component, safe_subpath
 from llmfit.util.proc import run, which
@@ -55,8 +56,12 @@ def register_in_lmstudio(spec: ModelSpec, gguf_path: Path, quant: str,
     app closed.
     """
     files = shards or _shards_beside(gguf_path)
+    projector = _projector_beside(gguf_path)
 
-    if which("lms"):
+    # `lms import` takes one file, so it would leave a vision model's projector
+    # behind and LM Studio would load it as text-only. The directory layout puts
+    # both files in the same folder, which is what its loader looks for.
+    if which("lms") and projector is None:
         result = run(["lms", "import", str(gguf_path), "--yes"], timeout=900)
         if result.ok:
             return {"target": "lm_studio", "ok": True, "method": "lms import",
@@ -64,6 +69,8 @@ def register_in_lmstudio(spec: ModelSpec, gguf_path: Path, quant: str,
                     "note": "visible in LM Studio's My Models list"}
 
     linked, method = [], "none"
+    if projector is not None:
+        files = [*files, projector]
     for shard in files:
         destination = target_path(spec, quant, shard.name)
         method, path = link_or_copy(shard, destination)
@@ -78,6 +85,13 @@ def register_in_lmstudio(spec: ModelSpec, gguf_path: Path, quant: str,
         "note": (f"placed under {models_dir()} as publisher/model/file.gguf; "
                  f"restart LM Studio if it is already running"),
     }
+
+
+def _projector_beside(gguf_path: Path) -> Optional[Path]:
+    """The multimodal projector stored next to the weights, if there is one."""
+    found = sorted(p for p in gguf_path.parent.glob("*.gguf")
+                   if is_projector(p.name))
+    return found[0] if found else None
 
 
 def _shards_beside(gguf_path: Path) -> List[Path]:

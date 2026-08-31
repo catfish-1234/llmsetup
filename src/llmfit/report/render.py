@@ -7,6 +7,7 @@ was not tested, the report says so rather than implying it works.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import List
 
 from llmfit.hardware.bandwidth import describe_bandwidth
@@ -81,6 +82,9 @@ def render_terminal(result: SetupResult, console: Console) -> None:
     )
     console.info(f"KV cache: {config.kv_cache_type}   flash attention: "
                  f"{'on' if config.flash_attention else 'off'}")
+    spec = _spec(result)
+    if spec is not None and spec.supports_vision:
+        console.info("vision: " + _vision_note(config))
     console.info(f"sampling: temp {config.temperature}, top_p {config.top_p}, "
                  f"top_k {config.top_k}, repeat penalty {config.repeat_penalty}")
     console.info(f"runtime: {plan.runtime} — {plan.runtime_reason}")
@@ -113,6 +117,20 @@ def _gpu_resident_bytes(result: SetupResult):
     return moe.resident_bytes_with_offload(
         candidate.model, bpw, offload.n_cpu_moe
     ) + candidate.estimate.kv_cache + candidate.estimate.overhead
+
+
+def _vision_note(config) -> str:
+    """Where the multimodal projector comes from on this runtime.
+
+    Worth stating either way: a vision model without its projector does not
+    fail, it just answers about images it cannot see.
+    """
+    if config.mmproj_path:
+        return f"projector loaded ({Path(config.mmproj_path).name})"
+    if config.runtime == "llamacpp":
+        return ("the projector is a second file, fetched into the shared store "
+                "alongside the weights")
+    return "the projector ships inside this runtime's own model package"
 
 
 def _render_advanced(result: SetupResult, console: Console) -> None:

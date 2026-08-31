@@ -119,8 +119,9 @@ answers, so a stated requirement is a tested one:
 | `tool_calling` | the model describing a tool call in prose instead of emitting one |
 | `json_output` | schema-invalid structured output |
 | `embeddings` | vectors that don't separate meaning (broken pooling ruins retrieval) |
-| `vision` | an unloaded vision projector |
+| `vision` | a missing projector: the model answering about an image it cannot see |
 | `throughput` | layers that silently fell back to CPU |
+| `prefill` | prompt processing too slow to use — the number RAG and agents wait on |
 | `stability` | leaks that only appear on the *second* request |
 | `repetition` | degenerate loops from sampling that's too greedy |
 
@@ -151,6 +152,7 @@ runs" from "it runs well" — and each is reported with why it was chosen:
 | **RoPE / YaRN** | Context past the trained window, planned only when you ask for more than the model natively has, with the quality cost stated. |
 | **Multi-GPU** | Tensor split proportional to VRAM, with the largest card holding the KV cache. |
 | **Dynamic quantizations** | Not every layer deserves the same precision. Dynamic/imatrix builds (`UD-Q4_K_XL`) keep the layers that hurt most under quantization at higher precision and squeeze the rest, and measure better than the plain K-quant of the same size. llmfit prefers them when the repo publishes one and falls back cleanly when it doesn't — while still honouring an explicit quant you asked for. |
+| **Vision projector** | A vision model is two files: the language model and a separate projector that turns image embeddings into tokens. Download only the first and the endpoint accepts images and answers about what it cannot see — confidently. llmfit fetches the projector alongside the weights, prefers a full-precision one (vision towers degrade faster under quantization than the language model does, and the file is small), budgets memory for it, links it into LM Studio beside the model, and can repair a setup that is missing it. |
 | **Serving** | Continuous batching, prefix caching (the biggest win for agents and RAG, where a long prefix repeats every turn), chunked prefill. |
 
 A simple setup still produces a simple command line: everything here stays off
@@ -175,6 +177,39 @@ with the reason attached rather than running them behind your back:
 - **NUMA** — on a multi-socket Linux box doing CPU-resident work, memory
   interleaving is worth real throughput. Suggested only there — never on Apple
   unified memory, where the idea does not apply.
+
+### Where a saving stops being free
+
+Not every memory saving is worth taking, and the difference is measurable rather
+than a matter of taste. A `q8_0` KV cache halves what context costs and measures
+as effectively lossless against `f16` — a handful of changed answers in five
+hundred, none at all across deep-context comparisons out to 41K tokens. Below
+that rung the picture changes and stops being predictable: `q4_0` is strongly
+model-dependent, ranging from a couple of changed answers to 375 in 500 on one
+7B, and past long context it is *slower* than `f16` too, because dequantizing
+inside attention costs more than the memory traffic it saves.
+
+So `q8_0` is chosen freely, and anything below it is never a silent default: it
+is a last-resort repair, priced as a real sacrifice, blocked at the context
+lengths where it would be slower as well as worse, and reported in words that
+say how to undo it. Given the choice between a lossy cache and a shorter
+context, llmfit shortens the context.
+
+### Two speeds, not one
+
+"Tokens per second" almost always means decode — how fast words appear once the
+model starts. Prefill, the rate the model *reads* at, is a different number
+bound by a different thing (compute, not memory bandwidth), and it is what
+actually keeps you waiting: a RAG answer, an agent turn carrying its history, a
+file pasted into a coding assistant. A setup can be fine at one and unusable at
+the other.
+
+Both are measured, against the machine rather than an arbitrary floor. Prefill
+is measured exactly — one long prompt, one token of output, so the server's own
+prompt-token count over the latency *is* the rate — and reported as the thing
+you feel: *"512 tokens/s prompt processing (16s at full context)"*. Slow prefill
+is a repairable signature of its own, and the first thing tried is the physical
+micro-batch, the flag that moves prompt throughput most.
 
 ### Repair
 
@@ -248,6 +283,7 @@ llmfit detect           # what hardware do I have?
 llmfit plan             # what would you pick, and why? (no downloads)
 llmfit verify           # test an endpoint I already run
 llmfit doctor           # re-test the last setup and repair it
+llmfit report           # reprint the last run's report (paste this into a bug report)
 llmfit export           # register an existing model with my other apps
 llmfit catalog list     # what models are known
 llmfit catalog add      # teach it about a model it doesn't know
@@ -384,7 +420,7 @@ The 3.9 floor is tested, not assumed: CI runs the full suite on 3.9, 3.10, 3.11,
 
 ```bash
 pip install -e ".[dev]"
-pytest                       # 462 tests, no GPU or network required
+pytest                       # 524 tests, no GPU or network required
 ruff check src/ tests/
 ```
 
@@ -395,6 +431,20 @@ reproduces each fixed weakness (path traversal, URL injection, hostile GGUF
 headers). Nothing in the suite needs a GPU or the network — anything reaching
 for either is a bug in the test.
 
+## Contributing
+
+The most useful contribution is usually not code. It is a catalog entry, or a
+report of a machine where the plan came out wrong — `llmfit report` prints
+exactly what makes that fixable.
+
+One rule governs the rest: **no entry is better than a guessed one.** Every
+number here decides whether a model fits in a stranger's memory, and a
+plausible guess that is 20% low becomes their out-of-memory error with no way
+to trace it back. Facts read from a config, a model card or a GGUF header are
+marked `measured`; inferences are marked `estimated` and re-derived from the
+real file once the weights land; anything unknown is left out, and the catalog
+refuses the entry loudly at load time. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## License
 
-Apache-2.0
+Apache-2.0 — see [LICENSE](LICENSE).

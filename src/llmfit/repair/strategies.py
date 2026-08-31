@@ -19,7 +19,13 @@ from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Sequence
 
 from llmfit.catalog.catalog import Catalog
-from llmfit.planner.memory import KV_QUALITY_ORDER, max_context_for_budget
+from llmfit.planner.memory import (
+    KV_QUALITY_ORDER,
+    cheaper_kv_quant,
+    kv_is_lossy,
+    kv_lossy_allowed,
+    max_context_for_budget,
+)
 from llmfit.types import (
     Candidate,
     HardwareProfile,
@@ -27,6 +33,7 @@ from llmfit.types import (
     Task,
     UseCaseProfile,
 )
+from llmfit.util.log import Console
 from llmfit.verify import signatures as sig
 
 COST_ORDER = {"low": 0, "medium": 1, "high": 2}
@@ -42,6 +49,9 @@ class RepairState:
     profile: UseCaseProfile
     catalog: Catalog
     fallbacks: List[Candidate] = field(default_factory=list)
+    #: Strategies that touch the network or the disk report through this. It is
+    #: optional so the pure ones stay constructible in a test without any I/O.
+    console: Optional[Console] = None
     #: Shrinking multiplier applied to the memory budget after each OOM. Reality
     #: has beaten our estimate, so the next attempt assumes less room.
     budget_factor: float = 0.92
@@ -112,27 +122,82 @@ def _reduce_batch(state: RepairState) -> Optional[Outcome]:
 
 
 def _quantize_kv(state: RepairState) -> Optional[Outcome]:
-    config = state.config
-    current = config.kv_cache_type.lower()
-    try:
-        index = KV_QUALITY_ORDER.index(current)
-    except ValueError:
-        index = 0
-    if index + 1 >= len(KV_QUALITY_ORDER):
-        return None
-    nxt = KV_QUALITY_ORDER[index + 1]
+    """Take the KV cache down to the cheapest dtype that costs nothing.
 
-    before = {"kv_cache_type": current}
+    Stops at the safe floor. Going below it is a real quality decision, not a
+    free saving, so it lives in its own strategy that the loop only reaches
+    after everything cheaper has been tried.
+    """
+    config = state.config
+    nxt = cheaper_kv_quant(config.kv_cache_type)
+    if nxt is None:
+        return None
+
+    before = {"kv_cache_type": config.kv_cache_type.lower()}
     config.kv_cache_type = nxt
     # Quantized KV requires flash attention on llama.cpp-family backends.
     config.flash_attention = True
-    cost = "low" if nxt == "q8_0" else "medium"
-    note = ("q8_0 is effectively lossless" if nxt == "q8_0"
-            else "this costs some recall over long context")
     return Outcome(
-        f"quantized the KV cache to {nxt} to free memory ({note})",
-        cost=cost, before=before, after={"kv_cache_type": nxt},
+        f"quantized the KV cache to {nxt} to free memory "
+        f"(measures as effectively lossless against f16)",
+        cost="low", before=before, after={"kv_cache_type": nxt},
     )
+
+
+def _quantize_kv_lossy(state: RepairState) -> Optional[Outcome]:
+    """Last-resort KV quantization below the safe floor.
+
+    Below q8_0 the saving stops being free: how much quality goes with it
+    depends on the model, and at long context the cache is slower as well as
+    worse, because dequantizing inside attention costs more than the memory
+    traffic it saves. So this only applies where it can still help -- short
+    enough context to be a genuine trade -- and it says plainly what it cost.
+    """
+    config = state.config
+    if not kv_lossy_allowed(config.context_tokens):
+        return None
+    nxt = cheaper_kv_quant(config.kv_cache_type, allow_lossy=True)
+    if nxt is None or not kv_is_lossy(nxt):
+        return None
+
+    before = {"kv_cache_type": config.kv_cache_type.lower()}
+    config.kv_cache_type = nxt
+    config.flash_attention = True
+    return Outcome(
+        f"took the KV cache down to {nxt} — this is past the point of being "
+        f"free: expect some answers to change, and raise the cache back to "
+        f"q8_0 with a shorter context if quality matters more than length",
+        cost="high", before=before, after={"kv_cache_type": nxt},
+    )
+
+
+def _increase_batch(state: RepairState) -> Optional[Outcome]:
+    """Give prompt processing a bigger micro-batch.
+
+    Prefill is compute-bound and batched, so the physical micro-batch is the
+    single flag that moves it most: on the same hardware, prompt throughput can
+    differ by an order of magnitude between a small ubatch and a large one. The
+    cost is compute-buffer memory, which is why this is only reached after
+    prefill has actually been measured and found wanting -- not guessed at.
+    """
+    config = state.config
+    if config.ubatch_size >= _MAX_UBATCH:
+        return None
+    before = {"batch_size": config.batch_size, "ubatch_size": config.ubatch_size}
+    config.ubatch_size = min(_MAX_UBATCH, config.ubatch_size * 2)
+    config.batch_size = max(config.batch_size, config.ubatch_size)
+    return Outcome(
+        f"raised the prompt micro-batch to {config.ubatch_size} "
+        f"(batch {config.batch_size}) so long prompts process in fewer, larger "
+        f"passes; this costs some compute-buffer memory",
+        cost="low", before=before,
+        after={"batch_size": config.batch_size, "ubatch_size": config.ubatch_size},
+    )
+
+
+#: Past this the compute buffer grows faster than prefill improves, and on
+#: smaller cards it is a reliable way to turn a working setup into an OOM.
+_MAX_UBATCH = 2048
 
 
 def _reduce_context(state: RepairState) -> Optional[Outcome]:
@@ -427,6 +492,41 @@ def _increase_gpu_layers(state: RepairState) -> Optional[Outcome]:
     )
 
 
+def _fetch_vision_projector(state: RepairState) -> Optional[Outcome]:
+    """Fetch the multimodal projector a vision model is missing.
+
+    This is the one repair that adds a file rather than giving something up: a
+    vision model served without its projector answers image questions from the
+    text alone, confidently and wrongly. Nothing about the settings can fix
+    that -- the model is simply only half loaded.
+    """
+    config, spec = state.config, state.candidate.model
+    if not spec.supports_vision or config.mmproj_path:
+        return None
+    if config.runtime != "llamacpp":
+        # Other runtimes bundle the projector with the model; a loose file has
+        # nowhere to go, so pretending otherwise would waste a repair round.
+        return None
+
+    from llmfit.runtimes.gguf_store import fetch_projector
+
+    console = state.console or Console(quiet=True)
+    try:
+        path = fetch_projector(spec, config.quant, console)
+    except Exception as exc:  # a failed download is a failed repair, not a crash
+        console.warn(f"could not fetch the vision projector: {exc}")
+        return None
+    if path is None:
+        return None
+
+    before = {"mmproj_path": None}
+    config.mmproj_path = str(path)
+    return Outcome(
+        description=f"loaded the vision projector ({path.name}) so images work",
+        cost="low", before=before, after={"mmproj_path": str(path)},
+    )
+
+
 # --------------------------------------------------------------------------- #
 # the table
 # --------------------------------------------------------------------------- #
@@ -451,13 +551,18 @@ STRATEGIES: List[RepairStrategy] = [
                    _enable_chat_template),
     RepairStrategy("enable_embeddings_flag", (sig.EMBEDDINGS_UNSUPPORTED,), "low",
                    _enable_embeddings_flag),
+    RepairStrategy("fetch_vision_projector", (sig.VISION_UNSUPPORTED,), "low",
+                   _fetch_vision_projector),
     RepairStrategy("fix_repetition_sampling", (sig.REPETITION_LOOP,), "low",
                    _fix_repetition_sampling),
     RepairStrategy("disable_flash_attention",
                    (sig.INCOHERENT_OUTPUT, sig.EMPTY_RESPONSE), "low",
                    _disable_flash_attention),
-    RepairStrategy("increase_gpu_layers", (sig.THROUGHPUT_TOO_LOW,), "low",
+    RepairStrategy("increase_gpu_layers",
+                   (sig.THROUGHPUT_TOO_LOW, sig.PREFILL_TOO_SLOW), "low",
                    _increase_gpu_layers),
+    RepairStrategy("increase_batch", (sig.PREFILL_TOO_SLOW,), "low",
+                   _increase_batch),
 
     # Visible trades.
     RepairStrategy("reduce_parallel", _MEMORY_SIGNATURES, "medium", _reduce_parallel),
@@ -468,13 +573,17 @@ STRATEGIES: List[RepairStrategy] = [
                    _restore_kv_precision),
 
     # Real sacrifices.
+    RepairStrategy("quantize_kv_cache_lossy",
+                   (*_MEMORY_SIGNATURES, sig.CONTEXT_EXCEEDED), "high",
+                   _quantize_kv_lossy),
     RepairStrategy("reduce_gpu_layers", _MEMORY_SIGNATURES, "high", _reduce_gpu_layers),
     RepairStrategy("drop_quant_tier", _MEMORY_SIGNATURES, "high", _drop_quant_tier),
     RepairStrategy("switch_model",
                    (*_MEMORY_SIGNATURES,
                     sig.INCOHERENT_OUTPUT, sig.TOOLS_UNSUPPORTED,
                     sig.VISION_UNSUPPORTED, sig.EMBEDDINGS_UNSUPPORTED,
-                    sig.THROUGHPUT_TOO_LOW, sig.NEEDLE_NOT_FOUND),
+                    sig.THROUGHPUT_TOO_LOW, sig.PREFILL_TOO_SLOW,
+                    sig.NEEDLE_NOT_FOUND),
                    "high", _switch_model),
 ]
 

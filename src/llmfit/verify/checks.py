@@ -28,6 +28,7 @@ from llmfit.types import (
     ModelSpec,
     RuntimeConfig,
     Severity,
+    Task,
     UseCaseProfile,
 )
 from llmfit.verify import signatures as sig
@@ -649,6 +650,86 @@ def check_throughput(ctx: CheckContext) -> CheckResult:
                  f"{measured:.1f} tokens/s (predicted {predicted:.0f})", **metrics)
 
 
+def check_prefill(ctx: CheckContext) -> CheckResult:
+    """Measure prompt processing, which is a different number from decode.
+
+    Decode speed is what a chat feels like. Prefill is what everything else
+    waits on: a RAG answer, an agent turn carrying its history, a file pasted
+    into a coding assistant. They are bound by different things -- decode by
+    memory bandwidth, prefill by compute -- so a setup can be fine at one and
+    unusable at the other, and only measuring one hides that.
+
+    Measured exactly rather than inferred: one long prompt with a single token
+    of output, so the server's own prompt-token count divided by the latency
+    *is* the prefill rate.
+    """
+    name = "prefill"
+    # Long enough to be dominated by prefill rather than by request overhead,
+    # and never longer than the context this setup was actually configured for.
+    target = max(512, min(4096, ctx.config.context_tokens // 2))
+    prompt, approx_tokens = _build_haystack(target, "IGNORED")
+
+    result = ctx.client.chat(
+        [{"role": "user", "content": prompt}],
+        max_tokens=1, temperature=0.0, timeout=300,
+    )
+    if not result.ok:
+        return _fail(name, Severity.ADVISORY, "the prefill measurement failed",
+                     sig.classify(result.error) or sig.UNKNOWN_ERROR,
+                     detail=result.error[:800])
+
+    tokens = result.prompt_tokens or approx_tokens
+    if result.latency_s <= 0:
+        return _pass(name, Severity.ADVISORY, "prefill was too fast to time")
+    rate = tokens / result.latency_s
+
+    # The number people actually experience: how long they stare at nothing
+    # before the first word, with the context they asked for filled.
+    full_context_wait = ctx.config.context_tokens / rate if rate else 0.0
+    metrics = {
+        "prefill_tokens_per_second": round(rate, 1),
+        "prefill_prompt_tokens": tokens,
+        "full_context_wait_s": round(full_context_wait, 1),
+    }
+
+    if rate < _PREFILL_FLOOR:
+        return _fail(
+            name, Severity.ADVISORY,
+            f"prompt processing is {rate:.0f} tokens/s, so a full-context "
+            f"prompt would take {full_context_wait / 60:.0f} minutes before "
+            f"the first word",
+            sig.PREFILL_TOO_SLOW, **metrics,
+        )
+    if _long_prompt_workload(ctx.profile) and full_context_wait > _PREFILL_PATIENCE:
+        return CheckResult(
+            name=name, status=CheckStatus.WARN, severity=Severity.ADVISORY,
+            message=(f"{rate:.0f} tokens/s prompt processing — a full "
+                     f"{ctx.config.context_tokens:,}-token prompt waits "
+                     f"{full_context_wait:.0f}s before the first word, which "
+                     f"this use case will hit routinely"),
+            failure_signature=sig.PREFILL_TOO_SLOW, metrics=metrics,
+        )
+    return _pass(name, Severity.ADVISORY,
+                 f"{rate:.0f} tokens/s prompt processing "
+                 f"({full_context_wait:.0f}s at full context)", **metrics)
+
+
+#: Below this, prompt processing is not a slow setup -- it is a broken one. A
+#: CPU-only machine on a small model clears it comfortably; a setup that does
+#: not has fallen off its accelerator entirely.
+_PREFILL_FLOOR = 15.0
+
+#: How long a first-word wait stays tolerable for a workload that fills its
+#: context on every request.
+_PREFILL_PATIENCE = 45.0
+
+
+def _long_prompt_workload(profile) -> bool:
+    """Whether this user sends long prompts as a matter of course."""
+    return bool({Task.RAG, Task.AGENT, Task.SUMMARIZE, Task.CODING}
+                & set(profile.tasks))
+
+
 # --------------------------------------------------------------------------- #
 # 10. stability under repeated load
 # --------------------------------------------------------------------------- #
@@ -777,6 +858,7 @@ ALL_CHECKS: Dict[str, Callable[[CheckContext], CheckResult]] = {
     "embeddings": check_embeddings,
     "vision": check_vision,
     "throughput": check_throughput,
+    "prefill": check_prefill,
     "stability": check_stability,
     "repetition": check_repetition,
 }

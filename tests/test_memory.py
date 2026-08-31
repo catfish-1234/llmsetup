@@ -6,6 +6,8 @@ import pytest
 
 from llmfit.planner.memory import (
     KV_ELEMENT_BYTES,
+    KV_QUALITY_ORDER,
+    KV_SAFE_FLOOR,
     cheaper_kv_quant,
     estimate_memory,
     kv_bytes_per_token,
@@ -144,11 +146,16 @@ class TestPartialOffload:
         assert layers_that_fit(model, 4.85, 64 * 1024 ** 2, 8192) == 0
 
 
-def test_kv_quality_ladder_terminates():
+@pytest.mark.parametrize("allow_lossy", [False, True])
+def test_kv_quality_ladder_terminates(allow_lossy):
     quant = "f16"
-    seen = set()
+    seen = []
     while quant:
         assert quant not in seen, "the KV quality ladder loops"
-        seen.add(quant)
-        quant = cheaper_kv_quant(quant)
-    assert len(seen) >= 3
+        seen.append(quant)
+        quant = cheaper_kv_quant(quant, allow_lossy=allow_lossy)
+    if allow_lossy:
+        assert seen == KV_QUALITY_ORDER
+    else:
+        # The ordinary path stops at the last dtype that is genuinely free.
+        assert seen == ["f16", KV_SAFE_FLOOR]
