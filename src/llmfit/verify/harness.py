@@ -29,7 +29,7 @@ from llmfit.verify.client import OpenAIClient
 BASELINE = ["health", "completion", "stability"]
 
 # Cheap and broadly informative, so they run unless explicitly skipped.
-STANDARD = ["streaming", "repetition", "throughput"]
+STANDARD = ["streaming", "repetition", "throughput", "prefill"]
 
 
 def select_checks(profile: UseCaseProfile, spec: ModelSpec,

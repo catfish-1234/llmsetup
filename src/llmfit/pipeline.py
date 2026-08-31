@@ -125,7 +125,7 @@ class Pipeline:
             state = RepairState(
                 config=config, candidate=candidate, hardware=self.hardware,
                 profile=self.profile, catalog=self.catalog,
-                fallbacks=list(plan.fallbacks),
+                fallbacks=list(plan.fallbacks), console=self.console,
             )
             loop = RepairLoop(state=state, relaunch=self._relaunch,
                               console=self.console, max_repairs=self.max_repairs)

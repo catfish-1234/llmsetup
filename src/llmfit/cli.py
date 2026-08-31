@@ -52,6 +52,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "setup": cmd_setup, "detect": cmd_detect, "plan": cmd_plan,
         "verify": cmd_verify, "doctor": cmd_doctor, "export": cmd_export,
         "catalog": cmd_catalog, "runtimes": cmd_runtimes, "ui": cmd_ui,
+        "report": cmd_report,
     }.get(args.command)
 
     if handler is None:
@@ -166,6 +167,12 @@ def build_parser() -> argparse.ArgumentParser:
     common(p_doctor)
     hardware_flags(p_doctor)
     p_doctor.add_argument("--profile", type=Path, help="saved setup JSON to re-test")
+
+    p_report = sub.add_parser(
+        "report", help="reprint the last setup's report (paste this into a bug report)")
+    common(p_report)
+    p_report.add_argument("path", nargs="?", type=Path,
+                          help="a saved report to print instead of the last one")
 
     p_export = sub.add_parser("export", help="register a model with your other apps")
     common(p_export)
@@ -702,12 +709,38 @@ def _config_for_external(spec, profile, args):
     )
 
 
+def cmd_report(args, console: Console) -> int:
+    """Reprint the report from the last setup.
+
+    This is what a bug report should be pasted from: it carries the machine, the
+    plan, every tuning decision with the reason it was made, and what the checks
+    actually found -- which is the difference between a fixable report and "it
+    did not work". It contains no credentials.
+    """
+    path = args.path or (app_dir() / "last-report.md")
+    if not Path(path).exists():
+        raise LlmfitError(
+            f"no saved report at {path}",
+            hint="run `llmfit setup` first — every run saves one",
+        )
+    sys.stdout.write(Path(path).read_text(encoding="utf-8"))
+    return 0
+
+
 def _save_last(result) -> None:
-    """Record the run so `llmfit doctor` can re-test it later."""
-    from llmfit.util.fs import write_json
+    """Record the run so `llmfit doctor` can re-test it and `llmfit report` can
+    reprint it.
+
+    The markdown is written every time rather than on request, because the run
+    people most want a report of is the one they did not think to ask for one
+    from.
+    """
+    from llmfit.util.fs import write_json, write_text
 
     try:
-        write_json(ensure_dir(app_dir()) / "last-setup.json", result.to_dict())
+        directory = ensure_dir(app_dir())
+        write_json(directory / "last-setup.json", result.to_dict())
+        write_text(directory / "last-report.md", render_markdown(result))
     except OSError:
         pass
 

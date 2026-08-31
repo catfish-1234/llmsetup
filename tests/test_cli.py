@@ -220,3 +220,41 @@ class TestNeverClaimsUntestedSuccess:
         code = main(["setup", "--dry-run", "--vram", "24", "--gpu-vendor", "nvidia",
                      "--task", "chat", "--yes"])
         assert code == 0
+
+
+class TestReportCommand:
+    """A bug report is only actionable if the reporter can produce one easily,
+    so every run saves the report whether or not it was asked for."""
+
+    def test_a_setup_saves_its_report_without_being_asked(self, capsys):
+        main(["setup", "--dry-run", "--vram", "24", "--gpu-vendor", "nvidia",
+              "--task", "chat", "--yes"])
+        capsys.readouterr()
+
+        assert main(["report"]) == 0
+        printed = capsys.readouterr().out
+        assert printed.startswith("# Local LLM setup:")
+        assert "## What was chosen" in printed
+
+    def test_the_reprint_is_the_report_not_a_summary_of_it(self, capsys):
+        """It has to carry the decisions and their reasons, which is the part
+        that makes a wrong plan diagnosable."""
+        main(["setup", "--dry-run", "--vram", "24", "--gpu-vendor", "nvidia",
+              "--task", "coding", "--yes"])
+        capsys.readouterr()
+
+        main(["report"])
+        printed = capsys.readouterr().out
+        assert "## Machine" in printed
+        assert "Runtime chosen because:" in printed
+
+    def test_says_what_to_do_when_there_is_nothing_saved(self, capsys):
+        code = main(["report"])
+        assert code != 0
+        assert "llmfit setup" in capsys.readouterr().err
+
+    def test_prints_a_report_it_is_handed(self, capsys, tmp_path):
+        saved = tmp_path / "old-report.md"
+        saved.write_text("# Local LLM setup: something else\n", encoding="utf-8")
+        assert main(["report", str(saved)]) == 0
+        assert "something else" in capsys.readouterr().out

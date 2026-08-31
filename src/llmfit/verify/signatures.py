@@ -38,6 +38,7 @@ VISION_UNSUPPORTED = "vision_unsupported"
 
 # --- performance ----------------------------------------------------------- #
 THROUGHPUT_TOO_LOW = "throughput_too_low"
+PREFILL_TOO_SLOW = "prefill_too_slow"
 LATENCY_TOO_HIGH = "latency_too_high"
 REQUEST_TIMEOUT = "request_timeout"
 

@@ -141,6 +141,47 @@ def dynamic_variants(quant: str) -> List[str]:
     return [c for c in candidates if c.upper() != upper]
 
 
+#: Vision models ship two files: the language model and a separate multimodal
+#: projector (the CLIP/SigLIP tower plus the layer that maps image embeddings
+#: into the model's token space). Repos name it inconsistently -- ``mmproj``,
+#: ``mm-proj``, ``mmproj-model-f16``, occasionally ``projector`` -- but the
+#: prefix is always there.
+_PROJECTOR_RE = re.compile(r"(?:^|[-_])(?:mmproj|mm-proj|projector)", re.I)
+
+#: Projector precision, best first. Vision towers are markedly more sensitive to
+#: quantization than the language model, and the file is small enough that the
+#: precision costs little, so a heavily quantized language model still deserves
+#: a full-precision projector. Q4 projectors exist and are visibly worse.
+_PROJECTOR_PRECISION = ("bf16", "f32", "f16", "q8_0")
+
+
+def is_projector(filename: str) -> bool:
+    """Whether a repo file is a multimodal projector rather than a model."""
+    stem = filename.rsplit("/", 1)[-1]
+    return bool(_PROJECTOR_RE.search(stem))
+
+
+def pick_mmproj(files: List[RemoteFile]) -> Optional[RemoteFile]:
+    """Choose the multimodal projector to pair with the language model.
+
+    Returns ``None`` when the repo publishes none, which is the normal case for
+    a text-only model and a reportable problem for a vision one.
+    """
+    projectors = [f for f in files
+                  if f.filename.lower().endswith(".gguf") and is_projector(f.filename)]
+    if not projectors:
+        return None
+    def rank(f: RemoteFile) -> tuple:
+        name = f.filename.lower()
+        for i, precision in enumerate(_PROJECTOR_PRECISION):
+            if re.search(rf"(^|[-_.]){re.escape(precision)}([-_.]|$)", name):
+                return (i, len(name))
+        # Unlabelled precision: no reason to prefer it over a known-good one,
+        # but better than nothing.
+        return (len(_PROJECTOR_PRECISION), len(name))
+    return sorted(projectors, key=rank)[0]
+
+
 def pick_gguf(files: List[RemoteFile], quant: str,
               prefer_dynamic: bool = True) -> Optional[RemoteFile]:
     """Choose the GGUF matching ``quant``.
@@ -150,7 +191,8 @@ def pick_gguf(files: List[RemoteFile], quant: str,
     ``Q4_0`` matches ``Q4_0_4_8`` (an ARM-specific repack that will not run on
     x86).
     """
-    ggufs = [f for f in files if f.filename.lower().endswith(".gguf")]
+    ggufs = [f for f in files
+             if f.filename.lower().endswith(".gguf") and not is_projector(f.filename)]
     if not ggufs:
         return None
 

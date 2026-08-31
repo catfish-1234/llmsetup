@@ -49,9 +49,41 @@ KV_ELEMENT_BYTES = {
     "q4_0": 0.5625,
 }
 
-# Quality cost of quantizing the KV cache, cheapest first. q8_0 is effectively
-# free; below q5 the degradation on long context becomes noticeable.
+# Quality cost of quantizing the KV cache, cheapest first.
 KV_QUALITY_ORDER = ["f16", "q8_0", "q5_1", "q4_0"]
+
+# The rung below which quantizing the KV cache stops being a cheap win.
+#
+# q8_0 is as close to free as a memory saving gets: measured against an f16
+# reference it changes a handful of answers in five hundred, and none at all
+# across deep-context comparisons out to 41K tokens. Below it the picture
+# changes and stops being predictable -- q4_0 is strongly model-dependent,
+# ranging from a couple of changed answers on one model to 375 in 500 on
+# another, and at very long context it is also *slower* than f16, because
+# dequantizing during attention costs more than the memory traffic it saves
+# (~37% slower generation at ~110K tokens).
+#
+# So: q8_0 is chosen freely, and anything below it is a deliberate last resort
+# that the user is told about, never a silent default.
+KV_SAFE_FLOOR = "q8_0"
+
+# Above this, a sub-q8_0 KV cache is not a trade at all -- it is slower *and*
+# worse, so there is nothing to weigh.
+KV_LOSSY_CONTEXT_LIMIT = 32768
+
+
+def kv_is_lossy(kv_quant: str) -> bool:
+    """Whether this KV dtype is past the point of being a free saving."""
+    try:
+        return (KV_QUALITY_ORDER.index(kv_quant.lower())
+                > KV_QUALITY_ORDER.index(KV_SAFE_FLOOR))
+    except ValueError:
+        return False
+
+
+def kv_lossy_allowed(context_tokens: int) -> bool:
+    """Whether dropping below the safe floor could still help at this context."""
+    return context_tokens <= KV_LOSSY_CONTEXT_LIMIT
 
 # --- empirical overhead constants (bytes) ---------------------------------- #
 # Fixed cost of bringing up a runtime + its GPU context.
@@ -71,6 +103,14 @@ _ACTIVATION_TENSORS = 18
 # Output projection buffer. Modern models have 100-250K vocabularies, and the
 # logits buffer is large enough to matter on small cards.
 _ASSUMED_VOCAB = 152_000
+
+# A vision model loads a second network: the projector (a SigLIP/CLIP tower plus
+# the layer mapping its output into token space), kept at f16 or bf16 because
+# vision quality degrades quickly under quantization. The towers in circulation
+# run roughly 400M-1B parameters, so the file alone is most of a gigabyte, and
+# image activations sit on top. Counting it is the difference between a vision
+# model that fits and one that OOMs the moment it is sent a picture.
+_VISION_PROJECTOR_BYTES = 1024 * 1024 ** 2
 
 
 def kv_bytes_per_token(spec: ModelSpec, kv_quant: str = "f16") -> float:
@@ -96,7 +136,8 @@ def overhead_bytes(
     logits = _ASSUMED_VOCAB * 4 * max(1, parallel)
     # A small proportional term: bigger graphs need bigger scratch space.
     graph = int(spec.layers * spec.hidden_size * 2 * 64)
-    return int(fixed + activations + logits + graph)
+    vision = _VISION_PROJECTOR_BYTES if spec.supports_vision else 0
+    return int(fixed + activations + logits + graph + vision)
 
 
 def estimate_memory(
@@ -197,10 +238,19 @@ def fits(estimate: MemoryEstimate, budget_bytes: int, headroom: float = 0.0) -> 
     return estimate.total <= budget_bytes * (1.0 - headroom)
 
 
-def cheaper_kv_quant(current: str) -> Optional[str]:
-    """Next KV cache dtype down the quality ladder, or None at the bottom."""
+def cheaper_kv_quant(current: str, allow_lossy: bool = False) -> Optional[str]:
+    """Next KV cache dtype down the quality ladder, or None at the bottom.
+
+    Stops at :data:`KV_SAFE_FLOOR` unless ``allow_lossy`` is set, so the
+    ordinary path can never quietly hand back a dtype that changes answers.
+    """
     try:
         idx = KV_QUALITY_ORDER.index(current.lower())
     except ValueError:
-        return "q8_0"
-    return KV_QUALITY_ORDER[idx + 1] if idx + 1 < len(KV_QUALITY_ORDER) else None
+        return KV_SAFE_FLOOR
+    nxt = idx + 1
+    if nxt >= len(KV_QUALITY_ORDER):
+        return None
+    if not allow_lossy and nxt > KV_QUALITY_ORDER.index(KV_SAFE_FLOOR):
+        return None
+    return KV_QUALITY_ORDER[nxt]

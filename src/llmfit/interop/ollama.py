@@ -52,12 +52,20 @@ def register_in_ollama(spec: ModelSpec, config: RuntimeConfig,
     if not result.ok:
         return {"target": "ollama", "ok": False, "modelfile": str(path),
                 "note": f"`ollama create` failed: {result.output.strip()[:300]}"}
+    note = (f"run it with `ollama run {tag}`"
+            + ("; note Ollama copied the weights into its own store, so they "
+               "occupy disk twice" if duplicates_disk else
+               "; derived from the official tag, so no extra disk is used"))
+    if spec.supports_vision and duplicates_disk:
+        # A Modelfile FROM a single GGUF carries the language model only. Ollama
+        # bundles the projector inside its own official tags, so that route
+        # keeps vision; this one does not, and saying so beats a user
+        # discovering it by sending an image.
+        note += ("; built from the language model alone, so this tag is "
+                 "text-only — use the official Ollama tag for vision")
     return {
         "target": "ollama", "ok": True, "name": tag, "modelfile": str(path),
-        "note": (f"run it with `ollama run {tag}`"
-                 + ("; note Ollama copied the weights into its own store, so they "
-                    "occupy disk twice" if duplicates_disk else
-                    "; derived from the official tag, so no extra disk is used")),
+        "note": note,
     }
 
 

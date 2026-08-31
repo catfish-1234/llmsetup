@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from llmfit.runtimes.base import Endpoint, Runtime, RuntimeUnavailable
-from llmfit.runtimes.gguf_store import fetch_gguf
+from llmfit.runtimes.gguf_store import fetch_gguf, fetch_projector
 from llmfit.runtimes.registry import register
 from llmfit.types import ModelSpec, RuntimeConfig
 from llmfit.util import http
@@ -43,10 +43,18 @@ class LlamaCppRuntime(Runtime):
 
     def ensure_model(self, spec: ModelSpec, config: RuntimeConfig,
                      console: Console) -> RuntimeConfig:
-        if config.model_path and Path(config.model_path).exists():
-            return config
-        path = fetch_gguf(spec, config.quant, console)
-        config.model_path = str(path)
+        if not (config.model_path and Path(config.model_path).exists()):
+            config.model_path = str(fetch_gguf(spec, config.quant, console))
+        # A vision model without its projector loads and serves happily; it just
+        # cannot see. Fetch it here so the failure never reaches the user.
+        if spec.supports_vision and not config.mmproj_path:
+            projector = fetch_projector(spec, config.quant, console)
+            if projector is not None:
+                config.mmproj_path = str(projector)
+            else:
+                console.warn(
+                    f"{spec.gguf_repo} publishes no multimodal projector, so "
+                    f"{spec.name} will run as a text-only model")
         return config
 
     def launch_command(self, spec: ModelSpec, config: RuntimeConfig) -> List[str]:
@@ -65,6 +73,8 @@ class LlamaCppRuntime(Runtime):
             "--jinja",
             "--alias", config.served_name or spec.id,
         ]
+        if config.mmproj_path:
+            cmd += ["--mmproj", config.mmproj_path]
         if config.threads:
             cmd += ["--threads", str(config.threads)]
         # Flash attention is an explicit on/off in current llama-server; leaving
