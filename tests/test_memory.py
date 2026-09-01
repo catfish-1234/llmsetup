@@ -136,7 +136,7 @@ class TestPartialOffload:
     def test_reports_a_useless_fraction_rather_than_lying(self):
         """A 1 GB budget for a 70B model fits a layer or two, and that is the
         honest answer. Rejecting such a split is the planner's job, not this
-        primitive's — see test_planner.py."""
+        primitive's, see test_planner.py."""
         model = spec(params_b=70.0, layers=80)
         fitted = layers_that_fit(model, 4.85, 1 * GIB, 8192)
         assert 0 <= fitted <= 2

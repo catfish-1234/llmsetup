@@ -166,7 +166,7 @@ class Pipeline:
 
         Deliberately non-fatal: a working chat model with a broken retriever is
         still a useful outcome, so this reports its own status instead of
-        failing the run. But it is *verified* — an embedding endpoint that
+        failing the run. But it is *verified*, an embedding endpoint that
         returns vectors which do not separate meaning is worse than none, since
         it fails silently at retrieval time.
         """

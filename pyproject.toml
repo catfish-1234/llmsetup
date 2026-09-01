@@ -1,6 +1,6 @@
 [build-system]
 # setuptools floor is set by security, not features: 68.x carries PYSEC-2025-49,
-# PYSEC-2026-1918 and PYSEC-2026-3447. `wheel` is deliberately absent — modern
+# PYSEC-2026-1918 and PYSEC-2026-3447. `wheel` is deliberately absent, because modern
 # setuptools vendors what it needs, and listing it only pinned an extra package
 # with its own advisories (CVE-2026-24049).
 requires = ["setuptools>=78.1.1"]

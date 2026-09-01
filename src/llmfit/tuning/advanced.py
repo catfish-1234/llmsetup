@@ -1,7 +1,7 @@
 """Deep tuning: the settings past load and basic sampling.
 
 Each planner here answers one question, takes the machine and the use case into
-account, and records why. The ordering in :func:`plan_advanced` is deliberate —
+account, and records why. The ordering in :func:`plan_advanced` is deliberate:
 offload decides how much memory is left, which is what speculative decoding then
 has to fit a draft model into.
 """
@@ -131,7 +131,7 @@ def plan_offload(
         f"leaving {resident / GIB:.1f} GB of weights on the GPU. Attention and the "
         f"KV cache stay resident, and only {spec.compute_params_b:g}B parameters "
         f"are active per token, so this costs far less speed than moving whole "
-        f"layers would — expect roughly {retained:.0%} of full-GPU throughput"
+        f"layers would, expect roughly {retained:.0%} of full-GPU throughput"
     )
     return plan
 
@@ -232,7 +232,7 @@ def plan_speculative(
     # much cheaper the draft is, so a conservative multiple is quoted.
     plan.expected_speedup = round(min(2.0, 1.0 + 0.55 * min(1.0, ratio / 20)), 2)
     plan.rationale = (
-        f"{draft.name} drafts for {spec.name} — same vocabulary, {ratio:.0f}x "
+        f"{draft.name} drafts for {spec.name}, same vocabulary, {ratio:.0f}x "
         f"smaller, {draft_bytes / GIB:.1f} GB. It guesses "
         f"{plan.max_draft_tokens} tokens ahead and the target verifies them in "
         f"one pass, which is worth roughly {plan.expected_speedup:.2f}x on "
@@ -366,7 +366,7 @@ def plan_rope(spec: ModelSpec, context_tokens: int) -> RopePlan:
     if context_tokens <= spec.max_context:
         plan.rationale = (
             f"native context is {spec.max_context:,} tokens, which covers the "
-            f"{context_tokens:,} requested — no scaling needed"
+            f"{context_tokens:,} requested, no scaling needed"
         )
         return plan
 
@@ -378,7 +378,7 @@ def plan_rope(spec: ModelSpec, context_tokens: int) -> RopePlan:
     plan.rationale = (
         f"YaRN scaling by {factor:.2f}x to reach {context_tokens:,} tokens from a "
         f"{spec.max_context:,}-token model. This works, but quality degrades with "
-        f"the scale factor — if answers get vaguer at long context, this is why, "
+        f"the scale factor. If answers get vaguer at long context, this is why, "
         f"and a model with a natively longer window is the better fix"
     )
     return plan
@@ -394,7 +394,7 @@ def plan_sampler(spec: ModelSpec, profile: UseCaseProfile,
     """The full decoding stack, chosen per task and model family.
 
     ``presence_penalty`` comes from the publisher's recommendation upstream and
-    is carried through rather than recomputed — a family that asks for 1.5 must
+    is carried through rather than recomputed, a family that asks for 1.5 must
     not have it silently reset to 0 here.
     """
     task = profile.primary_task
@@ -430,7 +430,7 @@ def plan_sampler(spec: ModelSpec, profile: UseCaseProfile,
         chain.xtc_threshold = 0.1
         notes.append(
             "DRY penalises repeated phrases rather than repeated tokens, and XTC "
-            "drops the most predictable continuation — together they break loops "
+            "drops the most predictable continuation, together they break loops "
             "and clichés without banning words the passage needs"
         )
     else:

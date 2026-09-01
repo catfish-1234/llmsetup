@@ -5,14 +5,14 @@ only sustainable answer is for it to refresh itself. This module finds new
 open-weight models and derives real catalog entries for them without a human
 typing anything.
 
-The reason this is possible at all: everything the memory model needs —
-``num_hidden_layers``, ``num_key_value_heads``, ``hidden_size``, ``head_dim`` —
+The reason this is possible at all: everything the memory model needs
+(``num_hidden_layers``, ``num_key_value_heads``, ``hidden_size``, ``head_dim``)
 is published in a model's ``config.json``. So discovery reads architecture from
 the source of truth rather than guessing, and an auto-added entry is as
 trustworthy as a hand-written one.
 
 What it will not do is add a model it cannot describe. An entry with a guessed
-layer count produces a wrong memory plan, which is worse than no entry — so
+layer count produces a wrong memory plan, which is worse than no entry, so
 every gate below is a reason to skip rather than to approximate.
 """
 
@@ -30,7 +30,7 @@ from llmfit.download import HF_ENDPOINT, _auth_headers, validate_repo
 from llmfit.util.log import Console
 
 # Quality gates. These exist to keep the catalog a curated set rather than a
-# dump of everything on the Hub — a recommendation engine is only as good as
+# dump of everything on the Hub, a recommendation engine is only as good as
 # what it is allowed to recommend.
 MIN_DOWNLOADS = 5_000
 MIN_LIKES = 20
@@ -123,7 +123,7 @@ class Candidate:
 
 
 def _get_json(url: str, timeout: float = 20.0) -> Optional[Any]:
-    """GET and parse JSON. Returns None on any failure — discovery is best-effort."""
+    """GET and parse JSON. Returns None on any failure, because discovery is best-effort."""
     try:
         request = urllib.request.Request(url, headers=_auth_headers())
         with urllib.request.urlopen(request, timeout=timeout) as response:
@@ -146,7 +146,7 @@ def list_trending(limit: int = 60, timeout: float = 20.0) -> List[Dict[str, Any]
 
 
 def fetch_config(repo: str, timeout: float = 20.0) -> Optional[Dict[str, Any]]:
-    """A model's config.json — the authoritative architecture description."""
+    """A model's config.json, the authoritative architecture description."""
     try:
         safe = urllib.parse.quote(validate_repo(repo), safe="/")
     except Exception:
@@ -405,7 +405,7 @@ def _quality_tier(params_b: float, downloads: int, likes: int) -> int:
     """A 1-5 tier from size and adoption.
 
     Adoption is a weak proxy for quality, but it is the only signal available
-    without running benchmarks — so the scale is deliberately compressed toward
+    without running benchmarks, so the scale is deliberately compressed toward
     the middle, and a discovered model never outranks a curated one on tier
     alone.
     """

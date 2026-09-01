@@ -308,7 +308,7 @@ models:
     hf_repo: Qwen/Qwen3-235B-A22B
     recommended_quants: [Q4_K_M, Q3_K_M]
     arch_source: measured
-    notes: Workstation/server class — ~140 GB at Q4. Listed so big rigs get an answer.
+    notes: Workstation and server class, about 140 GB at Q4. Listed so big rigs get an answer.
 
   # ------------------------------------------------------------------- gpt-oss
   - id: gpt-oss-20b
@@ -395,7 +395,7 @@ models:
     arch_source: measured
     notes: >
       Strong multilingual and vision. 16 KV heads make its cache pricier than
-      Qwen's at the same size — watch context length on 24 GB.
+      Qwen's at the same size. Watch context length on 24 GB.
 
   - id: gemma-3-12b
     tokenizer_family: gemma3
@@ -447,7 +447,7 @@ models:
     ollama_name: gemma3:4b
     recommended_quants: [Q4_K_M, Q6_K, Q8_0]
     arch_source: measured
-    notes: Smallest credible vision model — the fallback when vision is required.
+    notes: Smallest credible vision model, the fallback when vision is required.
 
   # --------------------------------------------------------------------- Llama
   - id: llama-3.3-70b
@@ -473,7 +473,7 @@ models:
     arch_source: measured
     notes: >
       Best instruction-following in its class and the widest ecosystem of
-      fine-tunes. Community licence has an acceptable-use policy — check it for
+      fine-tunes. Community licence has an acceptable-use policy, so check it for
       commercial deployment.
 
   - id: llama-3.1-8b
@@ -547,7 +547,7 @@ models:
     ollama_name: phi4:14b
     recommended_quants: [Q4_K_M, Q5_K_M, Q6_K]
     arch_source: measured
-    notes: Strong reasoning per parameter, but only 16K context — avoid for RAG.
+    notes: Strong reasoning per parameter, but only 16K context, so avoid for RAG.
 
   - id: phi-4-mini
     tokenizer_family: phi4

@@ -2,7 +2,7 @@
 
 Takes the winning candidate and the real machine, and produces the concrete
 settings the runtime will be launched with. Every value here is derived from a
-measured or estimated quantity — none of it is a fixed default — and the
+measured or estimated quantity, none of it a fixed default, and the
 reasoning for each is recorded so the report can justify the numbers.
 
 The order matters: GPU offload is decided first because it determines how much
@@ -173,7 +173,7 @@ class TunedConfig:
     estimate: object
 
     def explain(self) -> List[str]:
-        return [f"{d.setting} = {d.value} — {d.reason}" for d in self.decisions]
+        return [f"{d.setting} = {d.value} - {d.reason}" for d in self.decisions]
 
 
 # --------------------------------------------------------------------------- #
@@ -235,7 +235,7 @@ def _offload(candidate, hardware, profile, runtime, budget, parallel, ubatch,
                 "kv_cache_type", candidate_kv,
                 f"quantizing the KV cache saves "
                 f"{(estimate.kv_cache - trial.kv_cache) / 1024 ** 3:.1f} GB and keeps "
-                f"the whole model on the GPU — worth far more than the small "
+                f"the whole model on the GPU, worth far more than the small "
                 f"quality cost",
             ))
             decisions.append(TuningDecision(
@@ -264,7 +264,7 @@ def _offload(candidate, hardware, profile, runtime, budget, parallel, ubatch,
     decisions.append(TuningDecision(
         "gpu_layers", f"{layers} of {spec.layers}",
         f"the model cannot fit even at {min_useful} tokens of context, so "
-        f"{spec.layers - layers} layers run on CPU — expect a large slowdown",
+        f"{spec.layers - layers} layers run on CPU, expect a large slowdown",
     ))
     return layers, context, kv_type
 
@@ -360,7 +360,7 @@ def _memory_mapping(hardware: HardwareProfile, candidate: Candidate,
 
     mmap lets the OS page weights in lazily, which is what makes a partially
     offloaded model start fast. mlock pins them in RAM to stop the OS swapping
-    them back out mid-generation — worth it only when there is genuinely spare RAM,
+    them back out mid-generation, worth it only when there is genuinely spare RAM,
     since pinning on a tight machine causes the exact swapping it prevents.
     """
     weights = candidate.estimate.weights

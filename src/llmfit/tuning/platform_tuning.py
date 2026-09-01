@@ -1,7 +1,7 @@
 """Platform-specific settings the runtime cannot infer.
 
-These are the adjustments that live outside the inference engine — an OS limit,
-an environment variable, a memory policy — and they are the ones people most
+These are the adjustments that live outside the inference engine, an OS limit,
+an environment variable, a memory policy, and they are the ones people most
 often miss, because nothing in the engine's output points at them. A Mac that
 refuses to load a model it has the RAM for, or an AMD card the runtime does not
 recognise, both look like a broken setup rather than a missing sysctl.
@@ -206,5 +206,5 @@ def describe(actions: List[PlatformAction]) -> List[str]:
     lines = []
     for action in actions:
         prefix = "" if action.optional else "required: "
-        lines.append(f"{prefix}{action.title} — {action.reason}")
+        lines.append(f"{prefix}{action.title}: {action.reason}")
     return lines

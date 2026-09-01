@@ -74,7 +74,7 @@ class TestIntegrity:
 
     def test_provenance_is_per_catalog_not_global(self, tmp_path):
         """Two Catalog objects in one process must not report each other's
-        provenance — the reason this moved off a module global."""
+        provenance, the reason this moved off a module global."""
         override = tmp_path / "override.yaml"
         override.write_text("models:\n  - id: qwen3.8-27b\n    arch_source: measured\n")
         bundled = load_catalog(include_user_dir=False)

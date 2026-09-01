@@ -4,9 +4,9 @@ The open-weight landscape turns over every few weeks, so a shipped catalog is
 stale the moment it is written. Two ways to deal with that, both implemented
 here because both are things a user actually needs:
 
-* ``add`` — record a model you already know about, with its architecture read
+* ``add``. Record a model you already know about, with its architecture read
   from a local GGUF where possible so the memory maths is right.
-* ``refresh`` — check the catalog's entries against their upstream repos and
+* ``refresh``. Check the catalog's entries against their upstream repos and
   report what has drifted.
 
 Refresh deliberately **reports** rather than silently rewriting: a model catalog
@@ -137,7 +137,7 @@ _MIN_PLAUSIBLE_PARAMS_B = 0.05
 def _params_from_file(path: Path, layers: Optional[int]) -> Optional[float]:
     """Estimate parameter count from file size, assuming ~4.85 bits/weight.
 
-    Rough, and labelled as such — a wrong-by-10% parameter count is far less
+    Rough, and labelled as such. A wrong-by-10% parameter count is far less
     harmful than no entry, and the architecture fields that actually drive the
     KV maths were read from the header exactly. But an estimate below
     :data:`_MIN_PLAUSIBLE_PARAMS_B` means the file is not a real model, so this
@@ -189,9 +189,9 @@ def refresh(console: Console, catalog: Catalog, check_remote: bool = True,
 
     Two sources of truth are consulted, cheapest first:
 
-    1. **Local GGUF files** already in the shared store — free, offline, and
+    1. **Local GGUF files** already in the shared store, free, offline, and
        authoritative for architecture.
-    2. **Upstream repos** — confirms an entry still resolves, which is what
+    2. **Upstream repos**, confirms an entry still resolves, which is what
        catches a renamed or withdrawn model before a user hits it mid-setup.
     """
     from llmfit.download import list_repo_files

@@ -1,7 +1,7 @@
 """Companion embedding model provisioning.
 
 A RAG setup is half-built without a retriever. Before this, `llmfit plan` told
-users "a separate embedding model is needed" and `setup` never provided one —
+users "a separate embedding model is needed" and `setup` never provided one,
 these tests hold that gap shut.
 """
 

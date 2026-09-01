@@ -1,4 +1,4 @@
-"""GGUF header parsing — the mechanism that replaces catalog guesses with truth."""
+"""GGUF header parsing. The mechanism that replaces catalog guesses with truth."""
 
 from __future__ import annotations
 

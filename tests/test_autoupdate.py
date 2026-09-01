@@ -5,7 +5,7 @@ Two mechanisms, tested separately:
 * **discovery** turns a Hugging Face listing into catalog entries;
 * **auto-update** lets an installed copy pull a newer catalog on its own.
 
-Neither may ever break a run. The network is faked throughout — the suite makes
+Neither may ever break a run. The network is faked throughout, the suite makes
 no real requests.
 """
 
@@ -64,7 +64,7 @@ def valid_catalog_text(model_id="fetched-model", updated="2099-01-01"):
 
 class TestArchitectureExtraction:
     """Architecture comes from config.json, which is the publisher's own
-    statement — so these must match published configs exactly."""
+    statement, so these must match published configs exactly."""
 
     @pytest.mark.parametrize("config,expected", [
         ({"model_type": "qwen3", "num_hidden_layers": 36, "hidden_size": 4096,
@@ -357,7 +357,7 @@ class TestUnattendedCommitGate:
     """The validation that makes the scheduled workflow safe to run unattended.
 
     Discovered entries are machine-generated, so the gate has to reject a bad
-    one before it reaches the catalog — a wrong layer count is a wrong memory
+    one before it reaches the catalog. A wrong layer count is a wrong memory
     plan and an out-of-memory error on a user's machine.
     """
 

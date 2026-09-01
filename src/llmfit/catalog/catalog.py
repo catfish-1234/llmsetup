@@ -57,7 +57,7 @@ class Catalog:
                        {spec.id: dict(self.extras.get(spec.id, {}))})
 
     def arch_source(self, model_id: str) -> str:
-        """'measured' or 'estimated' — whether the architecture figures are trustworthy."""
+        """'measured' or 'estimated', whether the architecture figures are trustworthy."""
         return str(self.extras.get(model_id, {}).get("arch_source", "measured"))
 
     def __len__(self) -> int:
@@ -131,7 +131,7 @@ class Catalog:
         return True
 
     def unmatched_reasons(self, profile: UseCaseProfile) -> Dict[str, int]:
-        """Why models were filtered out — turns 'nothing fits' into an explanation."""
+        """Why models were filtered out, which turns 'nothing fits' into an explanation."""
         reasons: Dict[str, int] = {}
 
         def bump(key: str) -> None:
@@ -255,7 +255,7 @@ def _patch(base: ModelSpec, raw: dict) -> ModelSpec:
 
 
 #: Fields the memory model does arithmetic on. A string here does not fail at
-#: load time — it fails several layers down inside the fit maths, with an error
+#: load time. It fails several layers down inside the fit maths, with an error
 #: that says nothing about the catalog. Types are enforced at the boundary.
 _NUMERIC_FIELDS = {
     "params_b": float, "active_params_b": float, "layers": int,

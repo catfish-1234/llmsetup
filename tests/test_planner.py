@@ -152,7 +152,7 @@ class TestEmbeddingCompanion:
         assert plan_embedding_model(profile, make_hardware(), catalog) is None
 
     def test_multilingual_corpora_get_a_multilingual_retriever(self, catalog):
-        """An English-only retriever fails silently on other languages — it
+        """An English-only retriever fails silently on other languages: it
         returns plausible-looking but wrong neighbours."""
         profile = UseCaseProfile(tasks=[Task.RAG], needs_embeddings=True,
                                  languages=["en", "zh", "ar"])

@@ -3,7 +3,7 @@
 Chosen when several people (or several agents) hit the endpoint at once: vLLM's
 paged attention and continuous batching hold throughput as concurrency rises,
 where single-stream engines collapse. It serves safetensors, not GGUF, so the
-shared-GGUF story does not apply — which is called out in the report rather than
+shared-GGUF story does not apply, which is called out in the report rather than
 quietly ignored.
 """
 
