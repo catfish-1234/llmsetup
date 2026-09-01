@@ -123,6 +123,11 @@ class ReasoningPlan:
     """Thinking budget for a hybrid-reasoning model."""
 
     effort: ReasoningEffort = ReasoningEffort.MEDIUM
+    #: Hard ceiling on thinking tokens. None leaves it unrestricted, which is
+    #: the engine default and fine for a human watching; an agent in a loop
+    #: wants a bound, because a model that thinks past its output budget
+    #: returns nothing at all.
+    token_budget: Optional[int] = None
     #: Keep the thinking block in the response. Agents parsing structured output
     #: usually want it stripped; a human debugging a wrong answer wants it kept.
     preserve: bool = False
@@ -144,15 +149,53 @@ class ReasoningPlan:
         return d
 
 
-@dataclass
-class SpeculativePlan:
-    """A small draft model guessing ahead for a large one.
+class SpecType(str, Enum):
+    """How the engine gets its draft tokens.
 
-    Pays off in proportion to how predictable the output is — strong on code and
-    structured text, weak on open-ended prose — so it is enabled per task rather
-    than globally.
+    Speculative decoding is one idea with several implementations, and they cost
+    wildly different amounts. Picking the right one matters more than tuning any
+    of them:
+
+    ``NONE``
+        Generate one token at a time.
+    ``MTP``
+        Multi-token prediction heads that ship inside the model file itself.
+        Nothing extra to download, a small extra KV context, and it needs no
+        second model to stay in memory. When a model has these, nothing else
+        competes.
+    ``DRAFT``
+        The classic pairing: a separate small model of the same vocabulary
+        guesses and the target verifies. Costs whatever the draft model weighs.
+    ``EAGLE3`` / ``DFLASH``
+        Purpose-trained draft heads, faster and more accurate than a generic
+        small model, but they only exist where somebody has trained and
+        published them for that specific target.
+    ``NGRAM``
+        Draft by pattern-matching against text already in the context. No second
+        model, no meaningful memory cost. It only helps when the output repeats
+        the input, which is exactly what summarising, extraction and editing do.
     """
 
+    NONE = "none"
+    MTP = "draft-mtp"
+    DRAFT = "draft-simple"
+    EAGLE3 = "draft-eagle3"
+    DFLASH = "draft-dflash"
+    NGRAM = "ngram-cache"
+
+
+@dataclass
+class SpeculativePlan:
+    """How this setup drafts ahead, and why.
+
+    A draft is a bet on the next few tokens being predictable, so it pays in
+    proportion to how predictable the output is: strong on code and structured
+    text, weak on open-ended prose. The exception is a model carrying its own
+    prediction heads, which costs so little that the bet is worth taking either
+    way.
+    """
+
+    spec_type: SpecType = SpecType.NONE
     draft_model_id: Optional[str] = None
     draft_quant: str = "Q4_K_M"
     draft_path: Optional[str] = None
@@ -168,16 +211,22 @@ class SpeculativePlan:
 
     @property
     def enabled(self) -> bool:
-        return bool(self.draft_model_id)
+        return self.spec_type is not SpecType.NONE
+
+    @property
+    def needs_draft_model(self) -> bool:
+        """Whether a second model file has to be present for this to work."""
+        return self.spec_type in (SpecType.DRAFT, SpecType.EAGLE3, SpecType.DFLASH)
 
     @property
     def notable(self) -> bool:
-        """Report when it is on, and when only memory stood in the way — that
+        """Report when it is on, and when only memory stood in the way. That
         second case tells the user what more VRAM would buy them."""
         return self.enabled or "spare" in self.rationale
 
     def to_dict(self) -> Dict[str, Any]:
         d = asdict(self)
+        d["spec_type"] = self.spec_type.value
         d["enabled"] = self.enabled
         return d
 
@@ -264,7 +313,12 @@ class ServingPlan:
     cache_reuse_tokens: int = 256
     chunked_prefill: bool = False
     max_batched_tokens: Optional[int] = None
-    defrag_threshold: float = 0.1
+    #: Prompt cache kept in system RAM, in MiB, so a conversation returned to
+    #: later skips its prefill. None leaves the server's own default alone.
+    cache_ram_mib: Optional[int] = None
+    #: Tokens pinned at the front of the prompt during a context shift. An agent
+    #: whose system prompt gets evicted forgets its own rules mid task.
+    keep_tokens: int = 0
     api_key: Optional[str] = None
     lora_adapters: List[str] = field(default_factory=list)
     rationale: str = ""

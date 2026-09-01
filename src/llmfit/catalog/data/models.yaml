@@ -322,6 +322,8 @@ models:
     kv_heads: 8
     head_dim: 64
     max_context: 131072
+    sliding_window: 128
+    swa_pattern: 2
     license: Apache-2.0
     commercial_ok: true
     quality_tier: 4
@@ -349,6 +351,8 @@ models:
     kv_heads: 8
     head_dim: 64
     max_context: 131072
+    sliding_window: 128
+    swa_pattern: 2
     license: Apache-2.0
     commercial_ok: true
     quality_tier: 5
@@ -374,6 +378,8 @@ models:
     kv_heads: 16
     head_dim: 128
     max_context: 131072
+    sliding_window: 1024
+    swa_pattern: 6
     license: Gemma
     commercial_ok: true
     quality_tier: 4
@@ -401,6 +407,8 @@ models:
     kv_heads: 8
     head_dim: 256
     max_context: 131072
+    sliding_window: 1024
+    swa_pattern: 6
     license: Gemma
     commercial_ok: true
     quality_tier: 3
@@ -426,6 +434,8 @@ models:
     kv_heads: 4
     head_dim: 256
     max_context: 131072
+    sliding_window: 1024
+    swa_pattern: 6
     license: Gemma
     commercial_ok: true
     quality_tier: 2
