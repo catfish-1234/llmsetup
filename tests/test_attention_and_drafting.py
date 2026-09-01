@@ -335,3 +335,50 @@ class TestSwaRepair:
 
         named = {s.name: s for s in STRATEGIES}
         assert named["full_swa_cache"].handles(sig.NEEDLE_NOT_FOUND)
+
+
+class TestProvisioningTheDraft:
+    """Not every kind of drafting has a second model, and the code that fetches
+    one has to know that or it fails on a plan that needs nothing."""
+
+    def _pipeline(self, catalog, tmp_path):
+        from llmfit.pipeline import Pipeline
+        from llmfit.util.log import Console
+
+        return Pipeline(UseCaseProfile(tasks=[Task.CODING]), make_hardware(),
+                        catalog, Console(quiet=True))
+
+    def _plan_with(self, spec_type, **kwargs):
+        from llmfit.tuning.profiles import AdvancedProfile, SpeculativePlan
+        from llmfit.types import RuntimeConfig
+
+        config = RuntimeConfig(runtime="llamacpp", model_id="m", quant="Q4_K_M",
+                               context_tokens=8192, gpu_layers=1, total_layers=1)
+        config.advanced = AdvancedProfile(
+            speculative=SpeculativePlan(spec_type=spec_type, **kwargs))
+        return config
+
+    @pytest.mark.parametrize("spec_type", [SpecType.MTP, SpecType.NGRAM])
+    def test_nothing_is_fetched_for_drafting_that_has_no_model(
+            self, catalog, tmp_path, spec_type):
+        from llmfit.runtimes.llamacpp import LlamaCppRuntime
+
+        pipeline = self._pipeline(catalog, tmp_path)
+        config = self._plan_with(spec_type)
+        pipeline._ensure_draft_model(LlamaCppRuntime(), config)
+        plan = config.advanced.speculative
+        assert plan.spec_type is spec_type, "the plan must survive untouched"
+        assert plan.draft_path is None
+
+    def test_a_missing_draft_model_turns_drafting_off_honestly(
+            self, catalog, tmp_path):
+        """Leaving the type set while clearing the model would report drafting
+        as on while emitting nothing for it."""
+        from llmfit.runtimes.llamacpp import LlamaCppRuntime
+
+        pipeline = self._pipeline(catalog, tmp_path)
+        config = self._plan_with(SpecType.DRAFT, draft_model_id="no-such-model")
+        pipeline._ensure_draft_model(LlamaCppRuntime(), config)
+        plan = config.advanced.speculative
+        assert plan.spec_type is SpecType.NONE
+        assert not plan.enabled

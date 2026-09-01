@@ -106,9 +106,12 @@ def plan_offload(
 
     budget = hardware.usable_accel_bytes
     weights = int(spec.params_b * 1e9 * bpw / 8)
-    from llmfit.planner.memory import kv_bytes_per_token, overhead_bytes
+    from llmfit.planner.memory import kv_cache_bytes, overhead_bytes
 
-    non_weight = int(kv_bytes_per_token(spec) * context_tokens) + overhead_bytes(spec)
+    # Sliding-window layers cap their cache, and gpt-oss is both a mixture of
+    # experts and windowed, so using the flat formula here would over-state the
+    # shortfall and move more experts to RAM than the model actually needs.
+    non_weight = kv_cache_bytes(spec, context_tokens) + overhead_bytes(spec)
     excess = (weights + non_weight) - budget
 
     if excess <= 0:
@@ -206,9 +209,9 @@ def plan_speculative(
 
     quant = draft.recommended_quants[0] if draft.recommended_quants else "Q4_K_M"
     draft_bytes = int(draft.params_b * 1e9 * catalog.bpw(quant) / 8)
-    from llmfit.planner.memory import kv_bytes_per_token
+    from llmfit.planner.memory import kv_cache_bytes
 
-    draft_bytes += int(kv_bytes_per_token(draft) * min(context_tokens, 8192))
+    draft_bytes += kv_cache_bytes(draft, min(context_tokens, 8192))
 
     headroom = hardware.usable_accel_bytes - candidate.estimate.total
     if hardware.gpus and draft_bytes > headroom:
