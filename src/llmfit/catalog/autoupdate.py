@@ -5,7 +5,7 @@ newer one on a cadence, so a model released after install still shows up.
 
 Four rules, because an auto-updater that misbehaves is worse than none:
 
-1. **Fail open.** Any failure — offline, DNS, a 500, malformed YAML — leaves the
+1. **Fail open.** Any failure at all (offline, DNS, a 500, malformed YAML) leaves the
    bundled catalog in place and the run continues. A model picker must not stop
    working because a refresh server is down.
 2. **Never block the user.** One short timeout, checked at most once per
@@ -35,7 +35,7 @@ from llmfit.util.fs import app_dir, ensure_dir, write_text
 from llmfit.util.log import Console
 
 #: Where updated catalogs come from. Points at this project's own catalog on
-#: main, which a scheduled workflow keeps current — so the repo is the
+#: main, which a scheduled workflow keeps current, so the repo is the
 #: distribution channel and there is no extra infrastructure to run.
 DEFAULT_CATALOG_URL = (
     "https://raw.githubusercontent.com/catfish-1234/Open-source-llm/"
@@ -219,7 +219,7 @@ def apply_update(console: Console, force: bool = False,
 
     count = len(document.get("models") or [])
     header = (
-        "# Auto-updated catalog, fetched by llmfit. Do not edit — it is replaced\n"
+        "# Auto-updated catalog, fetched by llmfit. Do not edit: it is replaced\n"
         f"# on each update. Source: {target}\n"
         "# Disable with LLMFIT_AUTO_UPDATE=0. Your own entries in other files in\n"
         "# this directory are layered on top of this one and are never touched.\n\n"

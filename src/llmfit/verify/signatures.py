@@ -1,4 +1,4 @@
-"""Failure signatures — the shared vocabulary between verify and repair.
+"""Failure signatures, the shared vocabulary between verify and repair.
 
 A check never explains *how* to fix something; it names *what went wrong* using
 one of these tokens. The repair table maps tokens to remediation strategies.
@@ -99,7 +99,7 @@ def classify(text: str) -> Optional[str]:
 
     Returning None rather than UNKNOWN_ERROR is deliberate: the caller decides
     whether an unrecognised error is worth a generic signature, and a wrong
-    classification is worse than none — it sends repair down the wrong path.
+    classification is worse than none, because it sends repair down the wrong path.
     """
     if not text:
         return None

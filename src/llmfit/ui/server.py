@@ -3,8 +3,8 @@
 A deliberate choice of shape: this is a localhost HTTP server built on the
 standard library, serving one static page, rather than an Electron app.
 
-The reasoning is that the value of this project is the *reasoning* — the fit
-maths, the verification, the repair ladder — not the chrome. An Electron app
+The reasoning is that the value of this project is the *reasoning*, the fit
+maths, the verification, the repair ladder. Not the chrome. An Electron app
 would add a Node toolchain, a build step, per-platform packaging, code signing,
 and a self-update mechanism, all of which need maintaining forever and none of
 which make a single recommendation better. A local page costs one file, works on
@@ -32,7 +32,7 @@ STATIC = Path(__file__).parent / "static"
 
 #: Only these Host headers are served. A browser page on another site can make
 #: requests to 127.0.0.1, and DNS rebinding can point a hostile domain at the
-#: loopback address — checking Host is what stops a random web page from driving
+#: loopback address. Checking Host is what stops a random web page from driving
 #: this server and reading the machine's hardware profile.
 def _allowed_hosts(port: int) -> set:
     return {
@@ -191,7 +191,7 @@ class Handler(BaseHTTPRequestHandler):
         return {"runtimes": rows}
 
     def _questions(self) -> Dict[str, Any]:
-        """The interview, as data — the same question bank the CLI wizard uses."""
+        """The interview, as data, the same question bank the CLI wizard uses."""
         from llmfit.interview.questions import QUESTIONS
 
         return {
@@ -274,7 +274,7 @@ def _setup_command(candidate, profile) -> str:
 
     The UI never runs a multi-gigabyte download behind a button press. It hands
     over the command instead, so the irreversible step stays an explicit,
-    inspectable choice — and so the terminal remains the source of truth.
+    inspectable choice, and so the terminal remains the source of truth.
     """
     parts = ["llmfit setup", f"--model {candidate.model.id}",
              f"--quant {candidate.quant}", f"--context {profile.context_tokens}"]

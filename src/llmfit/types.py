@@ -252,7 +252,7 @@ class ModelSpec:
     chat_template: Optional[str] = None
     recommended_quants: List[str] = field(default_factory=lambda: ["Q4_K_M"])
     #: Models sharing a vocabulary. Speculative decoding requires the draft and
-    #: target to tokenize identically, which publisher alone does not imply —
+    #: target to tokenize identically, which publisher alone does not imply:
     #: a distill, for instance, inherits its base model's tokenizer.
     tokenizer_family: Optional[str] = None
     #: True for small models worth using as a speculative draft.
@@ -315,7 +315,7 @@ class ModelSpec:
 
     @property
     def compute_params_b(self) -> float:
-        """Parameters that actually do work per token — drives speed, not memory."""
+        """Parameters that actually do work per token, drives speed, not memory."""
         return self.active_params_b or self.params_b
 
     def to_dict(self) -> Dict[str, Any]:
@@ -520,7 +520,7 @@ class CheckResult:
 
 @dataclass
 class RepairAction:
-    """One entry in the repair journal — what was changed and what it cost."""
+    """One entry in the repair journal, what was changed and what it cost."""
 
     strategy: str
     trigger: str
@@ -563,7 +563,7 @@ class SetupResult:
         """Verified working.
 
         Requires that checks ran *and* none of them blocks. An empty check list
-        is not success — it is an untested plan. The tool's central promise is
+        is not success. It is an untested plan, and the tool's central promise is
         that it never claims something works without a check backing it, and
         treating "nothing was tested" as a pass would break exactly that.
         """

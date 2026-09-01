@@ -147,7 +147,7 @@ def memory_bytes() -> Tuple[int, Optional[int]]:
 
 
 def _darwin_available(total: int) -> Optional[int]:
-    """Free + inactive + speculative pages from vm_stat — macOS 'free' is misleading."""
+    """Free + inactive + speculative pages from vm_stat, macOS 'free' is misleading."""
     result = run(["vm_stat"], timeout=5)
     if not result.ok:
         return None

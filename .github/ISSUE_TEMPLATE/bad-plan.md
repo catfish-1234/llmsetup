@@ -7,7 +7,7 @@ labels: plan
 **The report**
 
 <!-- Paste the output of `llmfit report --markdown`. It carries the machine,
-     the plan, and every decision with the reason it was made — which is what
+     the plan, and every decision with the reason it was made, which is what
      makes this fixable. It contains no credentials. -->
 
 **What actually happened**

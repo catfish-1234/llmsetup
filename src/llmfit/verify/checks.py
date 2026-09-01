@@ -1,7 +1,7 @@
 """The individual verification checks.
 
 Each check takes a :class:`CheckContext` and returns a :class:`CheckResult`. A
-check never raises — a check that blows up is itself a failure result, because
+check never raises. A check that blows up is itself a failure result, because
 the harness has to keep going and the repair loop needs the signature.
 
 Checks are selected by the user's :class:`UseCaseProfile`, so the suite proves
@@ -45,7 +45,7 @@ class CheckContext:
     server_log: Optional[str] = None
 
     def log_tail(self, lines: int = 60) -> str:
-        """Recent server output — errors that never reach the HTTP layer live here."""
+        """Recent server output, errors that never reach the HTTP layer live here."""
         if not self.server_log:
             return ""
         try:
@@ -101,7 +101,7 @@ def check_health(ctx: CheckContext) -> CheckResult:
     ids = [i for i in listing.get("ids", []) if i]
     wanted = ctx.client.endpoint.model
     if ids and not any(_names_match(wanted, str(i)) for i in ids):
-        # Serving *something*, but not what we configured — a real failure mode
+        # Serving *something*, but not what we configured, a real failure mode
         # when a previous model is still resident.
         return _fail(
             name, Severity.CRITICAL,
@@ -115,7 +115,7 @@ def check_health(ctx: CheckContext) -> CheckResult:
 def _names_match(wanted: str, served: str) -> bool:
     """Compare a requested model name against one the server reports.
 
-    Servers decorate names — LM Studio prefixes a publisher, Ollama appends a
+    Servers decorate names. LM Studio prefixes a publisher, Ollama appends a
     tag, llama.cpp may serve a filename. So an exact match is too strict. But a
     plain substring test is too loose: a short name matches almost anything,
     which turns "the wrong model is loaded" into a silent pass. The rule is
@@ -237,7 +237,7 @@ def check_context(ctx: CheckContext) -> CheckResult:
     """Needle-in-a-haystack at the configured context length.
 
     This is the check that catches the most common silent misconfiguration: a
-    server started with a smaller context than requested, which does not error —
+    server started with a smaller context than requested, which does not error
     it just truncates the prompt, and the model answers about text it never saw.
     """
     name = "context"
@@ -272,7 +272,7 @@ def check_context(ctx: CheckContext) -> CheckResult:
         return _fail(
             name, Severity.REQUIRED,
             f"the model could not retrieve a fact placed mid-prompt at "
-            f"~{actual_prompt_tokens:,} tokens — the prompt is likely being "
+            f"~{actual_prompt_tokens:,} tokens, so the prompt is likely being "
             f"silently truncated, or KV-cache quantization has degraded recall",
             sig.NEEDLE_NOT_FOUND,
             detail=f"expected {needle_code!r} in the answer, got: {text[:300]!r}",
@@ -359,7 +359,7 @@ def check_tools(ctx: CheckContext) -> CheckResult:
         return _fail(
             name, severity,
             ("the model described the tool call in prose instead of returning a "
-             "structured tool_calls field — the chat template is probably not "
+             "structured tool_calls field, the chat template is probably not "
              "being applied" if mentions else
              "the model did not call the tool at all"),
             sig.TOOLS_UNSUPPORTED if not mentions else sig.TOOL_CALL_MALFORMED,
@@ -643,7 +643,7 @@ def check_throughput(ctx: CheckContext) -> CheckResult:
         return CheckResult(
             name=name, status=CheckStatus.WARN, severity=Severity.ADVISORY,
             message=(f"{measured:.1f} tokens/s is far below the predicted "
-                     f"{predicted:.0f} — layers may have fallen back to CPU"),
+                     f"{predicted:.0f}, layers may have fallen back to CPU"),
             failure_signature=sig.THROUGHPUT_TOO_LOW, metrics=metrics,
         )
     return _pass(name, Severity.ADVISORY,
@@ -703,7 +703,7 @@ def check_prefill(ctx: CheckContext) -> CheckResult:
     if _long_prompt_workload(ctx.profile) and full_context_wait > _PREFILL_PATIENCE:
         return CheckResult(
             name=name, status=CheckStatus.WARN, severity=Severity.ADVISORY,
-            message=(f"{rate:.0f} tokens/s prompt processing — a full "
+            message=(f"{rate:.0f} tokens/s prompt processing, a full "
                      f"{ctx.config.context_tokens:,}-token prompt waits "
                      f"{full_context_wait:.0f}s before the first word, which "
                      f"this use case will hit routinely"),
@@ -807,7 +807,7 @@ def check_repetition(ctx: CheckContext) -> CheckResult:
     if ratio > 0.5:
         return _fail(
             name, Severity.ADVISORY,
-            f"{ratio:.0%} of the output is repeated phrasing — the model is "
+            f"{ratio:.0%} of the output is repeated phrasing, so the model is "
             f"looping, which usually means sampling is too greedy for this family",
             sig.REPETITION_LOOP, detail=text[:400], repetition_ratio=round(ratio, 3),
         )

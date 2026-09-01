@@ -1,8 +1,8 @@
 """Config snippets for everything that speaks the OpenAI API.
 
 Open WebUI, Continue, Aider, Zed and Cursor all just need a base URL, a model
-name and a dummy key. Rather than editing their config files — which are the
-user's, and which we would have to merge correctly — llmfit *emits* the exact
+name and a dummy key. Rather than editing their config files, which are the
+user's, and which we would have to merge correctly, llmfit *emits* the exact
 snippet for each and tells the user where it goes. That keeps the tool honest
 about what it changed and leaves their editor config intact.
 """

@@ -4,7 +4,7 @@ The decision is made in this order, because each rule dominates the ones below:
 
 1. The engine must exist for the platform (no CUDA-only vLLM on a Mac).
 2. The use case may demand one (real concurrency wants a batching server).
-3. Prefer what the user already has installed — a working setup they recognise
+3. Prefer what the user already has installed, a working setup they recognise
    beats a marginally better one they have to install.
 4. Fall back to the easiest thing to install.
 """
@@ -71,7 +71,7 @@ def choose_runtime(
     installed = {r.name for r in available_runtimes()}
 
     # 2. Concurrency demands a real batching server, and vLLM is the only one of
-    #    these built for it — but only where it can actually run.
+    #    these built for it, but only where it can actually run.
     if profile.concurrent_users >= 4 and hardware.os == "linux" and \
             hardware.accelerator is Accelerator.NVIDIA:
         if "vllm" in installed:

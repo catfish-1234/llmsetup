@@ -2,7 +2,7 @@
 
 Each test here corresponds to a confirmed, reproduced weakness. The catalog is
 designed to be extended, shared and (via `catalog refresh`) fetched, so catalog
-YAML is treated as untrusted input throughout — as is any GGUF file on disk.
+YAML is treated as untrusted input throughout, as is any GGUF file on disk.
 """
 
 from __future__ import annotations

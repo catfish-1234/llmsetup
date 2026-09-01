@@ -49,7 +49,7 @@ def build_plan(
                            sorted(reasons.items(), key=lambda kv: -kv[1]))
         raise PlanningError(
             "no model in the catalog satisfies your requirements",
-            hint=(f"filtered out — {detail}. "
+            hint=(f"filtered out. {detail} "
                   "Relax a requirement (shorter context, drop vision) "
                   "or add a model with `llmfit catalog add`."),
         )
@@ -128,7 +128,7 @@ def _build_candidate(
             estimate = candidate_estimate
             if kv_quant != "f16":
                 cost = ("negligible quality cost" if kv_quant == "q8_0" else
-                        "measurably weaker recall over long context — if answers "
+                        "measurably weaker recall over long context, if answers "
                         "start missing details far back in the prompt, this is why")
                 warnings.append(
                     f"KV cache quantized to {kv_quant} to fit "
@@ -199,7 +199,7 @@ def _dedupe_by_model(candidates: List[Candidate]) -> List[Candidate]:
     """Keep the best-scoring quant per model, then one alternate quant at most.
 
     Without this the top of the list is the same model at five quant levels,
-    which is useless as a fallback chain — the repair loop needs *different
+    which is useless as a fallback chain, the repair loop needs *different
     models* to fall back to, not the same one slightly smaller.
     """
     best_per_model: List[Candidate] = []
@@ -238,7 +238,7 @@ def _plan_notes(
         notes.append(
             f"{best.model.name} is a mixture-of-experts model: all "
             f"{best.model.params_b:g}B parameters must be resident, but only "
-            f"{best.model.compute_params_b:g}B run per token — it is much faster "
+            f"{best.model.compute_params_b:g}B run per token, so it is much faster "
             "than a dense model of the same size"
         )
     if best.model.is_reasoning:
@@ -257,7 +257,7 @@ def _too_big_hint(
     viable: List[ModelSpec], profile: UseCaseProfile, hardware: HardwareProfile,
     catalog: Catalog,
 ) -> str:
-    """When nothing fits, say what *would* — a number the user can act on."""
+    """When nothing fits, say what *would*, a number the user can act on."""
     budget = hardware.memory_budget
     smallest = min(viable, key=lambda s: s.params_b)
     quant = smallest.recommended_quants[-1] if smallest.recommended_quants else "Q4_K_M"

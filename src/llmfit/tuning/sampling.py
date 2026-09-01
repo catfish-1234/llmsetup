@@ -2,11 +2,11 @@
 
 Two things drive these, and both matter more than people expect:
 
-* **the model family** — reasoning models are trained to explore during their
+* **the model family**, reasoning models are trained to explore during their
   thinking phase and go into repetition loops at the low temperatures that suit
   an instruct model. Publishers state recommended values; using 0.7/0.9 for
   everything discards that.
-* **the task** — code and structured extraction want near-deterministic output;
+* **the task**. Code and structured extraction want near-deterministic output;
   creative writing wants the opposite. The same model should not be sampled the
   same way for both.
 """
@@ -36,7 +36,7 @@ class Sampling:
     stop: List[str]
     presence_penalty: float = 0.0
     rationale: str = ""
-    #: Where the base values came from — a publisher's model card, or our own
+    #: Where the base values came from, a publisher's model card, or our own
     #: task defaults. Reported so the user can tell the difference.
     source: str = ""
 
@@ -64,7 +64,7 @@ def sampling_for(spec: ModelSpec, profile: UseCaseProfile,
     Publisher recommendations win the base values where they exist. A model is
     tuned and benchmarked at specific settings, and substituting generic ones is
     a known cause of local output that is quietly worse than the model's
-    reputation — with nothing in the setup to point at.
+    reputation, with nothing in the setup to point at.
 
     The task then adjusts *within* what the publisher sanctions: nudging
     temperature down for code is reasonable, but replacing a stated presence
@@ -102,7 +102,7 @@ def sampling_for(spec: ModelSpec, profile: UseCaseProfile,
             notes.append(published.notes)
 
         # Determinism is a task preference, but never past what the publisher
-        # warns against — several families loop at temperature 0.
+        # warns against, several families loop at temperature 0.
         if profile.primary_task in _DETERMINISTIC and \
                 "temperature 0" not in published.avoid and \
                 "greedy decoding" not in published.avoid:
@@ -121,7 +121,7 @@ def sampling_for(spec: ModelSpec, profile: UseCaseProfile,
     if spec.is_reasoning and published is None:
         # Only when the publisher said nothing. Reasoning models degenerate into
         # loops when sampled too tightly, so a generic low task temperature is
-        # lifted to a safe floor — but a stated value is never overridden.
+        # lifted to a safe floor, but a stated value is never overridden.
         temperature = max(temperature, 0.6)
         top_p = max(top_p, 0.95)
         top_k = max(top_k, 20)
@@ -133,7 +133,7 @@ def sampling_for(spec: ModelSpec, profile: UseCaseProfile,
 
     stop: List[str] = []
     if profile.needs_json and profile.primary_task is Task.EXTRACT:
-        # Not a hard constraint — just stops runaway prose after a JSON object.
+        # Not a hard constraint, just stops runaway prose after a JSON object.
         stop = ["```", "\n\n\n"]
         notes.append("stop sequences added to keep structured output tight")
 

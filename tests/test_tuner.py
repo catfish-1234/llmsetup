@@ -30,7 +30,7 @@ class TestOffload:
         assert tuned.config.gpu_layers == 0
 
     def test_the_final_estimate_fits_the_budget(self, catalog):
-        """Whatever the tuner settles on must actually fit — the whole point."""
+        """Whatever the tuner settles on must actually fit, the whole point."""
         for vram in (8, 12, 16, 24, 48):
             hardware = make_hardware(vram_gb=vram, ram_gb=vram * 2)
             profile = UseCaseProfile(tasks=[Task.CODING], context_tokens=32768)

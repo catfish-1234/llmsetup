@@ -17,13 +17,13 @@ context length and is usually what actually decides your context ceiling: on a
 
 A note on units, because published figures mix them: everything here is in
 **bytes**. Model and file sizes are quoted in the wild in decimal GB (1e9),
-while GPU capacity is in binary GiB (2^30) — a 24 GB card really holds 24 GiB.
+while GPU capacity is in binary GiB (2^30), a 24 GB card really holds 24 GiB.
 Comparing the two directly is a 7% error in the dangerous direction, so the code
 never carries a unit-less "GB" number; it carries bytes and converts at display.
 
 **overhead** compute buffers, activations and the runtime's own allocation. This
 is an *empirical* model calibrated against observed llama.cpp/Ollama residency,
-not a derivation — it is documented as such and deliberately errs high, because
+not a derivation. It is documented as such and deliberately errs high, because
 underestimating here means an OOM at inference time instead of a smaller model
 at plan time.
 """
@@ -156,7 +156,7 @@ def kv_cache_bytes(spec: ModelSpec, context_tokens: int, kv_quant: str = "f16",
 
 
 def weight_bytes(spec: ModelSpec, bpw: float) -> int:
-    """Resident weight bytes. Uses total parameters — MoE experts are all resident."""
+    """Resident weight bytes. Uses total parameters. MoE experts are all resident."""
     return int(spec.params_b * 1e9 * bpw / 8)
 
 

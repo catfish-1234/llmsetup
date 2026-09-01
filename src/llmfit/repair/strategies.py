@@ -164,7 +164,7 @@ def _quantize_kv_lossy(state: RepairState) -> Optional[Outcome]:
     config.kv_cache_type = nxt
     config.flash_attention = True
     return Outcome(
-        f"took the KV cache down to {nxt} — this is past the point of being "
+        f"took the KV cache down to {nxt}. This is past the point of being "
         f"free: expect some answers to change, and raise the cache back to "
         f"q8_0 with a shorter context if quality matters more than length",
         cost="high", before=before, after={"kv_cache_type": nxt},
@@ -348,7 +348,7 @@ def _full_swa_cache(state: RepairState) -> Optional[Outcome]:
 
 
 def _restore_kv_precision(state: RepairState) -> Optional[Outcome]:
-    """Long-context recall failed — undo the KV quantization that caused it.
+    """Long-context recall failed, undo the KV quantization that caused it.
 
     The needle check failing while everything else passes is the signature of an
     over-quantized KV cache. The fix trades context back for precision, which is
@@ -377,7 +377,7 @@ def _restore_kv_precision(state: RepairState) -> Optional[Outcome]:
     config.kv_cache_type = better
     config.context_tokens = target
     return Outcome(
-        f"restored KV cache precision to {better} (context now {target:,} tokens) — "
+        f"restored KV cache precision to {better} (context now {target:,} tokens): "
         f"aggressive KV quantization was costing long-context recall",
         cost="medium", before=before,
         after={"kv_cache_type": better, "context_tokens": target},

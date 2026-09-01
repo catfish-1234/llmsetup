@@ -254,7 +254,7 @@ def cmd_detect(args, console: Console) -> int:
     console.info(f"free disk in the model store: {gb(hardware.disk_free_bytes)}")
     for gpu in hardware.gpus:
         free = f", {gb(gpu.vram_free_bytes)} free" if gpu.vram_free_bytes else ""
-        console.info(f"GPU {gpu.index}: {gpu.name} — {gb(gpu.vram_bytes)}{free}"
+        console.info(f"GPU {gpu.index}: {gpu.name}, {gb(gpu.vram_bytes)}{free}"
                      f"  flash-attention: "
                      f"{'yes' if gpu.supports_flash_attention else 'no'}")
     for warning in hardware.detection_warnings:
@@ -288,7 +288,7 @@ def cmd_plan(args, console: Console) -> int:
         return 0
 
     console.print(console.bold(f"Machine: {summarize_hardware(hardware)}"))
-    console.print(console.bold(f"Runtime: {plan.runtime} — {plan.runtime_reason}"))
+    console.print(console.bold(f"Runtime: {plan.runtime} - {plan.runtime_reason}"))
     console.print()
     console.print(console.bold(f"Top {min(args.top, len(plan.candidates))} for "
                                f"{', '.join(t.value for t in profile.tasks)} "
@@ -319,7 +319,7 @@ def cmd_plan(args, console: Console) -> int:
     if embedder:
         console.print()
         console.print(console.bold("Companion embedding model"))
-        console.info(f"{embedder.name} ({embedder.license}) — "
+        console.info(f"{embedder.name} ({embedder.license}): "
                      f"{embedder.max_context:,} token window")
     return 0
 
@@ -618,7 +618,7 @@ def cmd_runtimes(args, console: Console) -> int:
             console.ok(f"{row['label']}: installed"
                        + (f" ({row['version']})" if row["version"] else ""))
         else:
-            console.info(f"  - {row['label']}: not installed — {row['install']}")
+            console.info(f"  - {row['label']}: not installed. {row['install']}")
     return 0
 
 
@@ -721,7 +721,7 @@ def cmd_report(args, console: Console) -> int:
     if not Path(path).exists():
         raise LlmfitError(
             f"no saved report at {path}",
-            hint="run `llmfit setup` first — every run saves one",
+            hint="run `llmfit setup` first, every run saves one",
         )
     sys.stdout.write(Path(path).read_text(encoding="utf-8"))
     return 0

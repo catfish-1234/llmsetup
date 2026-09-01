@@ -31,7 +31,7 @@ def human_bytes(n: Optional[float]) -> str:
 
 
 def gb(n: Optional[float]) -> str:
-    """Format bytes as GiB with one decimal — the unit people think in."""
+    """Format bytes as GiB with one decimal, the unit people think in."""
     return "unknown" if n is None else f"{n / GIB:.1f} GB"
 
 

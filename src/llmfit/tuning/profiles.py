@@ -3,16 +3,16 @@
 Everything a serious local setup can be tuned on, as typed data rather than a
 bag of strings. These objects are what separate "it runs" from "it runs well":
 
-* :class:`SamplerChain` — the full decoding stack (DRY, XTC, top-n-sigma,
+* :class:`SamplerChain`, the full decoding stack (DRY, XTC, top-n-sigma,
   typical-p, mirostat), including the *order* samplers run in, which changes the
   output as much as the values do.
-* :class:`ReasoningPlan` — whether a hybrid model thinks, and how hard. Turning
+* :class:`ReasoningPlan`, whether a hybrid model thinks, and how hard. Turning
   thinking off takes time-to-first-token from seconds to fractions of one, so on
   a latency-sensitive task this is the single largest lever available.
-* :class:`SpeculativePlan` — a small draft model guessing ahead for a large one.
-* :class:`OffloadPlan` — where tensors live: GPU layers, per-GPU split, and the
+* :class:`SpeculativePlan`, a small draft model guessing ahead for a large one.
+* :class:`OffloadPlan`, where tensors live: GPU layers, per-GPU split, and the
   MoE expert offload that decides whether a 235B model runs on a 24 GB card.
-* :class:`RopePlan` — context extension past what the model was trained on.
+* :class:`RopePlan`, context extension past what the model was trained on.
 
 Each carries its own ``rationale`` so the report can explain the setting rather
 than just print it.
@@ -236,7 +236,7 @@ class OffloadPlan:
     """Where the tensors live.
 
     ``n_cpu_moe`` is the interesting one. A mixture-of-experts model is mostly
-    routed expert weights, and only a few experts fire per token — so those
+    routed expert weights, and only a few experts fire per token, so those
     weights can sit in system RAM while attention and the KV cache stay on the
     GPU. That trade is far cheaper for MoE than moving whole layers off a dense
     model, and it is what makes a 235B model runnable on a consumer card.
@@ -276,7 +276,7 @@ class RopePlan:
     """Context extension beyond the trained window.
 
     YaRN lets a model address more context than it was trained on, at a real
-    quality cost that grows with the scale factor — so this is only planned when
+    quality cost that grows with the scale factor, so this is only planned when
     the user asked for more context than the model natively has.
     """
 

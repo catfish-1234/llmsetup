@@ -102,7 +102,7 @@ def validate(text: str, console: Console, new_ids: List[str]) -> bool:
 
     Three gates, each catching a different way an auto-generated entry goes
     wrong: it must parse, its numbers must be plausible, and it must survive a
-    real planning run — which is what would actually expose a bad layer count.
+    real planning run, which is what would actually expose a bad layer count.
     """
     import tempfile
 

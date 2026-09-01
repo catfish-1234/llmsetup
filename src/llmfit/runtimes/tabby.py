@@ -1,6 +1,6 @@
 """TabbyAPI / ExLlamaV2 adapter.
 
-ExLlamaV2 is the fastest path for INT4 on a single modern NVIDIA card — its
+ExLlamaV2 is the fastest path for INT4 on a single modern NVIDIA card. Its
 EXL2 format is measurement-based and mixed-bit-width, and on one 3090/4090/5090
 nothing else matches it for batch-size-1 generation. TabbyAPI is the
 OpenAI-compatible server around it.
