@@ -82,7 +82,7 @@ button.go:disabled{opacity:.55;cursor:default}
 .meter{margin:10px 0 8px}
 .track{display:flex;height:26px;border-radius:5px;background:var(--surface-2);
   overflow:hidden;position:relative}
-/* 2px surface-coloured gap between touching segments — the separator is the
+/* 2px surface-coloured gap between touching segments. The separator is the
    gap, never a stroke. Rounded data-end on the last filled segment only. */
 .seg{position:relative;border-right:2px solid var(--surface-1);min-width:2px}
 .seg:last-of-type{border-right:0}
@@ -93,7 +93,7 @@ button.go:disabled{opacity:.55;cursor:default}
 .free{flex:1;background:transparent}
 .capline{position:absolute;inset:0;pointer-events:none;
   border:1px solid var(--border);border-radius:5px}
-/* Legend doubles as direct labelling — required relief for the light-mode
+/* Legend doubles as direct labelling, required relief for the light-mode
    contrast warning on the aqua slot, and identity is never colour-alone. */
 .legend{display:flex;flex-wrap:wrap;gap:14px;font-size:12px;margin-top:8px}
 .legend span{display:inline-flex;align-items:center;gap:6px;color:var(--text-secondary)}
@@ -161,7 +161,7 @@ summary{cursor:pointer;font-size:12.5px;color:var(--text-secondary)}
 const $ = (s, r) => (r || document).querySelector(s);
 const el = (t, c, txt) => { const n = document.createElement(t);
   if (c) n.className = c; if (txt != null) n.textContent = txt; return n; };
-const gb = n => (n == null ? "—" : n.toFixed(1) + " GB");
+const gb = n => (n == null ? "n/a" : n.toFixed(1) + " GB");
 
 let HW = null, ANSWERS = {
   tasks: ["chat"], context_tokens: 8192, priority: "balanced",
@@ -216,8 +216,8 @@ const TASKS = [
   ["rag", "My documents"], ["summarize", "Summarising"], ["creative", "Creative writing"],
   ["extract", "Structured data"], ["translate", "Translation"], ["vision", "Images"],
 ];
-const CONTEXTS = [[4096,"4K — short chats"],[8192,"8K — normal"],
-  [32768,"32K — long documents"],[65536,"64K — large sets"],[131072,"128K — everything"]];
+const CONTEXTS = [[4096,"4K, short chats"],[8192,"8K, normal"],
+  [32768,"32K, long documents"],[65536,"64K, large sets"],[131072,"128K, everything"]];
 const PRIORITIES = [["speed","Speed"],["balanced","Balanced"],["quality","Quality"]];
 const EXTRAS = [["needs_tools","Tool calling"],["needs_vision","Image input"],
   ["needs_json","Strict JSON"],["needs_embeddings","Embeddings / search"],
@@ -226,7 +226,7 @@ const EXTRAS = [["needs_tools","Tool calling"],["needs_vision","Image input"],
 function buildForm() {
   const f = $("#form");
   f.append(field("What will you use it for?",
-    "This decides more than your hardware does — it filters eligible models and " +
+    "This decides more than your hardware does. It filters eligible models and " +
     "selects the tests that must pass.",
     chips(TASKS, v => ANSWERS.tasks.includes(v), v => {
       const i = ANSWERS.tasks.indexOf(v);
@@ -241,7 +241,7 @@ function buildForm() {
       "The KV cache grows linearly with this and can outgrow the weights themselves.",
       CONTEXTS, ANSWERS.context_tokens, v => ANSWERS.context_tokens = +v),
     selectField("Speed or quality?",
-      "Shifts the ranking weights — it genuinely changes the answer.",
+      "Shifts the ranking weights, and genuinely changes the answer.",
       PRIORITIES, ANSWERS.priority, v => ANSWERS.priority = v),
     selectField("Concurrent users?",
       "Each one needs its own KV cache slot, so this multiplies memory.",
@@ -316,11 +316,11 @@ function render(plan) {
 
   const card = el("section", "card");
   card.append(el("h2", null, "What fits"),
-              el("p", "sec", "Runtime: " + plan.runtime + " — " + plan.runtime_reason));
+              el("p", "sec", "Runtime: " + plan.runtime + ". " + plan.runtime_reason));
   for (const n of plan.notes || []) card.append(el("p", "muted", n));
   if (plan.embedding_model) {
     card.append(el("p", "muted",
-      "Retrieval also needs an embedding model — " + plan.embedding_model.name +
+      "Retrieval also needs an embedding model: " + plan.embedding_model.name +
       " will be set up alongside it."));
   }
   plan.candidates.forEach((c, i) => card.append(candidate(c, i === 0)));
@@ -358,7 +358,7 @@ function candidate(c, isTop) {
 }
 
 /* Status is never colour alone: a dot plus a written label.
-   "Spills to CPU" only means something when there is a GPU to spill from — on a
+   "Spills to CPU" only means something when there is a GPU to spill from. On a
    CPU-only machine every model runs on the CPU by definition, and labelling
    that a failure would flag every option as broken. */
 function fitStatus(c) {

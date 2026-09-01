@@ -12,5 +12,5 @@ labels: catalog
 
 <!-- For a new model: what it is good at, so it can be matched to a use case.
      For a correction: the field, the value llmfit has, and where the right
-     value comes from. A link to the source beats a number on its own — the
+     value comes from. A link to the source beats a number on its own: the
      catalog records provenance for every entry. -->

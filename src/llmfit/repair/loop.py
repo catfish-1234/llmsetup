@@ -12,7 +12,7 @@ Three rules keep it from thrashing:
    of the strategy table.
 2. **Bounded.** ``max_repairs`` caps total work on top of that, so a pathological
    machine produces a reported outcome rather than a long hang. There is
-   deliberately no per-signature cap — a hard memory limit legitimately needs to
+   deliberately no per-signature cap, a hard memory limit legitimately needs to
    escalate through every rung of the ladder, and cutting that short leaves the
    user with a setup that still does not work.
 3. **Journalled.** Every action records its trigger, what changed, and the cost,
@@ -116,7 +116,7 @@ class RepairLoop:
     def _switch_candidate(self, outcome: Outcome) -> None:
         """Adopt a different model, re-deriving its settings from scratch.
 
-        Carrying the old model's tuning across would be wrong — layer counts,
+        Carrying the old model's tuning across would be wrong, layer counts,
         memory footprint and sampling defaults are all model-specific.
         """
         from llmfit.tuning import tune

@@ -1,7 +1,7 @@
 """The local web UI.
 
 It is a thin client over the same functions the CLI uses, so these tests cover
-the seam — routing, serialisation and the security guard — rather than
+the seam (routing, serialisation and the security guard) rather than
 re-testing the planner through HTTP.
 """
 

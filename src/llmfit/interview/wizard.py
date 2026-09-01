@@ -2,9 +2,9 @@
 
 Three ways in, one output:
 
-* interactive — a TTY wizard,
-* ``--answers profile.yaml`` — for scripting and repeatability,
-* CLI flags — for one-liners.
+* interactive, a TTY wizard,
+* ``--answers profile.yaml``, for scripting and repeatability,
+* CLI flags, for one-liners.
 
 All three converge on the same answers dict, which :func:`profile_from_answers`
 validates into a :class:`UseCaseProfile`. That single path is why a scripted run
@@ -71,7 +71,7 @@ def _ask(question: Question, console: Console, emit, reader) -> Any:
 
 def _render_options(options: List[Option], console: Console, emit) -> None:
     for index, option in enumerate(options, 1):
-        hint = console.dim(f"  — {option.hint}") if option.hint else ""
+        hint = console.dim(f"  ({option.hint})") if option.hint else ""
         emit(f"  {index}) {option.label}{hint}")
 
 

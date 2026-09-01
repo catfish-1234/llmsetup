@@ -110,7 +110,7 @@ class OpenAIClient:
         """Stream a completion, measuring time to first token.
 
         TTFT is the number people actually feel, and it cannot be recovered from
-        a buffered request — which is the whole reason this exists separately.
+        a buffered request, which is the whole reason this exists separately.
         """
         body = {
             "model": self.endpoint.model,

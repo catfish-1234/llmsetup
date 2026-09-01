@@ -59,7 +59,7 @@ def score_candidate(
 
     score = sum(components[k] * weights[k] for k in weights)
 
-    # A model that does not fit on the accelerator is not merely lower-scoring —
+    # A model that does not fit on the accelerator is not merely lower-scoring:
     # it is a different experience. Apply a multiplicative penalty so a partially
     # offloaded large model never edges out a smaller one that fits.
     if not candidate.fits_on_gpu and hardware.gpus:

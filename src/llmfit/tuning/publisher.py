@@ -5,7 +5,7 @@ evaluated with, and those values are not interchangeable between families:
 Qwen3 asks for a presence penalty of 1.5 in non-thinking mode where most models
 want none, and its thinking mode wants a different temperature again.
 
-Ignoring that is a known cause of bad local output — the model behaves worse
+Ignoring that is a known cause of bad local output, the model behaves worse
 than its benchmarks for reasons the user cannot see. So a publisher's numbers
 are the **base**, and the task profile only adjusts within what the publisher
 sanctions rather than overriding it wholesale.
@@ -48,7 +48,7 @@ RECOMMENDATIONS: Dict[str, Dict[str, Recommendation]] = {
             code_presence_penalty=0.0,
             source="Qwen3 model card / technical report",
             notes=("Qwen3 asks for a presence penalty of 1.5 in non-thinking mode, "
-                   "which is unusual — it suppresses the repetition this family is "
+                   "which is unusual. It suppresses the repetition this family is "
                    "prone to. The publisher drops it to 0 for code, where repeated "
                    "tokens are legitimate."),
             avoid=["greedy decoding"],
@@ -86,7 +86,7 @@ RECOMMENDATIONS: Dict[str, Dict[str, Recommendation]] = {
         "instruct": Recommendation(
             temperature=1.0, top_p=0.95, top_k=64, min_p=0.0,
             source="Gemma 3 model card",
-            notes=("Gemma 3 is evaluated at temperature 1.0 with a wide top-k — "
+            notes=("Gemma 3 is evaluated at temperature 1.0 with a wide top-k, "
                    "much looser than most families. Turning it down to the usual "
                    "0.7 makes it noticeably flatter than its benchmarks suggest."),
         ),
@@ -95,7 +95,7 @@ RECOMMENDATIONS: Dict[str, Dict[str, Recommendation]] = {
         "instruct": Recommendation(
             temperature=0.15, top_p=1.0, top_k=-1,
             source="Mistral Small 3.x model card",
-            notes=("Mistral Small 3.x is tuned for a very low temperature — the "
+            notes=("Mistral Small 3.x is tuned for a very low temperature, the "
                    "publisher recommends 0.15, far below the common default."),
         ),
     },
@@ -120,7 +120,7 @@ RECOMMENDATIONS: Dict[str, Dict[str, Recommendation]] = {
 def lookup(family: str, thinking: bool) -> Optional[Recommendation]:
     """The publisher's settings for a family and mode, if stated.
 
-    Falls back from the requested mode to the other one — a family that
+    Falls back from the requested mode to the other one, a family that
     publishes only instruct values is better guidance for a thinking run than
     generic defaults are.
     """

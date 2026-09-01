@@ -149,7 +149,7 @@ class TestOpenAiSnippets:
         assert options["contextLength"] == config.context_tokens
 
     def test_docker_networking_is_called_out_for_open_webui(self, emitted):
-        """127.0.0.1 inside a container is the container — the single most
+        """127.0.0.1 inside a container is the container, the single most
         common reason Open WebUI cannot reach a local model."""
         assert "host.docker.internal" in emitted["open_webui"]["content"]
 

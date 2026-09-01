@@ -108,7 +108,7 @@ def _as_bytes(value) -> Optional[int]:
     if value is None or value == "":
         return None
     if isinstance(value, (int, float)):
-        # Bare numbers are GB — the unit people speak in.
+        # Bare numbers are GB, the unit people speak in.
         return int(value * GIB) if value < 4096 else int(value)
     return parse_size(str(value))
 
