@@ -261,10 +261,11 @@ _NUMERIC_FIELDS = {
     "params_b": float, "active_params_b": float, "layers": int,
     "hidden_size": int, "kv_heads": int, "head_dim": int, "max_context": int,
     "quality_tier": int, "max_disk_gb": float,
+    "sliding_window": int, "swa_pattern": int,
 }
 _BOOL_FIELDS = (
     "commercial_ok", "supports_tools", "supports_vision", "supports_json",
-    "is_reasoning", "is_embedding",
+    "is_reasoning", "is_embedding", "draft_capable", "mtp_heads",
 )
 _LIST_FIELDS = ("tasks", "languages", "recommended_quants")
 
