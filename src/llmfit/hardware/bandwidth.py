@@ -99,7 +99,7 @@ def estimated_gpu_bandwidth_bytes(gpu: GPU) -> int:
 
 
 def cpu_bandwidth_bytes(hw: HardwareProfile) -> int:
-    """System RAM bandwidth — the ceiling for any layer that isn't offloaded."""
+    """System RAM bandwidth, the ceiling for any layer that isn't offloaded."""
     if hw.unified_memory and hw.gpus:
         return estimated_gpu_bandwidth_bytes(hw.gpus[0])
     name = hw.cpu_name.lower()

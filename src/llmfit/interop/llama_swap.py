@@ -6,7 +6,7 @@ without keeping them all resident. That is exactly the shape of a machine where
 VRAM only fits one model at a time but the user wants several available.
 
 llmfit already knows each model's tuned command line, which is the hard part of
-a llama-swap config — so generating one is close to free and saves the user
+a llama-swap config, so generating one is close to free and saves the user
 hand-writing a launch command per model.
 """
 

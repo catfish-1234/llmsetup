@@ -77,7 +77,7 @@ def stream_lines(
 ) -> Iterator[str]:
     """Yield decoded lines from a streaming (SSE / NDJSON) response.
 
-    Used by the streaming check, which measures time-to-first-token — a number
+    Used by the streaming check, which measures time-to-first-token, a number
     you cannot get from a buffered request.
     """
     hdrs = {"Content-Type": "application/json", "Accept": "text/event-stream", **(headers or {})}

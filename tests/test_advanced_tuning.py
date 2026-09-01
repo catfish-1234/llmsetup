@@ -1,7 +1,7 @@
 """Deep configuration: placement, drafting, thinking budget, samplers, RoPE.
 
 These are the settings that separate "it runs" from "it runs well", and several
-change what is runnable at all — MoE expert offload most of all.
+change what is runnable at all. MoE expert offload most of all.
 """
 
 from __future__ import annotations
@@ -399,7 +399,7 @@ class TestServing:
 
 
 class TestLlamaSwap:
-    """One endpoint serving several models on demand — the right shape when
+    """One endpoint serving several models on demand, the right shape when
     VRAM fits one model at a time but the user wants a choice."""
 
     def _entries(self, catalog):

@@ -6,7 +6,7 @@ disk we read the real block count, KV head count and embedding width and
 recompute the memory plan against those. This is what stops a wrong catalog
 guess from turning into an OOM at inference time.
 
-Only the header is read — never the tensor data — so this is fast even on a
+Only the header is read, never the tensor data, so this is fast even on a
 70 GB file.
 """
 

@@ -2,7 +2,7 @@
 
 Questions are data so the same definitions drive the interactive wizard, the
 non-interactive answers file, and the CLI flag validation. Each carries the
-*reason* it is asked, which the wizard shows — people give better answers when
+*reason* it is asked, which the wizard shows, people give better answers when
 they know why a question matters, and "how long is your context" is meaningless
 without knowing it decides model size.
 """
@@ -66,11 +66,11 @@ PRIORITY_OPTIONS = [
 ]
 
 CONTEXT_OPTIONS = [
-    Option("4096", "4K — short chats", "smallest memory footprint"),
-    Option("8192", "8K — normal conversation", "a sensible default"),
-    Option("32768", "32K — long documents, codebases", "costs real VRAM"),
-    Option("65536", "64K — large document sets", "often decides the model size"),
-    Option("131072", "128K — everything at once", "the KV cache may exceed the weights"),
+    Option("4096", "4K, short chats", "smallest memory footprint"),
+    Option("8192", "8K, normal conversation", "a sensible default"),
+    Option("32768", "32K, long documents and codebases", "costs real VRAM"),
+    Option("65536", "64K, large document sets", "often decides the model size"),
+    Option("131072", "128K, everything at once", "the KV cache may exceed the weights"),
 ]
 
 QUESTIONS: List[Question] = [
@@ -129,7 +129,7 @@ QUESTIONS: List[Question] = [
     Question(
         key="needs_embeddings",
         prompt="Do you need embeddings (for search or RAG)?", kind="bool", default=None,
-        why="Adds a second, small embedding model — a chat model makes a poor "
+        why="Adds a second, small embedding model, a chat model makes a poor "
             "retriever, so these are separate jobs.",
         when=lambda a: "rag" not in a.get("tasks", []),
     ),

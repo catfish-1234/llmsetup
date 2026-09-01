@@ -299,7 +299,7 @@ def download_file(
 
 
 def make_progress_printer(console, label: str) -> Callable[[int, Optional[int]], None]:
-    """Throttled progress callback — one line, rewritten, at most 5x/second."""
+    """Throttled progress callback, one line, rewritten, at most 5x/second."""
     state = {"last": 0.0, "started": time.monotonic()}
 
     def report(done: int, total: Optional[int]) -> None:

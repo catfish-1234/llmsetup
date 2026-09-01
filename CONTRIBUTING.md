@@ -31,7 +31,7 @@ python scripts/update_catalog.py --add <hf-repo-id>
 ```
 
 That fetches the config, derives the fields llmfit needs, and marks provenance
-honestly. Check the diff before committing — particularly `params_b`, `layers`,
+honestly. Check the diff before committing, particularly `params_b`, `layers`,
 `kv_heads` and `head_dim`, which drive the memory model.
 
 The catalog also refreshes itself on a schedule, so a model that is merely
@@ -53,7 +53,7 @@ model store, LM Studio folder, or saved profiles.
 The decision logic is deliberately pure: interview, planning, tuning and repair
 are dataclass transformations with no I/O, which is why the whole suite runs in
 seconds on a laptop with no accelerator. Keep new logic on that side of the line
-where you can — if a function needs a GPU or the network to be tested, it is
+where you can. If a function needs a GPU or the network to be tested, it is
 usually doing two jobs.
 
 ## Reporting a bad plan
@@ -62,7 +62,7 @@ This is the most useful bug report there is, and it needs three things:
 
 1. `llmfit report --markdown` from the run (it contains the machine, the plan,
    and every decision with its reason).
-2. What actually happened — the error, or the speed you measured.
+2. What actually happened: the error, or the speed you measured.
 3. What you expected.
 
 Do not paste tokens or API keys; the report does not contain any, and llmfit

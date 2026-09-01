@@ -1,9 +1,9 @@
 # llmfit
 
-**Interview-driven setup for local open-weight LLMs.** It asks what you're going
-to do, looks at your machine, picks the model, tunes the runtime, *proves the
-setup works*, fixes it when it doesn't, and registers the result with LM Studio,
-Ollama, Jan and everything else you already use.
+Setup assistant for local open-weight LLMs. It asks what you're going to do
+with a model, looks at your machine, picks one, tunes the runtime for it, tests
+that the result actually works, fixes it when it doesn't, and registers it with
+LM Studio, Ollama, Jan and whatever else you already use.
 
 ```bash
 pip install -e .
@@ -17,16 +17,16 @@ llmfit setup
 Running a local model means answering a chain of questions where every answer
 depends on the last one:
 
-1. Which of the hundreds of models? (and the right answer changed last month)
-2. Which quantization? — depends on your VRAM **and** how long your context is
-3. Which runtime? — Ollama, llama.cpp, vLLM, LM Studio, MLX
-4. Which flags? — `-ngl`, `--ctx-size`, `--cache-type-k`, `--parallel`, …
-5. Does it actually do what you needed? Tool calling? JSON? 64K context?
-6. When it doesn't, *why*, and what do you change?
-7. Can you still open it in LM Studio, or is it stuck in one tool?
+1. Which of the hundreds of models, given that the right answer changed last month
+2. Which quantization, which depends on your VRAM and on how long your context is
+3. Which runtime: Ollama, llama.cpp, vLLM, LM Studio, MLX
+4. Which flags: `-ngl`, `--ctx-size`, `--cache-type-k`, `--parallel`, and so on
+5. Whether it does what you needed. Tool calling? JSON? 64K context?
+6. When it doesn't, why, and what to change
+7. Whether you can still open it in LM Studio, or it is stuck in one tool
 
-`llmfit` answers all seven, in order, and **verifies each answer instead of
-asserting it**.
+llmfit works through all seven in order, and tests each answer rather than
+claiming it.
 
 ## What a run looks like
 
@@ -43,10 +43,10 @@ Let's work out what you need.
     Qwen3.8 27B at Q4_K_M: strongest output quality in what fits.
 
 ==> Tuning
-    gpu_layers = 62 (all) — the whole model and its KV cache fit in 22.1 GB
-    flash_attention = on — reduces KV cache memory and speeds up prefill
-    threads = 4 — fully on the GPU, so only a few CPU threads are needed
-    sampling = temp=0.2 top_p=0.95 — code wants near-deterministic output
+    gpu_layers = 62 (all): the whole model and its KV cache fit in 22.1 GB
+    flash_attention = on: reduces KV cache memory and speeds up prefill
+    threads = 4: fully on the GPU, so only a few CPU threads are needed
+    sampling = temp=0.2 top_p=0.95: code wants near-deterministic output
 
 ==> Provisioning        [downloads once, into a shared store]
 ==> Starting the server
@@ -56,7 +56,7 @@ Let's work out what you need.
 
 ==> Repairing
   restore_kv_precision [medium]: restored KV cache precision to f16
-    (context now 49,152 tokens) — aggressive KV quantization was costing recall
+    (context now 49,152 tokens): aggressive KV quantization was costing recall
   ✓ context: retrieved a fact from the middle of a ~36,000-token prompt
 
 ==> Registering with your other apps
@@ -73,15 +73,15 @@ interview → detect → plan → tune → provision → verify ⇄ repair → i
 (what for?) (what on?) (what?) (how?)  (install)   (does it?)      (everywhere)
 ```
 
-The interesting logic — fit maths, tuning, failure diagnosis — is a **pure
-function over data**, so it is tested without a GPU, without a network and
+The parts that make decisions (fit maths, tuning, failure diagnosis) are pure
+functions over data, so they can be tested without a GPU, without a network and
 without any inference engine installed. Only three stages touch the outside
 world, each behind a narrow seam. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ### The memory model
 
-Sizing is computed, not guessed with rules of thumb — rules of thumb are what
-get people OOM-killed at 32K context:
+Sizing is computed rather than guessed at. Rules of thumb are what get people
+OOM-killed at 32K context:
 
 ```
 weights   = params × bits_per_weight / 8          # MoE: TOTAL params, all resident
@@ -89,21 +89,27 @@ kv_cache  = 2 × layers × kv_heads × head_dim × context × bytes_per_element
 overhead  = compute buffers + activations + runtime fixed cost
 ```
 
-Two details that are usually wrong elsewhere:
+Three details that calculators usually get wrong:
 
-- **GQA-aware.** Using `kv_heads`, not attention heads. Every modern model uses
-  grouped-query attention, and ignoring it overstates the cache several-fold.
-- **MoE modelled twice.** *Total* parameters for memory (every expert is
-  resident), *active* parameters for speed. Conflating those is the single most
-  common local-LLM sizing mistake.
+- **Grouped-query attention.** The cache is sized by `kv_heads`, not by
+  attention heads. Every modern model uses GQA, and ignoring it overstates the
+  cache several times over.
+- **Mixture of experts, counted twice.** Total parameters for memory, because
+  every expert stays resident, and active parameters for speed. Conflating the
+  two is the most common local sizing mistake there is.
+- **Sliding windows.** Some models interleave layers that attend globally with
+  layers that only attend inside a fixed window, and the windowed ones stop
+  caching once the window fills. Treating them as global put Gemma 3 27B at
+  15.5 GB of predicted cache at 32K against a real 2.9 GB, which is the
+  difference between fitting a 24 GB card and being ruled out of the plan.
 
 The KV term is why the interview asks about context up front: on a 24 GB card,
 the difference between 8K and 128K is the difference between a 32B model and a
-14B one — and at 128K a 14B model's cache costs more than its weights.
+14B one, and at 128K a 14B model's cache costs more than its weights.
 
-Throughput is predicted from physics rather than vibes — decode is
-memory-bandwidth bound, so `tokens/sec ≈ bandwidth / active_weight_bytes` — and
-the verifier measures the real number and compares. A large shortfall is
+Throughput comes from the physics rather than from a feel for it. Decode is
+memory-bandwidth bound, so `tokens/sec ≈ bandwidth / active_weight_bytes`, and
+the verifier measures the real number and compares the two. A large shortfall is
 diagnostic: it usually means layers silently fell back to CPU.
 
 ### Verification
@@ -115,13 +121,13 @@ answers, so a stated requirement is a tested one:
 |---|---|
 | `health` | server down; a *different* model still resident |
 | `completion` | corrupt quantization, mis-applied chat template |
-| `context` | **silent prompt truncation** — the server quietly ignoring your context setting |
+| `context` | **silent prompt truncation**: the server quietly ignoring the context setting you gave it |
 | `tool_calling` | the model describing a tool call in prose instead of emitting one |
 | `json_output` | schema-invalid structured output |
 | `embeddings` | vectors that don't separate meaning (broken pooling ruins retrieval) |
 | `vision` | a missing projector: the model answering about an image it cannot see |
 | `throughput` | layers that silently fell back to CPU |
-| `prefill` | prompt processing too slow to use — the number RAG and agents wait on |
+| `prefill` | prompt processing too slow to use, which is the number RAG and agents wait on |
 | `stability` | leaks that only appear on the *second* request |
 | `repetition` | degenerate loops from sampling that's too greedy |
 
@@ -132,7 +138,7 @@ repair.
 
 Asking for RAG provisions **two** models: the chat model, and a separate
 embedding model chosen for your languages (a multilingual corpus gets a
-multilingual retriever — an English-only one returns plausible-looking but wrong
+multilingual retriever, because an English-only one returns plausible but wrong
 neighbours). The retriever is verified like everything else, and a failure there
 is reported rather than dressed up: a chat model makes a poor retriever, and
 silently shipping one would degrade retrieval invisibly.
@@ -140,19 +146,19 @@ silently shipping one would degrade retrieval invisibly.
 ### Deep configuration
 
 Past the obvious knobs, the tuner plans the settings that actually separate "it
-runs" from "it runs well" — and each is reported with why it was chosen:
+runs" from "it runs well". Each is reported with the reason it was chosen:
 
 | | |
 |---|---|
-| **MoE expert offload** | A mixture-of-experts model is ~96% routed expert weights, and only a few experts fire per token. Those stacks go to system RAM while attention and the KV cache stay on the GPU. This is what makes a 117B model runnable on a 12 GB card — and it costs far less speed than moving whole layers, because only *active* parameters cross. |
-| **Speculative decoding** | A small draft model guesses ahead and the target verifies in one pass. llmfit picks the draft from the catalog — same vocabulary, ≥5x smaller — and only when the task has predictable output and there is memory to spare. |
+| **MoE expert offload** | A mixture-of-experts model is ~96% routed expert weights, and only a few experts fire per token. Those stacks go to system RAM while attention and the KV cache stay on the GPU. This is what makes a 117B model runnable on a 12 GB card, and it costs far less speed than moving whole layers, because only *active* parameters cross. |
+| **Speculative decoding** | Drafting ahead and verifying in one pass, in whichever form the model supports. Some models carry multi-token prediction heads inside their own weights, which costs no download and no second resident model, so nothing else competes when a build has them. Failing that, a small draft model from the catalog (same vocabulary, at least 5x smaller) when the task has predictable output and there is memory to spare. Failing that, drafting from the prompt itself, which costs nothing and pays when the answer quotes its source. Whether a build has the heads is read out of the file, because publishers ship an MTP build and a plain build of the same model. |
 | **Reasoning budget** | `--reasoning on/off` and effort tiers. Suppressing the thinking block takes time-to-first-token from seconds to a fraction of one, so extraction and translation get it off while agents keep it. |
-| **Publisher-recommended sampling** | Model authors publish the settings they evaluated their own model with, and those beat any generic default. Qwen3 in thinking mode wants `temp 0.6 / top-p 0.95`; the same model with thinking off wants `0.7 / 0.8` and a presence penalty of 1.5; Gemma 3 wants `temp 1.0 / top-k 64`; Mistral wants `0.15`. llmfit starts from the card for the family *and the mode it will actually run in*, then lets the task adjust only within what the publisher sanctioned — and refuses an adjustment the card explicitly warns against, such as greedy decoding on a Qwen3 reasoning model, which sends it into infinite repetition. Every entry cites its source. |
-| **Full sampler chain** | DRY, XTC, top-n-sigma, typical-p, mirostat, penalty windows — and the *order* they run in, which changes output as much as the values. Code gets no repetition penalties at all, because repeated tokens in code are usually correct. |
+| **Publisher-recommended sampling** | Model authors publish the settings they evaluated their own model with, and those beat any generic default. Qwen3 in thinking mode wants `temp 0.6 / top-p 0.95`; the same model with thinking off wants `0.7 / 0.8` and a presence penalty of 1.5; Gemma 3 wants `temp 1.0 / top-k 64`; Mistral wants `0.15`. llmfit starts from the card for the family *and the mode it will actually run in*, then lets the task adjust only within what the publisher sanctioned. It refuses an adjustment the card explicitly warns against, such as greedy decoding on a Qwen3 reasoning model, which sends it into infinite repetition. Every entry cites its source. |
+| **Full sampler chain** | DRY, XTC, top-n-sigma, typical-p, mirostat, penalty windows, and the *order* they run in, which changes output as much as the values. Code gets no repetition penalties at all, because repeated tokens in code are usually correct. |
 | **RoPE / YaRN** | Context past the trained window, planned only when you ask for more than the model natively has, with the quality cost stated. |
 | **Multi-GPU** | Tensor split proportional to VRAM, with the largest card holding the KV cache. |
-| **Dynamic quantizations** | Not every layer deserves the same precision. Dynamic/imatrix builds (`UD-Q4_K_XL`) keep the layers that hurt most under quantization at higher precision and squeeze the rest, and measure better than the plain K-quant of the same size. llmfit prefers them when the repo publishes one and falls back cleanly when it doesn't — while still honouring an explicit quant you asked for. |
-| **Vision projector** | A vision model is two files: the language model and a separate projector that turns image embeddings into tokens. Download only the first and the endpoint accepts images and answers about what it cannot see — confidently. llmfit fetches the projector alongside the weights, prefers a full-precision one (vision towers degrade faster under quantization than the language model does, and the file is small), budgets memory for it, links it into LM Studio beside the model, and can repair a setup that is missing it. |
+| **Dynamic quantizations** | Not every layer deserves the same precision. Dynamic/imatrix builds (`UD-Q4_K_XL`) keep the layers that hurt most under quantization at higher precision and squeeze the rest, and measure better than the plain K-quant of the same size. llmfit prefers them when the repo publishes one and falls back cleanly when it doesn't, while still honouring an explicit quant you asked for. |
+| **Vision projector** | A vision model is two files: the language model and a separate projector that turns image embeddings into tokens. Download only the first and the endpoint accepts images and answers, confidently, about what it cannot see. llmfit fetches the projector alongside the weights, prefers a full-precision one (vision towers degrade faster under quantization than the language model does, and the file is small), budgets memory for it, links it into LM Studio beside the model, and can repair a setup that is missing it. |
 | **Serving** | Continuous batching, prefix caching (the biggest win for agents and RAG, where a long prefix repeats every turn), chunked prefill. |
 
 A simple setup still produces a simple command line: everything here stays off
@@ -161,28 +167,41 @@ decisions that were actually made.
 
 ### The machine, not just the engine
 
-Some of the biggest wins are not flags at all — they are settings on the machine
+Some of the biggest wins are not flags at all. They are settings on the machine
 that the engine cannot reach, and llmfit reports them as explicit, opt-in steps
 with the reason attached rather than running them behind your back:
 
-- **Apple Silicon** — macOS caps how much unified memory the GPU may wire down
+- **Apple Silicon.** macOS caps how much unified memory the GPU may wire down
   (roughly 65–75% of RAM). A model that fits in principle will fall back to CPU
   without `sudo sysctl iogpu.wired_limit_mb=N`. llmfit raises it only when the
   plan actually exceeds the default budget, and never above 85% of RAM, so the
   OS keeps room to breathe.
-- **AMD** — ROCm ships kernels for a subset of GFX targets. Cards that need
+- **AMD.** ROCm ships kernels for a subset of GFX targets. Cards that need
   `HSA_OVERRIDE_GFX_VERSION` to run at all (RDNA1/2, the 780M-class iGPUs) get
   the right value; cards that are natively supported are left alone, because
   setting it there makes things worse.
-- **NUMA** — on a multi-socket Linux box doing CPU-resident work, memory
-  interleaving is worth real throughput. Suggested only there — never on Apple
+- **NUMA.** On a multi-socket Linux box doing CPU-resident work, memory
+  interleaving is worth real throughput. Suggested only there, never on Apple
   unified memory, where the idea does not apply.
+
+### Flags the installed binary actually has
+
+llama.cpp renames and retires flags between releases, and people run whatever
+their package manager last shipped. A command written against today's
+documentation fails on a perfectly good older build, and one written against an
+old build gives up features the new one has.
+
+So llmfit asks the binary. `--help` lists every flag it accepts, which turns
+that whole class of breakage into a question with an answer: anything the build
+does not recognise is dropped, and the setup runs with one feature less instead
+of the server refusing to start behind 400 lines of usage text. The answer is
+cached per binary, so it costs one subprocess per install.
 
 ### Where a saving stops being free
 
 Not every memory saving is worth taking, and the difference is measurable rather
 than a matter of taste. A `q8_0` KV cache halves what context costs and measures
-as effectively lossless against `f16` — a handful of changed answers in five
+as effectively lossless against `f16`: a handful of changed answers in five
 hundred, none at all across deep-context comparisons out to 41K tokens. Below
 that rung the picture changes and stops being predictable: `q4_0` is strongly
 model-dependent, ranging from a couple of changed answers to 375 in 500 on one
@@ -197,7 +216,7 @@ context, llmfit shortens the context.
 
 ### Two speeds, not one
 
-"Tokens per second" almost always means decode — how fast words appear once the
+"Tokens per second" almost always means decode, or how fast words appear once the
 model starts. Prefill, the rate the model *reads* at, is a different number
 bound by a different thing (compute, not memory bandwidth), and it is what
 actually keeps you waiting: a RAG answer, an agent turn carrying its history, a
@@ -205,8 +224,8 @@ file pasted into a coding assistant. A setup can be fine at one and unusable at
 the other.
 
 Both are measured, against the machine rather than an arbitrary floor. Prefill
-is measured exactly — one long prompt, one token of output, so the server's own
-prompt-token count over the latency *is* the rate — and reported as the thing
+is measured exactly. One long prompt, one token of output, so the server's own
+prompt-token count over the latency *is* the rate. It is reported as the thing
 you feel: *"512 tokens/s prompt processing (16s at full context)"*. Slow prefill
 is a repairable signature of its own, and the first thing tried is the physical
 micro-batch, the flag that moves prompt throughput most.
@@ -220,8 +239,8 @@ memory than estimated:
 ```
 [low   ] reduce_batch          halved the prompt batch, freeing compute buffers
 [low   ] quantize_kv_cache     KV cache → q8_0 (effectively lossless)
-[medium] reduce_context        32,768 → 24,576 tokens — what actually fits
-[high  ] reduce_gpu_layers     4 layers to CPU — frees VRAM, costs speed
+[medium] reduce_context        32,768 → 24,576 tokens, what actually fits
+[high  ] reduce_gpu_layers     4 layers to CPU, frees VRAM, costs speed
 ✓ converged
 ```
 
@@ -242,16 +261,16 @@ corrected estimate instead of an OOM at inference time.
 Weights live **once**, in a shared store; every app is *linked* against it
 (hardlink → symlink → copy, cheapest the filesystem allows):
 
-- **LM Studio** — `~/.lmstudio/models/<publisher>/<model>/<file>.gguf`, the exact
+- **LM Studio.** `~/.lmstudio/models/<publisher>/<model>/<file>.gguf`, the exact
   layout its UI parses (via `lms import` when the CLI is present)
-- **Ollama** — a generated Modelfile carrying your tuning; derived from the
+- **Ollama.** A generated Modelfile carrying your tuning, derived from the
   official tag where one exists, so tuning costs no extra disk
-- **Jan** — model folder plus `model.json`
-- **Open WebUI, Continue, Aider, Zed, Cursor** — ready-to-paste config snippets
-- **llama-swap** — a generated config so one endpoint serves several models on
+- **Jan.** Model folder plus `model.json`
+- **Open WebUI, Continue, Aider, Zed, Cursor.** Ready-to-paste config snippets
+- **llama-swap.** A generated config so one endpoint serves several models on
   demand, each with the command llmfit tuned for it
 
-## Terminal or a window — both
+## Terminal or a window, whichever suits
 
 The engine is a CLI. `llmfit ui` puts a local page in front of it:
 
@@ -262,12 +281,12 @@ llmfit ui        # opens http://127.0.0.1:8765
 It shows what it detected about your machine, asks the same questions the
 terminal wizard asks, and lays each recommendation out with its memory broken
 into weights, KV cache and overhead against what your machine can actually
-spare — which is the number that decides everything else.
+spare, which is the number that decides everything else.
 
 It is a page, not an Electron app, and that is deliberate: no Node toolchain, no
 build step, no per-platform packaging or code signing, no separate self-updater.
 It ships in the same `pip install`, works everywhere the CLI does, and fetches
-nothing — no CDN, no fonts, no analytics — because a tool for running models
+nothing: no CDN, no fonts, no analytics. A tool for running models
 locally should work with the network off.
 
 The UI plans and explains; it hands the download over as a command rather than
@@ -305,7 +324,7 @@ llmfit plan --vram 24 --gpu-vendor nvidia --task coding --task agent \
 # Non-interactive and reproducible
 llmfit setup --answers profile.yaml --report setup.md
 
-# I already have something running — does it do what I need?
+# I already have something running. Does it do what I need?
 llmfit verify --base-url http://127.0.0.1:11434 --model qwen3:8b --tools
 ```
 
@@ -338,7 +357,7 @@ models:
 Repeating an existing `id` patches just those fields, so overriding one setting
 doesn't mean restating the whole entry.
 
-Or let it read the architecture out of a file you already have — which is safer
+Or let it read the architecture out of a file you already have, which is safer
 than typing it, because layer and KV-head counts drive the whole memory model:
 
 ```bash
@@ -348,7 +367,7 @@ llmfit catalog add my-finetune --gguf ./my-finetune-Q4_K_M.gguf --publisher me
 ```
 
 `llmfit catalog refresh` checks entries against local GGUFs and upstream repos
-and reports drift — a renamed repo, a quantization that no longer exists, a
+and reports drift: a renamed repo, a quantization that no longer exists, a
 layer count that does not match the file. It writes a **proposed** overlay
 rather than editing in place: a catalog that changes underneath you turns a
 reproducible setup into a moving target.
@@ -369,7 +388,7 @@ llmfit catalog update                   # check right now
 ```
 
 It is built to be invisible when it fails: one short timeout, checked at most
-once per interval, and **any** failure — offline, DNS, a 500, malformed YAML —
+once per interval, and **any** failure (offline, DNS, a 500, malformed YAML)
 leaves the bundled catalog in place and the run continues. It never fetches for
 an `--offline` profile.
 
@@ -377,8 +396,8 @@ an `--offline` profile.
 newly popular open-weight models on Hugging Face and commits them, so the file
 your install pulls stays current with nobody pushing anything.
 
-Discovery reads architecture from each model's `config.json` — `num_hidden_layers`,
-`num_key_value_heads`, `hidden_size`, `head_dim` — which is exactly what the
+Discovery reads architecture from each model's `config.json`: `num_hidden_layers`,
+`num_key_value_heads`, `hidden_size`, `head_dim`, which is exactly what the
 memory model needs, so an auto-added entry is as trustworthy as a hand-written
 one. **It will not add a model it cannot describe**: an incomplete config is a
 reason to skip, because a guessed layer count is a wrong memory plan and an
@@ -400,7 +419,7 @@ extended, shared and refreshed:
 - repository ids are validated against an anchored pattern before they reach a
   URL;
 - GGUF header lengths are bounded by the real file size, so a crafted 58-byte
-  file cannot trigger a huge allocation — a hostile or corrupt file degrades to
+  file cannot trigger a huge allocation. A hostile or corrupt file degrades to
   "use the catalog estimate" rather than crashing the run.
 
 There is one runtime dependency (PyYAML), parsed with `safe_load`. No `shell=True`,
@@ -409,7 +428,7 @@ no `eval`, no `pickle`, and TLS verification is never disabled. CI runs
 
 ## Requirements
 
-Python 3.9+ and PyYAML — deliberately close to zero dependencies, because this
+Python 3.9+ and PyYAML, deliberately close to zero dependencies, because this
 runs on whatever machine you already have. An inference engine is needed only for
 `setup` and `verify`; `plan` and `detect` work with nothing installed.
 
@@ -428,13 +447,13 @@ Tests cover the fit maths against independently published figures (the KV-cache
 formula is pinned exactly), catalog integrity, repair convergence and
 termination, every check against a scripted endpoint, and a security suite that
 reproduces each fixed weakness (path traversal, URL injection, hostile GGUF
-headers). Nothing in the suite needs a GPU or the network — anything reaching
+headers). Nothing in the suite needs a GPU or the network, and anything reaching
 for either is a bug in the test.
 
 ## Contributing
 
 The most useful contribution is usually not code. It is a catalog entry, or a
-report of a machine where the plan came out wrong — `llmfit report` prints
+report of a machine where the plan came out wrong. `llmfit report` prints
 exactly what makes that fixable.
 
 One rule governs the rest: **no entry is better than a guessed one.** Every
@@ -447,4 +466,4 @@ refuses the entry loudly at load time. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-Apache-2.0 — see [LICENSE](LICENSE).
+Apache-2.0. See [LICENSE](LICENSE).

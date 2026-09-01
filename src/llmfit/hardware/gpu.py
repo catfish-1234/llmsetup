@@ -2,7 +2,7 @@
 
 Each vendor gets its own probe because each exposes memory differently, and
 memory is the number the whole planner depends on. A vendor probe that fails
-returns an empty list and a warning — it never raises, because "no nvidia-smi"
+returns an empty list and a warning rather than raising, because "no nvidia-smi"
 is the normal case on most machines.
 """
 

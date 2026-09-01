@@ -48,7 +48,7 @@ def register_everywhere(
     wanted = {c.value for c in (requested or [])}
 
     def should_do(target: str) -> bool:
-        # Register with an app if the user named it, or if it is simply present —
+        # Register with an app if the user named it, or if it is simply present:
         # "I want to see it in my other tools" is the default expectation.
         return target in wanted or installed.get(target, False)
 
@@ -83,7 +83,7 @@ def register_everywhere(
         })
 
     # --- llama-swap ---------------------------------------------------------- #
-    # One endpoint that serves several models on demand — the right shape when
+    # One endpoint that serves several models on demand, the right shape when
     # VRAM fits one model at a time but the user wants a choice.
     if gguf_path and Path(gguf_path).exists() and config.runtime == "llamacpp":
         records.append(_guard("llama_swap", lambda: _llama_swap(spec, config)))
@@ -126,7 +126,7 @@ def _llama_swap(spec: ModelSpec, config: RuntimeConfig) -> Dict[str, Any]:
 
 
 def _guard(target: str, fn) -> Dict[str, Any]:
-    """Registration failures are reported, never fatal — the setup still works."""
+    """Registration failures are reported, never fatal, the setup still works."""
     try:
         return fn()
     except Exception as exc:

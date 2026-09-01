@@ -1,7 +1,7 @@
 """Mixture-of-experts memory accounting.
 
-An MoE model is mostly routed expert weights — for a 30B-A3B model the experts
-are around 95% of the parameters — and only a handful of experts fire per token.
+An MoE model is mostly routed expert weights, for a 30B-A3B model the experts
+are around 95% of the parameters, and only a handful of experts fire per token.
 That asymmetry is exploitable: the expert stacks can sit in system RAM while
 attention, the router, the shared experts and the KV cache stay on the GPU.
 
@@ -82,7 +82,7 @@ def layers_to_offload(
 ) -> int:
     """How many layers' experts must move to RAM to free ``excess_bytes``.
 
-    Returns 0 when the model already fits, and is capped at the layer count —
+    Returns 0 when the model already fits, and is capped at the layer count,
     a caller asking to free more than the experts are worth gets every layer,
     and must find the rest elsewhere.
     """
