@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import re
 import sys
 from pathlib import Path
 from typing import Any, Dict, List
@@ -79,8 +80,8 @@ def main() -> int:
         console.info("every discovered model was already present")
         return 0
 
-    document["updated"] = datetime.date.today().isoformat()
-    text = yaml.safe_dump(document, sort_keys=False, width=100, allow_unicode=True)
+    original = BUNDLED.read_text(encoding="utf-8")
+    text = _append_entries(original, added)
 
     if not validate(text, console, [e["id"] for e in added]):
         console.error("the updated catalog failed validation; nothing was written")
@@ -90,8 +91,7 @@ def main() -> int:
         console.info(f"--dry-run: would add {len(added)} models")
         return 0
 
-    header = _preserve_header(BUNDLED.read_text(encoding="utf-8"))
-    args.output.write_text(header + text, encoding="utf-8")
+    args.output.write_text(text, encoding="utf-8")
     console.ok(f"wrote {args.output} with {len(added)} new models")
     _emit_summary(added)
     return 0
@@ -154,15 +154,30 @@ def validate(text: str, console: Console, new_ids: List[str]) -> bool:
     return True
 
 
-def _preserve_header(original: str) -> str:
-    """Keep the hand-written comment block at the top of the catalog."""
-    lines: List[str] = []
-    for line in original.splitlines(keepends=True):
-        if line.startswith("#") or not line.strip():
-            lines.append(line)
-        else:
-            break
-    return "".join(lines)
+def _append_entries(original: str, entries: List[Dict[str, Any]]) -> str:
+    """Add entries to the end of the catalog without rewriting the rest of it.
+
+    Round-tripping the whole document through a YAML dumper looks tidier and is
+    much worse: it drops every comment, reflows the layout, and turns the next
+    hand edit into a merge conflict across the entire file. `models:` is the
+    last top-level key, so new entries can go at the end and every existing byte
+    can stay exactly as its author left it.
+    """
+    body = yaml.safe_dump({"models": entries}, sort_keys=False, width=100,
+                          allow_unicode=True, default_flow_style=False)
+    # Drop the "models:" line the dumper adds and indent the rest into the
+    # existing list, which is written two spaces in.
+    lines = body.splitlines()[1:]
+    block = "\n".join("  " + line if line.strip() else line for line in lines)
+
+    updated = re.sub(r'^updated:.*$',
+                     f'updated: "{datetime.date.today().isoformat()}"',
+                     original, count=1, flags=re.M)
+    separator = "" if updated.endswith("\n") else "\n"
+    return (updated + separator
+            + "\n  # ---------------------------------------- added "
+            + f"{datetime.date.today().isoformat()} by `llmfit catalog refresh`\n"
+            + block + "\n")
 
 
 def _emit_summary(added: List[Dict[str, Any]]) -> None:

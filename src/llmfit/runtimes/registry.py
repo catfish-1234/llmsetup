@@ -17,6 +17,12 @@ from llmfit.runtimes.base import Runtime
 from llmfit.types import Accelerator, Client, HardwareProfile, UseCaseProfile
 
 _REGISTRY: Dict[str, Runtime] = {}
+#: Whether the adapter modules have been imported. A separate flag rather than
+#: "is the registry non-empty", because importing any single adapter directly
+#: registers that one and would otherwise convince the loader its work was
+#: already done, leaving every other engine invisible for the rest of the
+#: process.
+_LOADED = False
 
 
 def register(runtime: Runtime) -> Runtime:
@@ -41,7 +47,9 @@ def available_runtimes() -> List[Runtime]:
 
 
 def _ensure_loaded() -> None:
-    if _REGISTRY:
+    global _LOADED
+
+    if _LOADED:
         return
     # Imported here to avoid a circular import at module load.
     from llmfit.runtimes import (  # noqa: F401
@@ -52,6 +60,7 @@ def _ensure_loaded() -> None:
         tabby,
         vllm,
     )
+    _LOADED = True
 
 
 def choose_runtime(

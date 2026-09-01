@@ -162,6 +162,11 @@ class LlamaCppRuntime(Runtime):
                       "--spec-draft-ngl", str(plan.draft_gpu_layers)]
         flags += ["--spec-draft-n-max", str(plan.max_draft_tokens),
                   "--spec-draft-n-min", str(plan.min_draft_tokens)]
+        if plan.p_min > 0:
+            # Reject a guess the drafter is not confident about. Verifying a bad
+            # guess costs a full forward pass, so a low bar loses time rather
+            # than saving it.
+            flags += ["--spec-draft-p-min", str(plan.p_min)]
         return flags
 
     def _advanced_flags(self, spec: ModelSpec, config: RuntimeConfig) -> List[str]:
@@ -213,6 +218,14 @@ class LlamaCppRuntime(Runtime):
                 flags += ["--yarn-orig-ctx", str(rope.original_context)]
             if rope.yarn_ext_factor is not None:
                 flags += ["--yarn-ext-factor", str(rope.yarn_ext_factor)]
+            if rope.yarn_attn_factor is not None:
+                flags += ["--yarn-attn-factor", str(rope.yarn_attn_factor)]
+            if rope.yarn_beta_fast is not None:
+                flags += ["--yarn-beta-fast", str(rope.yarn_beta_fast)]
+            if rope.yarn_beta_slow is not None:
+                flags += ["--yarn-beta-slow", str(rope.yarn_beta_slow)]
+            if rope.freq_base:
+                flags += ["--rope-freq-base", str(rope.freq_base)]
 
         # --- sampler chain ------------------------------------------------- #
         sampler = advanced.sampler
@@ -221,6 +234,10 @@ class LlamaCppRuntime(Runtime):
                       "--dry-base", str(sampler.dry_base),
                       "--dry-allowed-length", str(sampler.dry_allowed_length),
                       "--dry-penalty-last-n", str(sampler.dry_penalty_last_n)]
+            for breaker in sampler.dry_sequence_breakers:
+                # Without these, DRY penalises a repeated newline as heavily as
+                # a repeated phrase, which mangles anything structured.
+                flags += ["--dry-sequence-breaker", breaker]
         if sampler.xtc_enabled:
             flags += ["--xtc-probability", str(sampler.xtc_probability),
                       "--xtc-threshold", str(sampler.xtc_threshold)]
@@ -253,6 +270,8 @@ class LlamaCppRuntime(Runtime):
             # A long-running agent has a fixed system prompt at the front. Pin
             # it so a context shift evicts the conversation and not the rules.
             flags += ["--keep", str(serving.keep_tokens)]
+        if serving.api_key:
+            flags += ["--api-key", serving.api_key]
         for adapter in serving.lora_adapters:
             flags += ["--lora", adapter]
         return flags
