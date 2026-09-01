@@ -20,6 +20,7 @@ from llmfit.repair.strategies import RepairState
 from llmfit.runtimes.base import Endpoint, Runtime, RuntimeUnavailable
 from llmfit.runtimes.registry import get_runtime
 from llmfit.tuning import tune
+from llmfit.tuning.profiles import SpecType
 from llmfit.types import (
     CheckResult,
     CheckStatus,
@@ -246,11 +247,17 @@ class Pipeline:
         so it is disabled and reported rather than blocking a working setup.
         """
         plan = getattr(config.advanced, "speculative", None)
-        if plan is None or not plan.enabled or not runtime.uses_gguf:
+        if plan is None or not runtime.uses_gguf:
+            return
+        # Not every kind of drafting has a second model. Prediction heads live
+        # in the target's own file and n-gram drafting reads the prompt, so
+        # there is nothing to fetch and nothing to fail at.
+        if not plan.needs_draft_model:
             return
 
-        spec = self.catalog.get(plan.draft_model_id)
+        spec = self.catalog.get(plan.draft_model_id) if plan.draft_model_id else None
         if spec is None:
+            plan.spec_type = SpecType.NONE
             plan.draft_model_id = None
             return
 
@@ -267,6 +274,7 @@ class Pipeline:
                 f"could not fetch the draft model ({exc.message}); continuing "
                 f"without speculative decoding"
             )
+            plan.spec_type = SpecType.NONE
             plan.draft_model_id = None
             plan.draft_path = None
             plan.rationale = f"disabled: the draft model could not be fetched ({exc.message})"

@@ -44,9 +44,21 @@ KNOWN_ARCHITECTURES = {
 }
 
 #: Substrings that mark a repo we never want in a recommendation catalog.
+#: Names that mean "not a base model somebody should be handed by default".
+#:
+#: Three groups. Placeholders and experiments, which are not models. Repos that
+#: are somebody else's quantization of a model already covered, which would
+#: otherwise be catalogued as if they were distinct models. And decensored
+#: derivatives, which are a legitimate thing to want and the wrong thing to
+#: recommend to a user who did not ask; "heretic" is the current name for what
+#: used to be called abliteration, so both are listed.
 _EXCLUDE = re.compile(
-    r"\b(?:untrained|random|test|debug|broken|dummy|toy|example|"
-    r"abliterated|uncensored|nsfw|erp|roleplay-?nsfw)\b",
+    r"(?:^|[\b_-])(?:"
+    r"untrained|random|test|debug|broken|dummy|toy|example|"
+    r"abliterated|heretic|decensored|uncensored|nsfw|erp|roleplay-?nsfw|"
+    r"awq|gptq|gguf|exl2|exl3|exllama|int4|int8|w4a16|w8a8|fp8|bnb|"
+    r"lora|adapter|qlora"
+    r")(?:$|[\b_-])",
     re.I,
 )
 
@@ -318,6 +330,14 @@ def discover(
             skip("too large to be runnable locally")
             continue
 
+        gguf_repo = find_gguf_repo(repo, timeout) if find_gguf else None
+        if find_gguf and not gguf_repo:
+            # A catalog entry with nowhere to download from is worse than no
+            # entry: it competes in the ranking, wins on paper, and then fails
+            # at provisioning with nothing to fall back on.
+            skip("no GGUF build published yet")
+            continue
+
         found.append(Candidate(
             id=model_id,
             repo=repo,
@@ -332,7 +352,7 @@ def discover(
             max_context=arch["max_context"],
             license=_license_of(item),
             supports_vision=arch["vision"],
-            gguf_repo=find_gguf_repo(repo, timeout) if find_gguf else None,
+            gguf_repo=gguf_repo,
             downloads=downloads,
             likes=likes,
             tags=[str(t) for t in (item.get("tags") or [])],

@@ -87,7 +87,7 @@ def fetch_projector(spec: ModelSpec, quant: str, console: Console) -> Optional[P
         return None
 
     directory = ensure_dir(store_path(spec, quant))
-    dest = directory / Path(chosen.filename).name
+    dest = safe_subpath(directory, Path(chosen.filename).name)
     download_file(chosen, dest, make_progress_printer(console, Path(chosen.filename).name))
     console.ok(f"vision projector ready: {dest}")
     return dest
@@ -126,7 +126,7 @@ def fetch_gguf(spec: ModelSpec, quant: str, console: Console) -> Path:
 
     first: Optional[Path] = None
     for shard in shards:
-        dest = directory / Path(shard.filename).name
+        dest = safe_subpath(directory, Path(shard.filename).name)
         download_file(shard, dest, make_progress_printer(console, Path(shard.filename).name))
         first = first or dest
 
