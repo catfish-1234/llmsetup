@@ -48,6 +48,12 @@ class GgufInfo:
     file_type: Optional[int] = None
     expert_count: Optional[int] = None
     chat_template: Optional[str] = None
+    #: Sliding-window span in tokens, when the architecture has one.
+    sliding_window: Optional[int] = None
+    #: Layers of multi-token prediction heads built into this file. These ship
+    #: in some builds of a model and not others, so the model's name settles
+    #: nothing and only the file can answer.
+    nextn_predict_layers: Optional[int] = None
     tensor_count: int = 0
     metadata: Dict[str, Any] = None
 
@@ -62,6 +68,10 @@ class GgufInfo:
     @property
     def is_moe(self) -> bool:
         return bool(self.expert_count and self.expert_count > 1)
+
+    @property
+    def has_mtp(self) -> bool:
+        return bool(self.nextn_predict_layers and self.nextn_predict_layers > 0)
 
     @property
     def supports_tools(self) -> Optional[bool]:
@@ -203,6 +213,8 @@ def read_gguf_info(path: Path) -> Optional[GgufInfo]:
         file_type=_as_int(metadata.get("general.file_type")),
         expert_count=_as_int(get("expert_count")),
         chat_template=_as_str(metadata.get("tokenizer.chat_template")),
+        sliding_window=_as_int(get("attention.sliding_window")),
+        nextn_predict_layers=_as_int(get("nextn_predict_layers")),
         tensor_count=tensor_count,
         metadata=metadata,
     )
@@ -233,6 +245,33 @@ def apply_to_spec(spec, info: Optional[GgufInfo]):
         if value and getattr(spec, field) != value:
             corrections.append(f"{label}: catalog said {getattr(spec, field)}, file says {value}")
             changes[field] = value
+
+    # Multi-token prediction heads are a property of the build, not the model:
+    # publishers ship an MTP variant alongside a plain one under names that
+    # differ by a suffix. Only the file settles it, in both directions.
+    if info.has_mtp != spec.mtp_heads:
+        corrections.append(
+            "multi-token prediction heads: "
+            + ("present in this build, so the model can draft for itself"
+               if info.has_mtp else
+               "absent from this build, so a separate draft model is needed")
+        )
+        changes["mtp_heads"] = info.has_mtp
+
+    # A sliding window changes what the cache costs by several times over, so
+    # reading it from the file rather than inferring it from the family is the
+    # difference between a context that fits and one that does not.
+    if info.sliding_window and info.sliding_window != spec.sliding_window:
+        corrections.append(
+            f"sliding-window attention: {info.sliding_window} tokens, "
+            f"read from the file"
+        )
+        changes["sliding_window"] = info.sliding_window
+        if spec.swa_pattern <= 1:
+            # The file states the window but not the interleave. Assume every
+            # layer is windowed, which is the conservative reading: it claims
+            # the smallest cache saving consistent with what the file says.
+            changes["swa_pattern"] = spec.layers
 
     # A GGUF's stated context length is the trained maximum; trust it over the
     # catalog only when it is *lower*, since repos often omit RoPE extension.
