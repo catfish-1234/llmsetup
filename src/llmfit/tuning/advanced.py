@@ -20,6 +20,7 @@ from llmfit.tuning.profiles import (
     RopePlan,
     SamplerChain,
     ServingPlan,
+    SpecType,
     SpeculativePlan,
 )
 from llmfit.types import GIB, Candidate, HardwareProfile, ModelSpec, Task, UseCaseProfile
@@ -162,6 +163,23 @@ def plan_speculative(
     spec = candidate.model
     plan = SpeculativePlan()
 
+    # Prediction heads that ship inside the model file beat every other option
+    # and are not a trade at all: nothing extra to download, no second model
+    # resident, and the extra KV context is a small fraction of the model's own.
+    # So this is not gated on the task being predictable the way a draft model
+    # is, because there is no memory being spent to lose.
+    if spec.has_mtp:
+        plan.spec_type = SpecType.MTP
+        plan.max_draft_tokens = 3
+        plan.expected_speedup = 1.8
+        plan.rationale = (
+            f"{spec.name} carries multi-token prediction heads in its own "
+            f"weights, so it drafts for itself. No second model to download or "
+            f"keep resident, and the extra cache is a small fraction of what a "
+            f"draft model would cost"
+        )
+        return plan
+
     if not any(t in _SPECULATIVE_TASKS for t in profile.tasks):
         plan.rationale = (
             "off: speculative decoding is a bet on predictable output, and this "
@@ -180,12 +198,11 @@ def plan_speculative(
 
     draft, ratio = _pick_draft(spec, catalog)
     if draft is None:
-        plan.rationale = (
-            f"off: no model in the catalog shares {spec.name}'s vocabulary and is "
-            f"small enough to draft for it — a draft model must tokenize "
-            f"identically or its guesses cannot be verified"
-        )
-        return plan
+        return _ngram_fallback(
+            plan, profile,
+            f"no model in the catalog shares {spec.name}'s vocabulary and is "
+            f"small enough to draft for it, and a draft model that tokenizes "
+            f"differently cannot have its guesses verified")
 
     quant = draft.recommended_quants[0] if draft.recommended_quants else "Q4_K_M"
     draft_bytes = int(draft.params_b * 1e9 * catalog.bpw(quant) / 8)
@@ -195,13 +212,13 @@ def plan_speculative(
 
     headroom = hardware.usable_accel_bytes - candidate.estimate.total
     if hardware.gpus and draft_bytes > headroom:
-        plan.rationale = (
-            f"off: {draft.name} would draft well for this model but needs "
+        return _ngram_fallback(
+            plan, profile,
+            f"{draft.name} would draft well for this model but needs "
             f"{draft_bytes / GIB:.1f} GB and only {max(0, headroom) / GIB:.1f} GB "
-            f"is spare — the memory is better spent on context"
-        )
-        return plan
+            f"is spare, so the memory is better spent on context")
 
+    plan.spec_type = SpecType.DRAFT
     plan.draft_model_id = draft.id
     plan.draft_quant = quant
     plan.draft_gpu_layers = draft.layers if hardware.gpus else 0
@@ -217,6 +234,42 @@ def plan_speculative(
         f"{plan.max_draft_tokens} tokens ahead and the target verifies them in "
         f"one pass, which is worth roughly {plan.expected_speedup:.2f}x on "
         f"predictable output and costs nothing when guesses miss"
+    )
+    return plan
+
+
+#: Tasks whose output quotes its input, which is the only situation where
+#: drafting from the context itself reliably hits. Answering a question about a
+#: retrieved document, summarising it, pulling fields out of it and rewriting it
+#: all reproduce long spans verbatim; open-ended chat does not.
+_NGRAM_TASKS = {Task.RAG, Task.SUMMARIZE, Task.EXTRACT, Task.CODING}
+
+
+def _ngram_fallback(plan: SpeculativePlan, profile: UseCaseProfile,
+                    why_no_draft: str) -> SpeculativePlan:
+    """Draft from the context when no draft model is available or affordable.
+
+    N-gram drafting pattern-matches against text already in the prompt, so it
+    needs no second model and no meaningful memory. That makes it nearly free to
+    try, but not free of doubt: measured results across models and hardware are
+    mixed, and it only pays where the output genuinely repeats the input. So it
+    is offered for the tasks that do that and left off elsewhere, rather than
+    switched on everywhere on the strength of costing nothing.
+    """
+    if not any(t in _NGRAM_TASKS for t in profile.tasks):
+        plan.rationale = f"off: {why_no_draft}"
+        return plan
+    plan.spec_type = SpecType.NGRAM
+    plan.max_draft_tokens = 8
+    # Deliberately not quoted as a speedup. Acceptance depends entirely on how
+    # much of the answer is quotation, which varies per request, and a number
+    # here would read as a promise.
+    plan.expected_speedup = 1.0
+    plan.rationale = (
+        f"drafting from the prompt itself, because {why_no_draft}. This costs "
+        f"no memory and no second download: it guesses by matching against text "
+        f"already in the context, which pays when the answer quotes the source "
+        f"and does nothing when it does not"
     )
     return plan
 
@@ -280,9 +333,14 @@ def plan_reasoning(spec: ModelSpec, profile: UseCaseProfile) -> ReasoningPlan:
         )
     elif task in (Task.CODING, Task.AGENT):
         plan.effort = ReasoningEffort.MEDIUM
+        # A bound, not a preference. An agent in a loop that spends its whole
+        # output budget thinking returns an empty answer, and the loop retries,
+        # and it happens again.
+        plan.token_budget = 2048
         plan.rationale = (
-            "medium thinking: enough to plan a change or a tool call, without the "
-            "full deliberation budget on every request"
+            "medium thinking, capped at 2048 tokens: enough to plan a change or "
+            "a tool call, without the risk of deliberating past the output "
+            "budget and returning nothing"
         )
     else:
         plan.effort = ReasoningEffort.MEDIUM
@@ -420,6 +478,27 @@ def plan_serving(profile: UseCaseProfile, runtime: str,
             "prefix caching with generous reuse: agent and retrieval workloads "
             "resend a long prefix every turn, and caching it removes most of the "
             "prompt-processing cost"
+        )
+
+        # An agent's system prompt is its rules. When the conversation outgrows
+        # the context and the oldest tokens are dropped, those rules go first
+        # unless they are pinned.
+        if profile.primary_task is Task.AGENT:
+            plan.keep_tokens = 1024
+            notes.append(
+                "the first 1024 tokens pinned, so a long-running agent keeps its "
+                "system prompt when older turns get evicted"
+            )
+        # Hold the prompt cache in RAM between requests. Sized against what the
+        # machine can spare rather than a fixed number, because the point is to
+        # avoid re-reading a long prefix, not to claim memory the model needs.
+        spare_mib = int(max(0, hardware.ram_bytes - hardware.memory_budget)
+                        / (1024 ** 2))
+        plan.cache_ram_mib = max(2048, min(16384, spare_mib // 4))
+        notes.append(
+            f"{plan.cache_ram_mib} MiB of prompt cache kept in RAM, so returning "
+            f"to an earlier conversation skips its prefill instead of paying for "
+            f"it again"
         )
 
     if runtime == "vllm":

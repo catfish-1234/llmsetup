@@ -257,6 +257,19 @@ class ModelSpec:
     tokenizer_family: Optional[str] = None
     #: True for small models worth using as a speculative draft.
     draft_capable: bool = False
+    #: Multi-token prediction heads shipped inside the model's own weights. When
+    #: present the model drafts for itself, which is strictly better than any
+    #: separate draft model. Detected from the file where possible rather than
+    #: asserted here, because it is a property of the specific GGUF build.
+    mtp_heads: bool = False
+    #: Sliding-window attention span, in tokens. Layers using it only attend
+    #: within the window, so their KV cache stops growing once the context
+    #: passes it. ``None`` means every layer attends globally.
+    sliding_window: Optional[int] = None
+    #: How the layers interleave: one globally-attending layer every N. Gemma 3
+    #: uses 6 (five local layers then one global). 1 means every layer is
+    #: global, which is the same as having no sliding window at all.
+    swa_pattern: int = 1
     notes: str = ""
 
     @property
@@ -273,6 +286,32 @@ class ModelSpec:
     @property
     def is_moe(self) -> bool:
         return self.active_params_b is not None and self.active_params_b < self.params_b
+
+    @property
+    def has_mtp(self) -> bool:
+        return bool(self.mtp_heads)
+
+    @property
+    def uses_swa(self) -> bool:
+        """Whether any layer attends only within a window.
+
+        Both parts have to hold. A window with no interleaving pattern, or a
+        pattern with no window, describes a model that attends globally
+        everywhere, and treating it as windowed would under-count its cache.
+        """
+        return bool(self.sliding_window) and self.swa_pattern > 1
+
+    @property
+    def global_layers(self) -> int:
+        """Layers whose cache grows with the whole context."""
+        if not self.uses_swa:
+            return self.layers
+        return max(1, self.layers // self.swa_pattern)
+
+    @property
+    def local_layers(self) -> int:
+        """Layers whose cache stops growing once the window is full."""
+        return self.layers - self.global_layers
 
     @property
     def compute_params_b(self) -> float:
@@ -392,6 +431,11 @@ class RuntimeConfig:
     #: image embeddings into tokens the language model understands. Without it
     #: the endpoint accepts images and quietly ignores them.
     mmproj_path: Optional[str] = None
+    #: Keep a full-size cache for sliding-window layers instead of just the
+    #: window. Costs the memory the window was saving, and buys back the cache
+    #: operations the window makes impossible, which is what long-range recall
+    #: and prefix reuse depend on.
+    swa_full: bool = False
     served_name: Optional[str] = None
     #: Deep settings: sampler chain, reasoning budget, speculative decoding,
     #: tensor placement, RoPE scaling and serving behaviour. Typed rather than

@@ -114,9 +114,45 @@ _VISION_PROJECTOR_BYTES = 1024 * 1024 ** 2
 
 
 def kv_bytes_per_token(spec: ModelSpec, kv_quant: str = "f16") -> float:
-    """Bytes of KV cache one token costs. GQA-aware."""
+    """Bytes of KV cache one token costs, if every layer attends globally.
+
+    GQA-aware: the cache is sized by key/value heads, not query heads, which is
+    the single most common way a memory estimate comes out several times too
+    large.
+
+    For a model with sliding-window layers this is the worst case rather than
+    the real one, because those layers stop caching once the window is full.
+    Use :func:`kv_cache_bytes`, which knows the difference.
+    """
     element = KV_ELEMENT_BYTES.get(kv_quant.lower(), 2.0)
     return 2 * spec.layers * spec.kv_heads * spec.effective_head_dim * element
+
+
+def kv_cache_bytes(spec: ModelSpec, context_tokens: int, kv_quant: str = "f16",
+                   swa_full: bool = False) -> int:
+    """KV cache for a whole context, accounting for sliding-window layers.
+
+    Some models interleave layers that attend globally with layers that only
+    attend within a fixed window. The windowed layers cache the window and no
+    more however long the context is, which is why a model like this fits a far
+    longer context than the flat formula suggests. Treating them as global is
+    not conservative in a useful way, it just makes the model look impossible.
+
+    ``swa_full`` covers the case where the engine has been told to keep a
+    full-size cache for the windowed layers anyway. That costs the full amount
+    again, and it is sometimes worth it, so the maths has to be able to say what
+    it would cost.
+    """
+    context_tokens = max(1, int(context_tokens))
+    element = KV_ELEMENT_BYTES.get(kv_quant.lower(), 2.0)
+    per_layer_token = 2 * spec.kv_heads * spec.effective_head_dim * element
+
+    if not spec.uses_swa or swa_full:
+        return int(per_layer_token * spec.layers * context_tokens)
+
+    windowed = min(context_tokens, int(spec.sliding_window or context_tokens))
+    return int(per_layer_token * (spec.global_layers * context_tokens
+                                  + spec.local_layers * windowed))
 
 
 def weight_bytes(spec: ModelSpec, bpw: float) -> int:
@@ -149,6 +185,7 @@ def estimate_memory(
     runtime: str = "llamacpp",
     ubatch: int = 512,
     parallel: int = 1,
+    swa_full: bool = False,
 ) -> MemoryEstimate:
     """Full memory breakdown for one (model, quant, context) combination.
 
@@ -162,7 +199,7 @@ def estimate_memory(
 
     return MemoryEstimate(
         weights=weight_bytes(spec, bpw),
-        kv_cache=int(kv_bytes_per_token(spec, kv_quant) * kv_total_tokens),
+        kv_cache=kv_cache_bytes(spec, kv_total_tokens, kv_quant, swa_full=swa_full),
         overhead=overhead_bytes(spec, runtime, ubatch, parallel),
         context_tokens=context_tokens,
         quant=quant,
@@ -179,23 +216,46 @@ def max_context_for_budget(
     ubatch: int = 512,
     parallel: int = 1,
     granularity: int = 1024,
+    swa_full: bool = False,
 ) -> int:
     """Largest context that fits in ``budget_bytes``. Zero if the weights alone don't.
 
     This is the inverse of :func:`estimate_memory` and is what the repair loop
     uses to shrink context to a value that will actually fit, rather than
     halving blindly.
+
+    For a sliding-window model the relationship is not a straight line. Up to
+    the window every layer caches; past it only the globally-attending layers
+    keep growing while the rest hold steady. Inverting the flat formula would
+    hand back a context several times shorter than the model can really take.
     """
+    parallel = max(1, parallel)
     fixed = weight_bytes(spec, bpw) + overhead_bytes(spec, runtime, ubatch, parallel)
     remaining = budget_bytes - fixed
     if remaining <= 0:
         return 0
 
-    per_token = kv_bytes_per_token(spec, kv_quant) * max(1, parallel)
-    if per_token <= 0:
+    element = KV_ELEMENT_BYTES.get(kv_quant.lower(), 2.0)
+    per_layer_token = 2 * spec.kv_heads * spec.effective_head_dim * element * parallel
+    if per_layer_token <= 0:
         return spec.max_context
 
-    tokens = int(remaining / per_token)
+    if not spec.uses_swa or swa_full:
+        tokens = int(remaining / (per_layer_token * spec.layers))
+    else:
+        window = int(spec.sliding_window or 0)
+        # Below the window nothing is capped yet, so every layer still counts.
+        flat = int(remaining / (per_layer_token * spec.layers))
+        if flat <= window:
+            tokens = flat
+        else:
+            # Past the window the local layers are a fixed cost and only the
+            # global ones keep growing.
+            local_cost = per_layer_token * spec.local_layers * window
+            growth = per_layer_token * spec.global_layers
+            tokens = int((remaining - local_cost) / growth) if growth > 0 else window
+            tokens = max(window, tokens)
+
     tokens = (tokens // granularity) * granularity          # round down to a clean value
     return max(0, min(tokens, spec.max_context))
 
@@ -224,7 +284,12 @@ def layers_that_fit(
         return 0
 
     per_layer_weights = weight_bytes(spec, bpw) / spec.layers
-    per_layer_kv = (kv_bytes_per_token(spec, kv_quant) / spec.layers) * context_tokens * max(1, parallel)
+    # Averaged across layers. On a sliding-window model the global and local
+    # layers cost different amounts, but offload takes a contiguous run of them
+    # in roughly the published proportion, so the average is the right estimate
+    # to use here and the exact split is not knowable in advance anyway.
+    per_layer_kv = (kv_cache_bytes(spec, context_tokens * max(1, parallel), kv_quant)
+                    / spec.layers)
     per_layer = per_layer_weights + per_layer_kv
     if per_layer <= 0:
         return spec.layers

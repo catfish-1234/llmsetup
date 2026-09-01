@@ -209,6 +209,7 @@ def _reduce_context(state: RepairState) -> Optional[Outcome]:
     fitted = max_context_for_budget(
         spec, bpw, state.budget, kv_quant=config.kv_cache_type,
         runtime=config.runtime, ubatch=config.ubatch_size, parallel=config.parallel,
+        swa_full=config.swa_full,
     )
     floor = _context_floor(state.profile)
     # Always make real progress: if the computed fit is not smaller, step down.
@@ -304,6 +305,48 @@ def _reduce_parallel(state: RepairState) -> Optional[Outcome]:
 # --------------------------------------------------------------------------- #
 
 
+def _full_swa_cache(state: RepairState) -> Optional[Outcome]:
+    """Stop windowing the cache on a model whose recall just failed.
+
+    Sliding-window layers only keep the last N tokens, which is where most of a
+    model like this saves its memory. The saving is real, but it makes some
+    cache operations impossible, and the symptom is exactly what the needle
+    check measures: everything works except finding something stated earlier in
+    a long prompt.
+
+    Tried before giving up context, because keeping the whole prompt visible is
+    usually worth more than keeping it long.
+    """
+    config, spec = state.config, state.candidate.model
+    if not spec.uses_swa or config.swa_full:
+        return None
+    if config.runtime != "llamacpp":
+        return None
+
+    from llmfit.planner.memory import estimate_memory
+
+    bpw = (state.candidate.estimate.weights * 8) / (spec.params_b * 1e9)
+    cost = estimate_memory(spec, bpw, config.context_tokens,
+                           kv_quant=config.kv_cache_type, runtime=config.runtime,
+                           ubatch=config.ubatch_size, parallel=config.parallel,
+                           swa_full=True)
+    if cost.total > state.budget:
+        # Honest refusal rather than a change that will OOM on restart. The
+        # context reduction that follows is the workable version of this fix.
+        return None
+
+    before = {"swa_full": False}
+    config.swa_full = True
+    return Outcome(
+        f"kept a full-size attention cache instead of a sliding window, so the "
+        f"model can see the whole prompt rather than the last "
+        f"{spec.sliding_window:,} tokens on most of its layers. This costs "
+        f"{(cost.kv_cache - state.candidate.estimate.kv_cache) / (1024 ** 3):.1f} "
+        f"GB more",
+        cost="medium", before=before, after={"swa_full": True},
+    )
+
+
 def _restore_kv_precision(state: RepairState) -> Optional[Outcome]:
     """Long-context recall failed — undo the KV quantization that caused it.
 
@@ -324,6 +367,7 @@ def _restore_kv_precision(state: RepairState) -> Optional[Outcome]:
     fitted = max_context_for_budget(
         spec, bpw, state.budget, kv_quant=better, runtime=config.runtime,
         ubatch=config.ubatch_size, parallel=config.parallel,
+        swa_full=config.swa_full,
     )
     target = min(config.context_tokens, (fitted // 1024) * 1024)
     if target < _context_floor(state.profile):
@@ -569,6 +613,8 @@ STRATEGIES: List[RepairStrategy] = [
     RepairStrategy("reduce_context",
                    (*_MEMORY_SIGNATURES, sig.CONTEXT_EXCEEDED, sig.REQUEST_TIMEOUT),
                    "medium", _reduce_context),
+    RepairStrategy("full_swa_cache", (sig.NEEDLE_NOT_FOUND,), "medium",
+                   _full_swa_cache),
     RepairStrategy("restore_kv_precision", (sig.NEEDLE_NOT_FOUND,), "medium",
                    _restore_kv_precision),
 

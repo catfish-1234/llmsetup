@@ -19,6 +19,12 @@ from llmfit.util.fs import app_dir, ensure_dir
 from llmfit.util.log import Console
 from llmfit.util.proc import first_line, run, spawn, which
 
+#: Flags that stand alone, so filtering must not swallow the token after them.
+_VALUELESS_FLAGS = {
+    "--jinja", "--mlock", "--no-mmap", "--embeddings", "--cont-batching",
+    "--reasoning-preserve", "--swa-full", "--no-context-shift", "--context-shift",
+}
+
 
 class LlamaCppRuntime(Runtime):
     name = "llamacpp"
@@ -75,6 +81,8 @@ class LlamaCppRuntime(Runtime):
         ]
         if config.mmproj_path:
             cmd += ["--mmproj", config.mmproj_path]
+        if config.swa_full:
+            cmd.append("--swa-full")
         if config.threads:
             cmd += ["--threads", str(config.threads)]
         # Flash attention is an explicit on/off in current llama-server; leaving
@@ -84,10 +92,7 @@ class LlamaCppRuntime(Runtime):
         if config.kv_cache_type != "f16":
             cmd += ["--cache-type-k", config.kv_cache_type,
                     "--cache-type-v", config.kv_cache_type]
-        if config.mlock:
-            cmd.append("--mlock")
-        if not config.mmap:
-            cmd.append("--no-mmap")
+        cmd += self._load_mode_flags(config)
         if spec.is_embedding:
             cmd.append("--embeddings")
 
@@ -95,7 +100,69 @@ class LlamaCppRuntime(Runtime):
 
         for flag in config.extra.get("llamacpp_flags", []):
             cmd.append(str(flag))
-        return cmd
+        return self._drop_unsupported(cmd)
+
+    def _load_mode_flags(self, config: RuntimeConfig) -> List[str]:
+        """How the weights get into memory.
+
+        Current llama.cpp folds mmap and mlock into one `--load-mode`; older
+        builds have the two separate booleans. Emit whichever the installed
+        binary understands, because getting this wrong is not cosmetic: without
+        mlock, part of a model that only just fits can be paged out mid
+        generation and the speed collapses.
+        """
+        if "--load-mode" in self._flags():
+            if config.mlock:
+                return ["--load-mode", "mmap+mlock" if config.mmap else "mlock"]
+            return [] if config.mmap else ["--load-mode", "none"]
+        flags = []
+        if config.mlock:
+            flags.append("--mlock")
+        if not config.mmap:
+            flags.append("--no-mmap")
+        return flags
+
+    def _flags(self):
+        """Long flags the installed binary accepts; empty when it cannot be asked."""
+        from llmfit.runtimes.capabilities import supported_flags
+
+        return supported_flags(self.binary)
+
+    def _drop_unsupported(self, cmd: List[str]) -> List[str]:
+        """Strip anything this build does not know about.
+
+        llama.cpp renames and retires flags between releases and people run
+        whatever their package manager last shipped. Asking the binary what it
+        accepts turns "the server refused to start and the log is 400 lines of
+        usage text" into a command that simply runs with one feature less.
+        """
+        from llmfit.runtimes.capabilities import filter_flags
+
+        return filter_flags(cmd, self._flags(), drop_value=_VALUELESS_FLAGS)
+
+    def _speculative_flags(self, plan) -> List[str]:
+        """Flags for whichever kind of drafting was planned.
+
+        The way these are spelled changed: the draft-model options moved under a
+        `--spec-` prefix and gained a `--spec-type` that selects between a
+        separate draft model, the model's own prediction heads, purpose-trained
+        draft heads, and drafting straight from the prompt. On a build that
+        predates all that, the unsupported flags are dropped and the setup runs
+        without drafting rather than failing to start.
+        """
+        if not plan.enabled:
+            return []
+        flags = ["--spec-type", plan.spec_type.value]
+        if plan.needs_draft_model:
+            if not plan.draft_path:
+                # Planned but never provisioned. Emitting a type with no model
+                # behind it would fail at load, so say nothing.
+                return []
+            flags += ["--spec-draft-model", plan.draft_path,
+                      "--spec-draft-ngl", str(plan.draft_gpu_layers)]
+        flags += ["--spec-draft-n-max", str(plan.max_draft_tokens),
+                  "--spec-draft-n-min", str(plan.min_draft_tokens)]
+        return flags
 
     def _advanced_flags(self, spec: ModelSpec, config: RuntimeConfig) -> List[str]:
         """Deep settings: placement, drafting, thinking budget, sampler chain.
@@ -123,19 +190,17 @@ class LlamaCppRuntime(Runtime):
             flags += ["--override-tensor", pattern]
 
         # --- speculative decoding ----------------------------------------- #
-        spec_plan = advanced.speculative
-        if spec_plan.enabled and spec_plan.draft_path:
-            flags += [
-                "--model-draft", spec_plan.draft_path,
-                "--draft-max", str(spec_plan.max_draft_tokens),
-                "--draft-min", str(spec_plan.min_draft_tokens),
-                "--gpu-layers-draft", str(spec_plan.draft_gpu_layers),
-            ]
+        flags += self._speculative_flags(advanced.speculative)
 
         # --- reasoning budget --------------------------------------------- #
         reasoning = advanced.reasoning
         if reasoning.supported:
             flags += ["--reasoning", "on" if reasoning.enabled else "off"]
+            if reasoning.enabled and reasoning.token_budget is not None:
+                # A hard ceiling on thinking. Without one, a reasoning model
+                # asked something ambiguous can spend its whole output budget
+                # deliberating and never answer.
+                flags += ["--reasoning-budget", str(reasoning.token_budget)]
             if reasoning.enabled and reasoning.preserve:
                 flags.append("--reasoning-preserve")
 
@@ -180,8 +245,14 @@ class LlamaCppRuntime(Runtime):
             flags.append("--cont-batching")
         if serving.prefix_caching and serving.cache_reuse_tokens:
             flags += ["--cache-reuse", str(serving.cache_reuse_tokens)]
-        if serving.defrag_threshold:
-            flags += ["--defrag-thold", str(serving.defrag_threshold)]
+        if serving.cache_ram_mib is not None:
+            # Prompt cache held in system RAM across requests, so a returning
+            # conversation skips its prefill instead of paying for it again.
+            flags += ["--cache-ram", str(serving.cache_ram_mib)]
+        if serving.keep_tokens:
+            # A long-running agent has a fixed system prompt at the front. Pin
+            # it so a context shift evicts the conversation and not the rules.
+            flags += ["--keep", str(serving.keep_tokens)]
         for adapter in serving.lora_adapters:
             flags += ["--lora", adapter]
         return flags

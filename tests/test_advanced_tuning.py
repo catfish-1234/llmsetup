@@ -175,12 +175,18 @@ class TestSpeculativeDecoding:
             assert spec.family != catalog.require("qwen3-8b").family, model_id
 
     def test_declines_when_there_is_no_memory_for_the_draft(self, catalog):
-        """Every byte the draft holds is a byte not available for context."""
+        """Every byte the draft holds is a byte not available for context, so a
+        draft that does not fit is not loaded. Drafting from the prompt itself
+        costs nothing, so that is offered instead."""
+        from llmfit.tuning.profiles import SpecType
+
         hardware = make_hardware(vram_gb=24, ram_gb=64)
         result = tuned(catalog, "qwen3-32b", hardware,
                        UseCaseProfile(tasks=[Task.CODING], context_tokens=32768))
         plan = result.config.advanced.speculative
-        assert not plan.enabled
+        assert plan.draft_model_id is None
+        assert plan.draft_memory_bytes == 0
+        assert plan.spec_type is SpecType.NGRAM
         assert "spare" in plan.rationale
 
     def test_declines_for_open_ended_tasks(self, catalog):
@@ -347,15 +353,17 @@ class TestEmittedFlags:
         command, _ = self._command(
             catalog, "qwen3-32b", make_hardware(vram_gb=48, ram_gb=128),
             UseCaseProfile(tasks=[Task.CODING], context_tokens=8192))
-        assert "--model-draft" in command
-        assert "--draft-max" in command
+        assert "--spec-type" in command
+        assert command[command.index("--spec-type") + 1] == "draft-simple"
+        assert "--spec-draft-model" in command
+        assert "--spec-draft-n-max" in command
 
     def test_nothing_exotic_appears_for_a_plain_setup(self, catalog):
         """A simple setup must still produce a simple command line."""
         command, _ = self._command(
             catalog, "qwen3-4b", make_hardware(vram_gb=24),
             UseCaseProfile(tasks=[Task.CHAT], context_tokens=4096))
-        for flag in ("--n-cpu-moe", "--model-draft", "--xtc-probability",
+        for flag in ("--n-cpu-moe", "--spec-draft-model", "--xtc-probability",
                      "--mirostat", "--rope-scaling"):
             assert flag not in command
 
