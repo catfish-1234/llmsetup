@@ -83,6 +83,8 @@ class LlamaCppRuntime(Runtime):
             cmd += ["--mmproj", config.mmproj_path]
         if config.swa_full:
             cmd.append("--swa-full")
+        if config.seed is not None:
+            cmd += ["--seed", str(config.seed)]
         if config.threads:
             cmd += ["--threads", str(config.threads)]
         # Flash attention is an explicit on/off in current llama-server; leaving
