@@ -135,6 +135,10 @@ def build_parser() -> argparse.ArgumentParser:
                          help="plan and tune, but download and launch nothing")
     p_setup.add_argument("--no-register", action="store_true",
                          help="skip registering with other apps")
+    p_setup.add_argument("--sweep", action="store_true",
+                         help="measure batch settings on this machine and keep "
+                              "the fastest; adds a few minutes and needs "
+                              "llama-bench")
     p_setup.add_argument("--no-repair", action="store_true",
                          help="report failures instead of fixing them")
     p_setup.add_argument("--report", type=Path, help="write a markdown report here")
@@ -346,6 +350,7 @@ def cmd_setup(args, console: Console) -> int:
         runtime_name=args.runtime, quick=args.quick, dry_run=args.dry_run,
         max_repairs=0 if args.no_repair else 12,
         register=not args.no_register,
+        sweep=getattr(args, "sweep", False),
     )
     try:
         result = pipeline.run()
