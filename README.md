@@ -244,6 +244,35 @@ lengths where it would be slower as well as worse, and reported in words that
 say how to undo it. Given the choice between a lossy cache and a shorter
 context, llmfit shortens the context.
 
+### Measuring, not just predicting
+
+Everything above computes. The memory model is exact arithmetic and the
+throughput estimate is grounded in bandwidth, but neither can know that this
+card, on this driver, with this build, processes prompts fastest at a
+micro-batch of 2048 rather than the default 512. Measurements put that gap at
+25-30% of prompt throughput on some hardware, and it is not the kind of thing a
+formula recovers: it comes from kernel shapes and cache sizes.
+
+`llmfit setup --sweep` runs the candidates through llama-bench and keeps what
+wins. Three rules keep it honest:
+
+- **Nothing is benchmarked that would not fit.** Candidates go through the same
+  memory model as the plan, at the context you asked for, so the sweep cannot
+  recommend a setting that runs out of memory later.
+- **The objective follows the use case.** Prefill and decode trade against each
+  other, and which one matters is not a property of the hardware. Inline
+  completion is scored at 80% prefill; long-form writing at 20%.
+- **A win inside the noise is not a win.** llama-bench reports a standard
+  deviation with every number, and a candidate that beats the default by less
+  than the run-to-run spread is reported as a tie. Most of the time the planned
+  settings are already at the top of the curve, and that is a result worth
+  printing too: settings nobody checked and settings that were checked and held
+  up are different things.
+
+This is the one place llmfit can beat careful manual work outright, and not
+because the method is clever. A person tries three configurations and stops; a
+machine sits through all of them in a fixed order and writes down the spread.
+
 ### Two speeds, not one
 
 "Tokens per second" almost always means decode, or how fast words appear once the
@@ -331,6 +360,7 @@ llmfit setup            # the whole flow
 llmfit detect           # what hardware do I have?
 llmfit plan             # what would you pick, and why? (no downloads)
 llmfit verify           # test an endpoint I already run
+llmfit setup --sweep    # measure batch settings here and keep the fastest
 llmfit doctor           # re-test the last setup and repair it
 llmfit report           # reprint the last run's report (paste this into a bug report)
 llmfit export           # register an existing model with my other apps
@@ -469,7 +499,7 @@ The 3.9 floor is tested, not assumed: CI runs the full suite on 3.9, 3.10, 3.11,
 
 ```bash
 pip install -e ".[dev]"
-pytest                       # 686 tests, no GPU or network required
+pytest                       # 714 tests, no GPU or network required
 ruff check src/ tests/
 ```
 

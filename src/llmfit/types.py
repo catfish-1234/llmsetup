@@ -589,6 +589,9 @@ class SetupResult:
     #: Machine-level adjustments (an OS limit, an env var) that llmfit will not
     #: apply on the user's behalf but that this setup wants.
     platform_actions: List[Dict[str, Any]] = field(default_factory=list)
+    #: What an empirical sweep measured, when one was run. Absent by default,
+    #: because it costs minutes of the user's time to produce.
+    sweep: Optional[Dict[str, Any]] = None
     started_at: Optional[str] = None
     finished_at: Optional[str] = None
 
@@ -623,6 +626,7 @@ class SetupResult:
             "registrations": self.registrations,
             "embedding": self.embedding,
             "platform_actions": self.platform_actions,
+            "sweep": self.sweep,
             "succeeded": self.succeeded,
             "verified": self.checks_ran,
             "started_at": self.started_at,

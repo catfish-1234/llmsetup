@@ -91,6 +91,7 @@ def render_terminal(result: SetupResult, console: Console) -> None:
 
     _render_advanced(result, console)
     _render_platform(result, console)
+    _render_sweep(result, console)
     _render_checks(result.checks, console)
     _render_embedding(result, console)
     _render_repairs(result, console)
@@ -171,6 +172,27 @@ def _render_platform(result: SetupResult, console: Console) -> None:
         console.info(console.dim(f"    {action['reason']}"))
         if action.get("command"):
             console.info(f"    $ {action['command']}")
+
+
+def _render_sweep(result: SetupResult, console: Console) -> None:
+    """What measuring the machine found, including when it found nothing.
+
+    Reporting a sweep that changed nothing matters as much as reporting one that
+    did: it is the difference between settings nobody checked and settings that
+    were checked and held up.
+    """
+    sweep = result.sweep
+    if not sweep:
+        return
+    console.print()
+    console.print(console.bold("Measured on this machine"))
+    if sweep.get("worth_applying"):
+        console.ok(sweep.get("rationale", ""))
+    else:
+        console.info(console.dim(sweep.get("rationale", "")))
+    if sweep.get("measurements"):
+        console.info(console.dim(
+            f"{sweep['measurements']} measurements taken with llama-bench"))
 
 
 def _render_checks(checks: List[CheckResult], console: Console) -> None:
