@@ -81,6 +81,15 @@ class RepairStrategy:
     cost: str
     apply: Callable[[RepairState], Optional[Outcome]]
     description: str = ""
+    #: Whether the loop may run this more than once for the same signature.
+    #:
+    #: Normally it may not, and that is what makes termination structural. A
+    #: strategy setting this takes on the obligation itself: it must consume
+    #: something finite on every run and return None once that is gone, so the
+    #: sequence still ends. Only set it where the strategy walks a fixed list
+    #: it records progress through, never where it recomputes a value that
+    #: could oscillate.
+    exhausts_itself: bool = False
 
     def handles(self, signature: str) -> bool:
         return signature in self.triggers
@@ -470,6 +479,43 @@ def _template_name(spec) -> str:
     return "chatml"
 
 
+def _try_tool_parser(state: RepairState) -> Optional[Outcome]:
+    """Try the next tool-call parser this family might be using.
+
+    A model emitting a perfectly good tool call still comes back as prose when
+    the server is looking for another shape, and the shapes are not
+    interchangeable between families or even between versions of one. Which
+    parser a given build wants is not something to be reasoned about from the
+    outside, so try the plausible ones and let the check say which works.
+    """
+    config, spec = state.config, state.candidate.model
+    if config.runtime != "vllm":
+        return None
+
+    from llmfit.tuning.tuner import tool_parsers_for
+
+    candidates = tool_parsers_for(spec)
+    if not candidates:
+        return None
+    tried = config.extra.setdefault("tool_parsers_tried", [])
+    current = config.extra.get("tool_parser")
+    if current and current not in tried:
+        tried.append(current)
+    remaining = [p for p in candidates if p not in tried]
+    if not remaining:
+        return None
+
+    nxt = remaining[0]
+    before = {"tool_parser": current}
+    config.extra["tool_parser"] = nxt
+    tried.append(nxt)
+    return Outcome(
+        f"switched the tool-call parser to {nxt}, because this family emits "
+        f"calls in more than one shape and the server has to be told which",
+        cost="low", before=before, after={"tool_parser": nxt},
+    )
+
+
 def _enable_embeddings_flag(state: RepairState) -> Optional[Outcome]:
     """llama.cpp will not serve embeddings unless started with --embeddings."""
     config = state.config
@@ -593,6 +639,11 @@ STRATEGIES: List[RepairStrategy] = [
     RepairStrategy("enable_chat_template",
                    (sig.TOOLS_UNSUPPORTED, sig.TOOL_CALL_MALFORMED), "low",
                    _enable_chat_template),
+    # Repeatable: it walks a recorded list of parsers and returns None once
+    # every one has been tried, so the sequence is finite either way.
+    RepairStrategy("try_tool_parser",
+                   (sig.TOOLS_UNSUPPORTED, sig.TOOL_CALL_MALFORMED), "low",
+                   _try_tool_parser, exhausts_itself=True),
     RepairStrategy("enable_embeddings_flag", (sig.EMBEDDINGS_UNSUPPORTED,), "low",
                    _enable_embeddings_flag),
     RepairStrategy("fetch_vision_projector", (sig.VISION_UNSUPPORTED,), "low",
