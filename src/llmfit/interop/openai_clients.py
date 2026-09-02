@@ -94,6 +94,29 @@ def _continue_yaml(model: str, base: str, spec: ModelSpec,
       - chat
       - edit
 {"      - apply" if spec.supports_tools else ""}
+{_continue_autocomplete(model, base, spec) if spec.supports_fim else ""}"""
+
+
+def _continue_autocomplete(model: str, base: str, spec: ModelSpec) -> str:
+    """The inline-completion role, which is a separate entry from chat.
+
+    Continue keeps autocomplete apart from chat because the two want different
+    models: one answers between keystrokes, the other reasons about a change.
+    Where the same model can do both, it still has to be listed twice, because
+    the roles carry different settings.
+    """
+    return f"""  - name: {spec.name} autocomplete (llmfit)
+    provider: openai
+    model: {model}
+    apiBase: {base}
+    apiKey: {DUMMY_KEY}
+    defaultCompletionOptions:
+      # Completions are read at a glance and replaced by the next keystroke, so
+      # they are kept short and cheap rather than thorough.
+      maxTokens: 256
+      temperature: 0.1
+    roles:
+      - autocomplete
 """
 
 

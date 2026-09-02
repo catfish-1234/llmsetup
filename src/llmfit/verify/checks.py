@@ -650,6 +650,74 @@ def check_throughput(ctx: CheckContext) -> CheckResult:
                  f"{measured:.1f} tokens/s (predicted {predicted:.0f})", **metrics)
 
 
+#: What an inline completion has to come back within. A suggestion that lands
+#: after the next keystroke is worse than no suggestion, because the reader has
+#: already moved on and now has to read it anyway.
+_INFILL_LATENCY_BUDGET_S = 1.0
+
+
+def check_infill(ctx: CheckContext) -> CheckResult:
+    """Fill a gap in a function and see whether the result is usable.
+
+    Two things can go wrong and they look the same from the outside. The model
+    may not be trained for this at all, in which case it ignores the suffix and
+    writes something plausible that does not join up. Or the server may not have
+    the endpoint, in which case nothing happens. Both leave an editor plugin
+    silently useless, so both are worth separating out here.
+    """
+    name = "infill"
+    severity = (Severity.REQUIRED if Task.AUTOCOMPLETE in ctx.profile.tasks
+                else Severity.ADVISORY)
+
+    prefix = "def add_numbers(a, b):\n    total = "
+    suffix = "\n    return total\n"
+    result = ctx.client.infill(prefix, suffix, max_tokens=32, timeout=60)
+
+    if not result.get("ok"):
+        return _fail(
+            name, severity,
+            "the infill endpoint is not available on this server",
+            sig.classify(result.get("error", "")) or sig.INFILL_UNSUPPORTED,
+            detail=str(result.get("error", ""))[:600],
+        )
+
+    text = (result.get("text") or "").strip()
+    latency = float(result.get("latency_s") or 0.0)
+    metrics = {"latency_s": round(latency, 3)}
+
+    if not text:
+        return _fail(name, severity,
+                     "the endpoint answered but filled the gap with nothing",
+                     sig.INFILL_UNSUPPORTED, **metrics)
+
+    # The gap is the right-hand side of an assignment whose result is returned.
+    # Anything that completes it mentions the two arguments; prose about the
+    # function does not, and prose is what a model without infill training
+    # produces here.
+    joined = "a" in text and "b" in text
+    if not joined:
+        return _fail(
+            name, severity,
+            "the endpoint accepted the request but the model does not appear "
+            "to be trained for infilling, since it ignored the code after the "
+            "cursor",
+            sig.INFILL_UNSUPPORTED, detail=f"filled the gap with: {text[:200]!r}",
+            **metrics,
+        )
+
+    if latency > _INFILL_LATENCY_BUDGET_S:
+        return CheckResult(
+            name=name, status=CheckStatus.WARN, severity=Severity.ADVISORY,
+            message=(f"infill works but takes {latency:.1f}s, which is longer "
+                     f"than a typing pause, so suggestions will arrive after "
+                     f"they are useful"),
+            failure_signature=sig.THROUGHPUT_TOO_LOW, metrics=metrics,
+        )
+    return _pass(name, severity,
+                 f"filled a gap in a function in {latency * 1000:.0f}ms",
+                 **metrics)
+
+
 def check_prefill(ctx: CheckContext) -> CheckResult:
     """Measure prompt processing, which is a different number from decode.
 
@@ -859,6 +927,7 @@ ALL_CHECKS: Dict[str, Callable[[CheckContext], CheckResult]] = {
     "vision": check_vision,
     "throughput": check_throughput,
     "prefill": check_prefill,
+    "infill": check_infill,
     "stability": check_stability,
     "repetition": check_repetition,
 }

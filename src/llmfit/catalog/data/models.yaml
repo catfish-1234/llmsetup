@@ -119,15 +119,20 @@ models:
     license: Apache-2.0
     commercial_ok: true
     quality_tier: 5
-    tasks: [coding, agent, extract]
+    tasks: [coding, agent, extract, autocomplete]
     supports_tools: true
     supports_json: true
+    supports_fim: true
     gguf_repo: unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF
     hf_repo: Qwen/Qwen3-Coder-30B-A3B-Instruct
     ollama_name: qwen3-coder:30b
     recommended_quants: [Q4_K_M, Q5_K_M, Q6_K, Q8_0]
     arch_source: measured
-    notes: The standard local coding-agent pick for 24-32 GB. 256K context.
+    notes: >
+      The standard local coding-agent pick for 24-32 GB. 256K context. Also
+      fill-in-the-middle capable, which llama.vim lists it for, and its 3.3B
+      active parameters mean it answers at small-model speed, so it can drive
+      inline completion as well as chat.
 
   - id: qwen3-coder-next
     tokenizer_family: qwen3-next
