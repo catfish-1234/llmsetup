@@ -132,11 +132,17 @@ def kv_cache_bytes(spec: ModelSpec, context_tokens: int, kv_quant: str = "f16",
                    swa_full: bool = False) -> int:
     """KV cache for a whole context, accounting for sliding-window layers.
 
-    Some models interleave layers that attend globally with layers that only
-    attend within a fixed window. The windowed layers cache the window and no
-    more however long the context is, which is why a model like this fits a far
-    longer context than the flat formula suggests. Treating them as global is
-    not conservative in a useful way, it just makes the model look impossible.
+    Not every layer costs the same, and on some models most of them cost nothing
+    per token at all:
+
+    * Recurrent layers, as in the Gated DeltaNet blocks that make up three
+      quarters of a hybrid model, carry a fixed-size state instead of a cache.
+    * Windowed attention layers cache the window and no more, however long the
+      context is.
+    * Only globally-attending layers grow with the whole context.
+
+    Treating every layer as the third kind is not conservative in a useful way.
+    It just makes models look impossible that in fact fit comfortably.
 
     ``swa_full`` covers the case where the engine has been told to keep a
     full-size cache for the windowed layers anyway. That costs the full amount
@@ -147,12 +153,19 @@ def kv_cache_bytes(spec: ModelSpec, context_tokens: int, kv_quant: str = "f16",
     element = KV_ELEMENT_BYTES.get(kv_quant.lower(), 2.0)
     per_layer_token = 2 * spec.kv_heads * spec.effective_head_dim * element
 
+    # Recurrent layers hold a state whose size does not depend on how long the
+    # context is. It is part of the footprint but not part of the per-token
+    # cost, so it is added once rather than multiplied by anything.
+    recurrent = spec.recurrent_layers * spec.recurrent_state_bytes
+
     if not spec.uses_swa or swa_full:
-        return int(per_layer_token * spec.layers * context_tokens)
+        return int(per_layer_token * spec.attention_layers * context_tokens
+                   + recurrent)
 
     windowed = min(context_tokens, int(spec.sliding_window or context_tokens))
     return int(per_layer_token * (spec.global_layers * context_tokens
-                                  + spec.local_layers * windowed))
+                                  + spec.local_layers * windowed)
+               + recurrent)
 
 
 def weight_bytes(spec: ModelSpec, bpw: float) -> int:
@@ -225,9 +238,11 @@ def max_context_for_budget(
     halving blindly.
 
     For a sliding-window model the relationship is not a straight line. Up to
-    the window every layer caches; past it only the globally-attending layers
-    keep growing while the rest hold steady. Inverting the flat formula would
-    hand back a context several times shorter than the model can really take.
+    the window every attention layer caches; past it only the globally-attending
+    layers keep growing while the rest hold steady. Recurrent layers never grow
+    at all, so on a hybrid model they come off the budget once and then stop
+    mattering. Inverting the flat formula would hand back a context several
+    times shorter than the model can really take.
     """
     parallel = max(1, parallel)
     fixed = weight_bytes(spec, bpw) + overhead_bytes(spec, runtime, ubatch, parallel)
@@ -240,12 +255,16 @@ def max_context_for_budget(
     if per_layer_token <= 0:
         return spec.max_context
 
+    remaining -= spec.recurrent_layers * spec.recurrent_state_bytes
+    if remaining <= 0:
+        return 0
+
     if not spec.uses_swa or swa_full:
-        tokens = int(remaining / (per_layer_token * spec.layers))
+        tokens = int(remaining / (per_layer_token * spec.attention_layers))
     else:
         window = int(spec.sliding_window or 0)
         # Below the window nothing is capped yet, so every layer still counts.
-        flat = int(remaining / (per_layer_token * spec.layers))
+        flat = int(remaining / (per_layer_token * spec.attention_layers))
         if flat <= window:
             tokens = flat
         else:

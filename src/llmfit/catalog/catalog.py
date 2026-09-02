@@ -262,6 +262,7 @@ _NUMERIC_FIELDS = {
     "hidden_size": int, "kv_heads": int, "head_dim": int, "max_context": int,
     "quality_tier": int, "max_disk_gb": float,
     "sliding_window": int, "swa_pattern": int,
+    "full_attention_interval": int, "recurrent_state_bytes": int,
 }
 _BOOL_FIELDS = (
     "commercial_ok", "supports_tools", "supports_vision", "supports_json",
