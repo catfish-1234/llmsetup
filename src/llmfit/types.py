@@ -270,6 +270,15 @@ class ModelSpec:
     #: uses 6 (five local layers then one global). 1 means every layer is
     #: global, which is the same as having no sliding window at all.
     swa_pattern: int = 1
+    #: One full-attention layer every N, with the layers in between recurrent.
+    #: A recurrent layer carries a fixed-size state instead of a cache that
+    #: grows with the context, so on a hybrid model most of the layers stop
+    #: costing anything per token. llama.cpp writes this as
+    #: ``<arch>.full_attention_interval``. 1 means no recurrent layers at all.
+    full_attention_interval: int = 1
+    #: Bytes of recurrent state one non-attention layer holds. Constant in the
+    #: context length, which is the whole point of it.
+    recurrent_state_bytes: int = 0
     notes: str = ""
 
     @property
@@ -302,16 +311,37 @@ class ModelSpec:
         return bool(self.sliding_window) and self.swa_pattern > 1
 
     @property
-    def global_layers(self) -> int:
-        """Layers whose cache grows with the whole context."""
-        if not self.uses_swa:
+    def is_hybrid(self) -> bool:
+        """Whether some layers are recurrent rather than attention layers."""
+        return self.full_attention_interval > 1
+
+    @property
+    def attention_layers(self) -> int:
+        """Layers that keep a KV cache at all.
+
+        On a hybrid model the rest are recurrent: they carry a fixed-size state
+        and contribute nothing that grows with the context. Counting them as
+        cache layers is how a model that fits comfortably gets ruled out.
+        """
+        if not self.is_hybrid:
             return self.layers
-        return max(1, self.layers // self.swa_pattern)
+        return max(1, self.layers // self.full_attention_interval)
+
+    @property
+    def recurrent_layers(self) -> int:
+        return self.layers - self.attention_layers
+
+    @property
+    def global_layers(self) -> int:
+        """Attention layers whose cache grows with the whole context."""
+        if not self.uses_swa:
+            return self.attention_layers
+        return max(1, self.attention_layers // self.swa_pattern)
 
     @property
     def local_layers(self) -> int:
-        """Layers whose cache stops growing once the window is full."""
-        return self.layers - self.global_layers
+        """Attention layers whose cache stops growing once the window is full."""
+        return self.attention_layers - self.global_layers
 
     @property
     def compute_params_b(self) -> float:
