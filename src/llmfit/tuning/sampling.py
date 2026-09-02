@@ -20,10 +20,10 @@ from llmfit.tuning import publisher
 from llmfit.types import ModelSpec, Task, UseCaseProfile
 
 #: Tasks where repeated tokens are legitimate output rather than a defect.
-_CODE_LIKE = {Task.CODING, Task.AGENT, Task.EXTRACT}
+_CODE_LIKE = {Task.CODING, Task.AGENT, Task.EXTRACT, Task.AUTOCOMPLETE}
 
 #: Tasks that want reproducible output, where a publisher permits it.
-_DETERMINISTIC = {Task.EXTRACT, Task.CODING, Task.TRANSLATE}
+_DETERMINISTIC = {Task.EXTRACT, Task.CODING, Task.TRANSLATE, Task.AUTOCOMPLETE}
 
 
 @dataclass
@@ -52,9 +52,31 @@ _TASK_DEFAULTS = {
     Task.CHAT:      (0.7,  0.90, 40, 0.05, 1.10, "general conversation"),
     Task.CREATIVE:  (0.95, 0.95, 60, 0.03, 1.05, "creative writing benefits from variety"),
     Task.VISION:    (0.4,  0.90, 40, 0.05, 1.05, "image description should stay grounded"),
+    Task.AUTOCOMPLETE: (0.1, 0.95, 20, 0.00, 1.00,
+                        "inline completion should finish the line the obvious "
+                        "way rather than suggest something interesting"),
 }
 
 _DEFAULT = (0.7, 0.9, 40, 0.05, 1.1, "general default")
+
+#: Tasks where variety is the point and a low published temperature is the
+#: wrong instrument, however well it serves the use the publisher had in mind.
+_OPEN_ENDED = {Task.CREATIVE}
+
+#: Where creative work lands. Temperature near one with min-p to truncate is
+#: what the writing communities have converged on, and the two only work as a
+#: pair: the temperature supplies the variety, the min-p keeps it coherent.
+_CREATIVE_TEMPERATURE = 1.0
+_CREATIVE_MIN_P = 0.05
+
+#: Where work that has to repeat itself lands. Low enough to be stable, not so
+#: low that the model has no choice at all.
+_DETERMINISTIC_TEMPERATURE = 0.2
+
+#: Inline completion. Low but not zero: the model should finish the line the
+#: obvious way, and every family that warns about greedy decoding warns about
+#: zero specifically.
+_COMPLETION_TEMPERATURE = 0.2
 
 
 def sampling_for(spec: ModelSpec, profile: UseCaseProfile,
@@ -106,7 +128,7 @@ def sampling_for(spec: ModelSpec, profile: UseCaseProfile,
         if profile.primary_task in _DETERMINISTIC and \
                 "temperature 0" not in published.avoid and \
                 "greedy decoding" not in published.avoid:
-            lowered = min(temperature, 0.2)
+            lowered = min(temperature, _DETERMINISTIC_TEMPERATURE)
             if lowered < temperature:
                 temperature = lowered
                 notes.append(
@@ -117,6 +139,52 @@ def sampling_for(spec: ModelSpec, profile: UseCaseProfile,
                 "temperature left at the published value: this family warns "
                 "against greedy decoding, which sends it into repetition loops"
             )
+
+        # Infilling is a third mode, alongside instruct and thinking. It does
+        # not go through the chat template at all: the model is handed a prefix
+        # and a suffix on a separate endpoint and asked to join them. A card's
+        # temperature describes the conversational mode and does not govern
+        # this one, and a completion that varies between identical cursor
+        # positions is noise rather than variety. No publisher states a figure
+        # for it, so this is llmfit's own and is labelled as such.
+        if profile.primary_task is Task.AUTOCOMPLETE and \
+                temperature > _COMPLETION_TEMPERATURE and not spec.is_reasoning:
+            temperature = _COMPLETION_TEMPERATURE
+            notes.append(
+                f"temperature {temperature} for infilling, which is a separate "
+                f"endpoint and a different mode from the conversational one the "
+                f"card describes"
+            )
+
+        # The mirror of the case above. A published number describes the use the
+        # publisher had in mind, which is ordinary instruct-style work, and some
+        # cards state a very low one: Mistral says 0.15. Handing that to someone
+        # writing fiction gives them flat, repetitive prose and no way to see
+        # why. Creative writing is a deliberately different use, so it gets the
+        # settings that make it work.
+        if profile.primary_task in _OPEN_ENDED:
+            if temperature < _CREATIVE_TEMPERATURE:
+                notes.append(
+                    f"temperature raised from the published {temperature} to "
+                    f"{_CREATIVE_TEMPERATURE} for creative work, which the "
+                    f"published figure is not aimed at"
+                )
+                temperature = _CREATIVE_TEMPERATURE
+            if min_p < _CREATIVE_MIN_P:
+                # This is what makes a high temperature usable rather than
+                # random: it cuts the tail relative to the most likely token, so
+                # the model stays coherent while still having room to choose.
+                min_p = _CREATIVE_MIN_P
+                notes.append(
+                    f"min-p {min_p} added, which is what keeps a temperature "
+                    f"this high coherent instead of merely random"
+                )
+            if repeat_penalty > 1.0:
+                repeat_penalty = 1.0
+                notes.append(
+                    "repetition penalty off, since DRY handles repeated phrasing "
+                    "without penalising words a passage legitimately reuses"
+                )
 
     if spec.is_reasoning and published is None:
         # Only when the publisher said nothing. Reasoning models degenerate into

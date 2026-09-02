@@ -36,6 +36,8 @@ class Question:
 TASK_OPTIONS = [
     Option("chat", "General chat and Q&A", "the everyday assistant case"),
     Option("coding", "Writing and reviewing code", "wants a code-tuned model"),
+    Option("autocomplete", "Inline completion as I type in an editor",
+           "a second, faster model on the /infill endpoint"),
     Option("agent", "Agents and tool use", "requires reliable function calling"),
     Option("rag", "Questions over my own documents", "needs long context + embeddings"),
     Option("summarize", "Summarizing long documents", "long context matters most"),
@@ -176,6 +178,10 @@ def infer_flags(answers: dict) -> dict:
         derived.setdefault("needs_json", True)
     if "vision" in tasks:
         derived.setdefault("needs_vision", True)
+    # Completion sees the file around the cursor, not a conversation, and every
+    # token of context is latency paid on every keystroke.
+    if "autocomplete" in tasks and int(derived.get("context_tokens") or 0) == 0:
+        derived["context_tokens"] = 8192
     if "rag" in tasks:
         derived.setdefault("needs_embeddings", True)
         # Retrieval over documents is not useful in a short window.

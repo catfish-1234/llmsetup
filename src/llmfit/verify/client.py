@@ -181,6 +181,38 @@ class OpenAIClient:
 
     # ----------------------------------------------------------------- meta
 
+    def infill(self, prefix: str, suffix: str, max_tokens: int = 64,
+               timeout: Optional[float] = None) -> Dict[str, Any]:
+        """Ask the server to fill the gap between a prefix and a suffix.
+
+        A different endpoint from chat, because it is a different operation:
+        the model is not answering a question about the code, it is continuing
+        it from the middle with the rest already in view.
+        """
+        body = {
+            "input_prefix": prefix,
+            "input_suffix": suffix,
+            "n_predict": max_tokens,
+            "temperature": 0.0,
+        }
+        started = time.monotonic()
+        response = http.request(
+            self.endpoint.infill_url, method="POST", json_body=body,
+            headers=self.endpoint.headers, timeout=timeout or self.timeout,
+        )
+        latency = time.monotonic() - started
+        if not response.ok:
+            return {"ok": False,
+                    "error": (response.error or "") + response.body[:500],
+                    "status": response.status, "latency_s": latency}
+        data = response.json() or {}
+        return {
+            "ok": True,
+            "text": data.get("content") or data.get("completion") or "",
+            "latency_s": latency,
+            "raw": data,
+        }
+
     def list_models(self) -> Dict[str, Any]:
         response = http.request(self.endpoint.models_url, timeout=20)
         if not response.ok:

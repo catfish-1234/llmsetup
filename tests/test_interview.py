@@ -18,6 +18,19 @@ from llmfit.util.errors import LlmfitError
 from llmfit.util.log import Console
 
 
+def task_numbers(*names):
+    """Positions of task options, looked up rather than hardcoded.
+
+    The wizard numbers its options, and a test that spells the numbers out
+    breaks the moment an option is inserted, which says nothing about the
+    behaviour it was meant to pin.
+    """
+    from llmfit.interview.questions import TASK_OPTIONS
+
+    order = [option.value for option in TASK_OPTIONS]
+    return ",".join(str(order.index(name) + 1) for name in names)
+
+
 def drive(script):
     """Run the wizard against a scripted set of answers; unanswered = Enter."""
     answers = iter(script)
@@ -75,7 +88,8 @@ class TestInference:
 
 class TestWizard:
     def test_collects_answers_by_number(self):
-        profile, _ = drive(["2,3", "1", "3", "3", "1", "", "", "", "", "en", "n", ""])
+        profile, _ = drive([task_numbers("coding", "agent"),
+                            "1", "3", "3", "1", "", "", "", "", "en", "n", ""])
         assert Task.CODING in profile.tasks and Task.AGENT in profile.tasks
         assert Client.LM_STUDIO in profile.clients
         assert profile.context_tokens == 32768
@@ -98,7 +112,7 @@ class TestWizard:
 
     def test_preserves_the_order_tasks_were_given(self):
         """The first task named is treated as primary and drives sampling."""
-        profile, _ = drive(["3,2"])
+        profile, _ = drive([task_numbers("agent", "coding")])
         assert profile.primary_task is Task.AGENT
 
     def test_reprompts_on_an_unrecognised_answer(self):

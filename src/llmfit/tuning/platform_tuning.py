@@ -260,6 +260,10 @@ def _compute_capability(gpu) -> float:
 
 
 #: Where two runs disagreeing is a defect rather than variety.
+#:
+#: Inline completion is deliberately absent. It wants reproducibility as much as
+#: anything here, but it cannot pay roughly 60% more latency to get it: the
+#: whole use case is answering before the next keystroke.
 _REPRODUCIBLE_TASKS = {Task.EXTRACT, Task.CODING, Task.TRANSLATE}
 
 

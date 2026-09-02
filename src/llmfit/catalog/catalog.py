@@ -95,6 +95,10 @@ class Catalog:
     def embedding_models(self) -> List[ModelSpec]:
         return [m for m in self.models if m.is_embedding]
 
+    def completion_models(self) -> List[ModelSpec]:
+        """Models that can fill a gap between a prefix and a suffix."""
+        return [m for m in self.models if m.supports_fim and not m.is_embedding]
+
     def matching(self, profile: UseCaseProfile) -> List[ModelSpec]:
         """Hard capability filter.
 
@@ -267,6 +271,7 @@ _NUMERIC_FIELDS = {
 _BOOL_FIELDS = (
     "commercial_ok", "supports_tools", "supports_vision", "supports_json",
     "is_reasoning", "is_embedding", "draft_capable", "mtp_heads",
+    "supports_fim",
 )
 _LIST_FIELDS = ("tasks", "languages", "recommended_quants")
 

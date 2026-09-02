@@ -35,6 +35,7 @@ JSON_MODE_UNSUPPORTED = "json_mode_unsupported"
 STREAMING_UNSUPPORTED = "streaming_unsupported"
 EMBEDDINGS_UNSUPPORTED = "embeddings_unsupported"
 VISION_UNSUPPORTED = "vision_unsupported"
+INFILL_UNSUPPORTED = "infill_unsupported"
 
 # --- performance ----------------------------------------------------------- #
 THROUGHPUT_TOO_LOW = "throughput_too_low"
