@@ -94,10 +94,12 @@ class VllmRuntime(Runtime):
         kv_dtype = kv_cache_dtype(config)
         if kv_dtype:
             cmd += ["--kv-cache-dtype", kv_dtype]
-        if spec.supports_tools:
-            # Without these, tool calls come back as prose instead of structured calls.
-            cmd += ["--enable-auto-tool-choice",
-                    "--tool-call-parser", str(config.extra.get("tool_parser", "hermes"))]
+        parser = config.extra.get("tool_parser")
+        if spec.supports_tools and parser:
+            # Without these, tool calls come back as prose instead of structured
+            # calls. With the wrong one, so do they, which is why an unknown
+            # family gets no parser rather than a plausible-looking default.
+            cmd += ["--enable-auto-tool-choice", "--tool-call-parser", str(parser)]
         cmd += self._advanced_flags(config)
         return cmd
 

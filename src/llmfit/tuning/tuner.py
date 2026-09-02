@@ -11,6 +11,7 @@ memory the rest of the settings have to work with.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import List, Optional
 
@@ -400,7 +401,17 @@ def _runtime_specific(config: RuntimeConfig, candidate: Candidate,
                 f"{spec.kv_heads} KV heads evenly",
             ))
         if spec.supports_tools:
-            config.extra["tool_parser"] = _tool_parser(spec)
+            parser = _tool_parser(spec)
+            if parser:
+                config.extra["tool_parser"] = parser
+            else:
+                decisions.append(TuningDecision(
+                    "tool_parser", "none",
+                    f"vLLM has no documented tool-call parser for "
+                    f"{spec.name}'s family, and guessing one is how a good tool "
+                    f"call comes back as prose. Auto tool choice stays off and "
+                    f"the tool check will report what the endpoint really does",
+                ))
         # The KV dtype is derived from config.kv_cache_type at launch rather
         # than stored here, so the repair loop's changes follow through.
         if config.kv_cache_type != "f16" and config.context_tokens > 32768 \
@@ -429,16 +440,59 @@ def _runtime_specific(config: RuntimeConfig, candidate: Candidate,
         config.extra.setdefault("hint", "if offload fails, set HSA_OVERRIDE_GFX_VERSION")
 
 
-def _tool_parser(spec) -> str:
-    """vLLM needs to be told how this family emits tool calls."""
-    publisher = spec.publisher.lower()
-    if "qwen" in publisher or "qwen" in spec.id:
-        return "hermes"
-    if "mistral" in publisher:
-        return "mistral"
-    if "meta-llama" in publisher or "llama" in spec.id:
-        return "llama3_json"
-    return "hermes"
+#: How each family emits tool calls, as vLLM names the parsers. Only families
+#: with a documented parser appear. The order matters for the fallbacks the
+#: repair loop tries: the first entry is the default and the rest are the
+#: plausible alternatives for that family.
+_TOOL_PARSERS = {
+    "qwen": ["hermes", "qwen3_xml"],
+    "mistral": ["mistral"],
+    "llama3": ["llama3_json"],
+    "llama4": ["llama4_pythonic", "pythonic"],
+    "deepseek": ["deepseek_v3"],
+    "granite": ["granite", "granite4"],
+    "glm": ["glm45"],
+    "kimi": ["kimi_k2"],
+    "internlm": ["internlm"],
+}
+
+
+def tool_parsers_for(spec) -> List[str]:
+    """Parsers worth trying for this model, best first.
+
+    Empty when the family has no documented parser. That is the useful answer:
+    passing a parser that does not match the family is not a harmless default,
+    it is the exact cause of the failure it is meant to prevent, where the model
+    emits a perfectly good tool call and the server hands back prose because it
+    was looking for another shape. Better to leave auto tool choice off and let
+    the tool check report honestly what the endpoint does.
+    """
+    # Separators are stripped so a key matches however the name is punctuated:
+    # "llama-3.1-8b", "Llama_3.1" and "llama3" all have to reach the same entry,
+    # and a catalog entry added by hand will not have a tokenizer family set.
+    haystack = re.sub(r"[^a-z0-9]", "",
+                      f"{spec.publisher} {spec.id} {spec.family}".lower())
+    if "llama4" in haystack:
+        return list(_TOOL_PARSERS["llama4"])
+
+    # A model can match two families: a DeepSeek distill of Qwen carries Qwen's
+    # tokenizer and chat template, which is what decides the tool format, but
+    # DeepSeek's own parser is still worth trying if that fails. Collect every
+    # match rather than taking whichever the dictionary happened to yield first.
+    found: List[str] = []
+    for key in sorted(_TOOL_PARSERS, key=lambda k: -len(k)):
+        if key == "llama4" or key not in haystack:
+            continue
+        for parser in _TOOL_PARSERS[key]:
+            if parser not in found:
+                found.append(parser)
+    return found
+
+
+def _tool_parser(spec) -> Optional[str]:
+    """vLLM needs to be told how this family emits tool calls, or nothing."""
+    parsers = tool_parsers_for(spec)
+    return parsers[0] if parsers else None
 
 
 def _bpw(candidate: Candidate) -> float:
