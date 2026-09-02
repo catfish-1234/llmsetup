@@ -44,7 +44,7 @@ class Pipeline:
                  catalog: Catalog, console: Console, *,
                  runtime_name: Optional[str] = None, quick: bool = False,
                  dry_run: bool = False, max_repairs: int = 12,
-                 register: bool = True):
+                 register: bool = True, sweep: bool = False):
         self.profile = profile
         self.hardware = hardware
         self.catalog = catalog
@@ -54,6 +54,7 @@ class Pipeline:
         self.dry_run = dry_run
         self.max_repairs = max_repairs
         self.register = register
+        self.sweep = sweep
         self._endpoint: Optional[Endpoint] = None
         self._runtime: Optional[Runtime] = None
 
@@ -119,6 +120,10 @@ class Pipeline:
         # Ground truth beats the catalog: correct the plan from the real file.
         self._correct_from_gguf(candidate, config, plan)
 
+        if self.sweep and runtime.uses_gguf:
+            self.console.step("Measuring settings on this machine")
+            result.sweep = self._sweep_settings(candidate, config)
+
         self.console.step("Starting the server")
         checks = self._launch_and_check(candidate.model, config, None)
 
@@ -159,6 +164,45 @@ class Pipeline:
 
         result.finished_at = _now()
         return result
+
+    # ----------------------------------------------------------------- sweep
+
+    def _sweep_settings(self, candidate, config: RuntimeConfig) -> Dict[str, Any]:
+        """Try candidate settings on the real hardware and keep what wins.
+
+        Every other number in the plan is predicted. This one is measured, which
+        is the only way to find that a particular card processes prompts fastest
+        at a micro-batch four times the default. Nothing is applied unless the
+        difference is larger than the run-to-run spread.
+        """
+        from llmfit.bench import apply_sweep, run_sweep
+
+        bpw = (candidate.estimate.weights * 8) / (candidate.model.params_b * 1e9)
+        outcome = run_sweep(
+            candidate.model, config, self.profile,
+            budget_bytes=self.hardware.memory_budget, bpw=bpw,
+            console=self.console,
+        )
+        if apply_sweep(config, outcome):
+            self.console.ok(outcome.rationale)
+            # The compute buffers scale with the micro-batch, so the memory
+            # figures the plan reports were computed for a batch size that is no
+            # longer the one being used.
+            self._recompute_estimate(candidate, config)
+        else:
+            self.console.info(outcome.rationale)
+        return outcome.to_dict()
+
+    def _recompute_estimate(self, candidate, config: RuntimeConfig) -> None:
+        """Bring the memory figures back in step with the settings in force."""
+        from llmfit.planner.memory import estimate_memory
+
+        candidate.estimate = estimate_memory(
+            candidate.model, self.catalog.bpw(config.quant), config.context_tokens,
+            quant=config.quant, kv_quant=config.kv_cache_type,
+            runtime=config.runtime, ubatch=config.ubatch_size,
+            parallel=config.parallel, swa_full=config.swa_full,
+        )
 
     # ------------------------------------------------------------- embedding
 
@@ -306,6 +350,7 @@ class Pipeline:
             corrected, bpw, config.context_tokens, quant=config.quant,
             kv_quant=config.kv_cache_type, runtime=config.runtime,
             ubatch=config.ubatch_size, parallel=config.parallel,
+            swa_full=config.swa_full,
         )
         config.total_layers = corrected.layers
         if config.gpu_layers > corrected.layers:
