@@ -89,7 +89,7 @@ class RepairLoop:
         """Cheapest applicable strategy that has not been tried for this signature."""
         for strategy in strategies_for(signature):
             key = (signature, strategy.name)
-            if key in self._tried:
+            if key in self._tried and not strategy.exhausts_itself:
                 continue
             self._tried.add(key)
 
