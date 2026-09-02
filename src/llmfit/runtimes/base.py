@@ -47,6 +47,11 @@ class Endpoint:
     def embeddings_url(self) -> str:
         return f"{self.base_url.rstrip('/')}/v1/embeddings"
 
+    @property
+    def infill_url(self) -> str:
+        """Fill-in-the-middle. Not an OpenAI route, so it sits outside /v1."""
+        return f"{self.base_url.rstrip('/')}/infill"
+
 
 class RuntimeUnavailable(Exception):
     """Raised by :meth:`Runtime.provision` when the engine cannot be used."""

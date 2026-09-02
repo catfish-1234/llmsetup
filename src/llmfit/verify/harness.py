@@ -55,6 +55,9 @@ def select_checks(profile: UseCaseProfile, spec: ModelSpec,
     if profile.needs_vision or Task.VISION in profile.tasks:
         selected.append("vision")
 
+    if Task.AUTOCOMPLETE in profile.tasks or spec.supports_fim:
+        selected.append("infill")
+
     if profile.needs_embeddings or spec.is_embedding:
         selected.append("embeddings")
 

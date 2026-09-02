@@ -29,7 +29,7 @@ from llmfit.types import GIB, Candidate, HardwareProfile, ModelSpec, Task, UseCa
 #: Speculative decoding is a bet on guessability: code and structured text pay,
 #: open-ended prose does not.
 _SPECULATIVE_TASKS = {Task.CODING, Task.AGENT, Task.EXTRACT, Task.TRANSLATE,
-                      Task.SUMMARIZE, Task.RAG}
+                      Task.SUMMARIZE, Task.RAG, Task.AUTOCOMPLETE}
 
 #: Smallest size ratio worth drafting with. A draft model that is not much
 #: cheaper than the target cannot win back the cost of verifying its guesses.
@@ -245,7 +245,8 @@ def plan_speculative(
 #: drafting from the context itself reliably hits. Answering a question about a
 #: retrieved document, summarising it, pulling fields out of it and rewriting it
 #: all reproduce long spans verbatim; open-ended chat does not.
-_NGRAM_TASKS = {Task.RAG, Task.SUMMARIZE, Task.EXTRACT, Task.CODING}
+_NGRAM_TASKS = {Task.RAG, Task.SUMMARIZE, Task.EXTRACT, Task.CODING,
+                Task.AUTOCOMPLETE}
 
 
 def _ngram_fallback(plan: SpeculativePlan, profile: UseCaseProfile,
@@ -334,6 +335,13 @@ def plan_reasoning(spec: ModelSpec, profile: UseCaseProfile) -> ReasoningPlan:
             "thinking kept low: it helps a little here and costs latency on every "
             "turn, which is felt in conversation"
         )
+    elif task is Task.AUTOCOMPLETE:
+        plan.effort = ReasoningEffort.OFF
+        plan.rationale = (
+            "thinking off: a completion has a few hundred milliseconds before "
+            "the next keystroke makes it irrelevant, and a thinking block "
+            "spends all of that before the first character appears"
+        )
     elif task in (Task.CODING, Task.AGENT):
         plan.effort = ReasoningEffort.MEDIUM
         # A bound, not a preference. An agent in a loop that spends its whole
@@ -406,7 +414,7 @@ def plan_sampler(spec: ModelSpec, profile: UseCaseProfile,
             f"presence penalty {presence_penalty} as the publisher specifies"
         )
 
-    if task in (Task.CODING, Task.AGENT, Task.EXTRACT):
+    if task in (Task.CODING, Task.AGENT, Task.EXTRACT, Task.AUTOCOMPLETE):
         # Deterministic work: no truncation games, and repetition in code is
         # usually legitimate (boilerplate, repeated identifiers), so penalties
         # stay off rather than mangling valid output.
@@ -474,13 +482,18 @@ def plan_serving(profile: UseCaseProfile, runtime: str,
 
     # Prefix caching is the single biggest win for agents and RAG, where a long
     # system prompt or document is resent on every turn.
-    if profile.primary_task in (Task.AGENT, Task.RAG, Task.CODING):
+    if profile.primary_task in (Task.AGENT, Task.RAG, Task.CODING,
+                                Task.AUTOCOMPLETE):
         plan.prefix_caching = True
         plan.cache_reuse_tokens = 512
         notes.append(
-            "prefix caching with generous reuse: agent and retrieval workloads "
-            "resend a long prefix every turn, and caching it removes most of the "
-            "prompt-processing cost"
+            "prefix caching with generous reuse: "
+            + ("every keystroke resends the file above the cursor, so caching "
+               "that prefix is most of the difference between a suggestion "
+               "arriving and arriving too late"
+               if profile.primary_task is Task.AUTOCOMPLETE else
+               "agent and retrieval workloads resend a long prefix every turn, "
+               "and caching it removes most of the prompt-processing cost")
         )
 
         # An agent's system prompt is its rules. When the conversation outgrows
