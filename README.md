@@ -102,6 +102,11 @@ Three details that calculators usually get wrong:
   caching once the window fills. Treating them as global put Gemma 3 27B at
   15.5 GB of predicted cache at 32K against a real 2.9 GB, which is the
   difference between fitting a 24 GB card and being ruled out of the plan.
+- **Recurrent layers.** A hybrid replaces most of its attention layers with
+  recurrent ones that hold a fixed-size state instead of a cache that grows.
+  Three quarters of Qwen3.6 35B-A3B is built this way, so it was being charged
+  24 GB of cache at 262K against a real 6 GB. On a 24 GB budget it reaches 172K
+  tokens, where the old maths said 43K.
 
 The KV term is why the interview asks about context up front: on a 24 GB card,
 the difference between 8K and 128K is the difference between a 32B model and a
@@ -154,6 +159,8 @@ runs" from "it runs well". Each is reported with the reason it was chosen:
 | **Speculative decoding** | Drafting ahead and verifying in one pass, in whichever form the model supports. Some models carry multi-token prediction heads inside their own weights, which costs no download and no second resident model, so nothing else competes when a build has them. Failing that, a small draft model from the catalog (same vocabulary, at least 5x smaller) when the task has predictable output and there is memory to spare. Failing that, drafting from the prompt itself, which costs nothing and pays when the answer quotes its source. Whether a build has the heads is read out of the file, because publishers ship an MTP build and a plain build of the same model. |
 | **Reasoning budget** | `--reasoning on/off` and effort tiers. Suppressing the thinking block takes time-to-first-token from seconds to a fraction of one, so extraction and translation get it off while agents keep it. |
 | **Publisher-recommended sampling** | Model authors publish the settings they evaluated their own model with, and those beat any generic default. Qwen3 in thinking mode wants `temp 0.6 / top-p 0.95`; the same model with thinking off wants `0.7 / 0.8` and a presence penalty of 1.5; Gemma 3 wants `temp 1.0 / top-k 64`; Mistral wants `0.15`. llmfit starts from the card for the family *and the mode it will actually run in*, then lets the task adjust only within what the publisher sanctioned. It refuses an adjustment the card explicitly warns against, such as greedy decoding on a Qwen3 reasoning model, which sends it into infinite repetition. Every entry cites its source. |
+| **Reproducibility** | Extraction, coding and translation get a fixed seed, and the plan says what that does and does not buy. A seed removes the sampler as a source of variation; it does not make the engine deterministic, because floating-point addition is not associative and a request batched with three others accumulates in a different order. Where that matters and the hardware supports it, batch-invariant kernels are offered as an opt-in step with their real cost attached, which is roughly 60% longer per request. |
+| **Tool-call parsers** | vLLM has to be told which shape a family emits tool calls in, and the shapes are not interchangeable. Only families with a documented parser get one; the rest get none, because a plausible-looking default causes the exact failure it is meant to prevent, where the model emits a good call and the server hands back prose. Which parser a build actually wants is settled by trying, so the tool check has a repair that walks the family's candidates. |
 | **Full sampler chain** | DRY, XTC, top-n-sigma, typical-p, mirostat, penalty windows, and the *order* they run in, which changes output as much as the values. Code gets no repetition penalties at all, because repeated tokens in code are usually correct. |
 | **RoPE / YaRN** | Context past the trained window, planned only when you ask for more than the model natively has, with the quality cost stated. |
 | **Multi-GPU** | Tensor split proportional to VRAM, with the largest card holding the KV cache. |
@@ -439,7 +446,7 @@ The 3.9 floor is tested, not assumed: CI runs the full suite on 3.9, 3.10, 3.11,
 
 ```bash
 pip install -e ".[dev]"
-pytest                       # 524 tests, no GPU or network required
+pytest                       # 657 tests, no GPU or network required
 ruff check src/ tests/
 ```
 

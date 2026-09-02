@@ -91,6 +91,8 @@ class VllmRuntime(Runtime):
         quantization = config.extra.get("vllm_quantization")
         if quantization:
             cmd += ["--quantization", str(quantization)]
+        if config.seed is not None:
+            cmd += ["--seed", str(config.seed)]
         kv_dtype = kv_cache_dtype(config)
         if kv_dtype:
             cmd += ["--kv-cache-dtype", kv_dtype]
