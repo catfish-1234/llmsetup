@@ -522,7 +522,8 @@ def _fix_seed(config, profile, decisions) -> None:
 
 #: Tasks where a repeated run producing a different answer is a defect rather
 #: than variety. Kept in step with the sampling module's own list.
-_DETERMINISTIC_TASKS = {Task.EXTRACT, Task.CODING, Task.TRANSLATE}
+_DETERMINISTIC_TASKS = {Task.EXTRACT, Task.CODING, Task.TRANSLATE,
+                        Task.AUTOCOMPLETE}
 
 
 def _tool_parser(spec) -> Optional[str]:

@@ -33,6 +33,10 @@ class Task(str, enum.Enum):
     EXTRACT = "extract"
     VISION = "vision"
     EMBEDDING = "embedding"
+    #: Inline completion in an editor: the model is handed the code before and
+    #: after the cursor and fills the gap. A different job from writing code in
+    #: a chat window, with different models and a different endpoint.
+    AUTOCOMPLETE = "autocomplete"
 
 
 class Priority(str, enum.Enum):
@@ -244,6 +248,11 @@ class ModelSpec:
     supports_json: bool = False
     is_reasoning: bool = False
     is_embedding: bool = False
+    #: Trained to fill a gap between a prefix and a suffix, with the special
+    #: tokens that requires. Instruction-tuned models generally cannot do this
+    #: even when they are excellent at writing code in a chat window, so it is
+    #: a capability rather than something to infer from the name.
+    supports_fim: bool = False
     languages: List[str] = field(default_factory=lambda: ["en"])
     gguf_repo: Optional[str] = None      # HF repo carrying GGUF quants
     ollama_name: Optional[str] = None    # tag pullable via `ollama pull`

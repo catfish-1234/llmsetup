@@ -139,6 +139,29 @@ answers, so a stated requirement is a tested one:
 Each failure returns a machine-readable signature, which is the join key into
 repair.
 
+### Inline completion is a different setup
+
+Autocomplete in an editor is not chat with a shorter prompt. It uses a separate
+endpoint, `/infill`, where the model is handed the code before and after the
+cursor and asked to join them. Instruction-tuned models generally cannot do that
+at all, however good they are at writing code in a chat window, because they
+were never taught the tokens that express it.
+
+So asking for it changes the whole plan rather than a setting. llmfit picks a
+model trained to infill, sized by *active* parameters rather than total, because
+that is what decides how long the editor waits: a 30B mixture of experts that
+activates 3B answers at 3B speed. It routes to an engine that has the endpoint,
+since Ollama and LM Studio serve the same model perfectly well for chat and
+simply have no infill route, which leaves an editor plugin looking broken. It
+turns thinking off, because a reasoning block spends the entire latency budget
+before the first character appears. It caches the prefix, since every keystroke
+resends the file above the cursor. And it writes the `autocomplete` role into
+the editor config alongside the chat one.
+
+Infilling is treated as its own sampling mode, alongside instruct and thinking.
+A model card's temperature describes the conversational mode, and completion
+never goes through the chat template at all.
+
 ### RAG gets a real retriever
 
 Asking for RAG provisions **two** models: the chat model, and a separate
@@ -446,7 +469,7 @@ The 3.9 floor is tested, not assumed: CI runs the full suite on 3.9, 3.10, 3.11,
 
 ```bash
 pip install -e ".[dev]"
-pytest                       # 657 tests, no GPU or network required
+pytest                       # 686 tests, no GPU or network required
 ruff check src/ tests/
 ```
 

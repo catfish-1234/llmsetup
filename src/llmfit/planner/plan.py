@@ -276,6 +276,59 @@ def _too_big_hint(
     )
 
 
+#: What an inline completion has to come back within before people turn it off.
+#: A suggestion that lands after the next keystroke is worse than none, so this
+#: is the constraint the whole choice is made against.
+_COMPLETION_LATENCY_BUDGET_MS = 500
+
+#: Above this many *active* parameters the model is too slow to sit in the
+#: typing loop, whatever else it has going for it. Active rather than total,
+#: because decode speed is set by the parameters that run per token: a 30B
+#: mixture of experts that activates 3B answers at 3B speed, so it belongs here
+#: even though a dense 30B would not.
+_COMPLETION_MAX_ACTIVE_PARAMS_B = 8.0
+
+
+def plan_completion_model(
+    profile: UseCaseProfile, hardware: HardwareProfile, catalog: Catalog,
+    chat_model: Optional[ModelSpec] = None,
+) -> Optional[ModelSpec]:
+    """Pick a companion model for inline completion.
+
+    Editors run two models rather than one, and for a reason worth stating: the
+    completion model is measured on how fast it answers, not on how well it
+    reasons. Anything that fires on every keystroke has a few hundred
+    milliseconds before people switch it off, and a 30B model cannot make that
+    on consumer hardware however good its code is.
+
+    So this deliberately picks small, and it picks only from models trained to
+    fill a gap. An instruction-tuned model handed a prefix and a suffix does not
+    do a worse job of infilling; it does not do the job at all, because it was
+    never taught the tokens that express it.
+    """
+    if Task.AUTOCOMPLETE not in profile.tasks:
+        return None
+
+    candidates = [m for m in catalog.completion_models()
+                  if m.compute_params_b <= _COMPLETION_MAX_ACTIVE_PARAMS_B]
+    if not candidates:
+        return None
+
+    # The chat model already occupies memory, so the completion model is sized
+    # against what is left rather than against the card.
+    budget = hardware.memory_budget
+    if chat_model is not None:
+        budget -= int(chat_model.params_b * 1e9 * 4.85 / 8)
+    affordable = [m for m in candidates
+                  if int(m.params_b * 1e9 * 4.85 / 8) < max(0, budget)]
+
+    # Fewest active parameters first, because that is what decides how long the
+    # editor waits. Quality breaks ties between models that answer as quickly
+    # as each other.
+    pool = affordable or candidates
+    return sorted(pool, key=lambda m: (m.compute_params_b, -m.quality_tier))[0]
+
+
 def plan_embedding_model(
     profile: UseCaseProfile, hardware: HardwareProfile, catalog: Catalog
 ) -> Optional[ModelSpec]:

@@ -14,7 +14,13 @@ from __future__ import annotations
 from typing import Dict, List, Tuple
 
 from llmfit.runtimes.base import Runtime
-from llmfit.types import Accelerator, Client, HardwareProfile, UseCaseProfile
+from llmfit.types import (
+    Accelerator,
+    Client,
+    HardwareProfile,
+    Task,
+    UseCaseProfile,
+)
 
 _REGISTRY: Dict[str, Runtime] = {}
 #: Whether the adapter modules have been imported. A separate flag rather than
@@ -82,6 +88,21 @@ def choose_runtime(
         return "vllm", (
             f"serving {profile.concurrent_users} concurrent users on NVIDIA/Linux; "
             "vLLM's continuous batching handles this far better than single-stream engines"
+        )
+
+    # 2b. Inline completion needs a server with an infill endpoint. Ollama and
+    #     LM Studio serve the same model perfectly well for chat and simply do
+    #     not have that route, so an editor plugin pointed at them gets nothing
+    #     back and looks broken.
+    if Task.AUTOCOMPLETE in profile.tasks:
+        if "llamacpp" in installed:
+            return "llamacpp", (
+                "inline completion needs the infill endpoint, which llama.cpp "
+                "serves and which is already installed"
+            )
+        return "llamacpp", (
+            "inline completion needs the infill endpoint; llama.cpp serves it "
+            "and the alternatives here do not"
         )
 
     # 3. Prefer something already installed, in order of how well it fits.
