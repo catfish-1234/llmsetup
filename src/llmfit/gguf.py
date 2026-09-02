@@ -50,6 +50,13 @@ class GgufInfo:
     chat_template: Optional[str] = None
     #: Sliding-window span in tokens, when the architecture has one.
     sliding_window: Optional[int] = None
+    #: One full-attention layer every N, the rest recurrent. This is how
+    #: llama.cpp itself describes a hybrid model, so it is the right thing to
+    #: read rather than inferring the shape from the model's name.
+    full_attention_interval: Optional[int] = None
+    #: State-space dimensions for the recurrent layers, when present.
+    ssm_inner_size: Optional[int] = None
+    ssm_state_size: Optional[int] = None
     #: Layers of multi-token prediction heads built into this file. These ship
     #: in some builds of a model and not others, so the model's name settles
     #: nothing and only the file can answer.
@@ -72,6 +79,26 @@ class GgufInfo:
     @property
     def has_mtp(self) -> bool:
         return bool(self.nextn_predict_layers and self.nextn_predict_layers > 0)
+
+    @property
+    def is_hybrid(self) -> bool:
+        return bool(self.full_attention_interval and self.full_attention_interval > 1)
+
+    @property
+    def recurrent_state_bytes(self) -> int:
+        """Bytes of state one recurrent layer holds, when the file says enough.
+
+        Derived only from dimensions the file actually states. Where it does not
+        state them this returns 0 rather than a guess: the state is small next
+        to the weights and constant in the context length, and the overhead term
+        already errs high, so a missing figure costs far less than an invented
+        one would.
+        """
+        if not (self.ssm_inner_size and self.ssm_state_size):
+            return 0
+        # Recurrent state is kept at full precision by every implementation that
+        # ships one, because it is small and it accumulates.
+        return int(self.ssm_inner_size * self.ssm_state_size * 4)
 
     @property
     def supports_tools(self) -> Optional[bool]:
@@ -214,6 +241,9 @@ def read_gguf_info(path: Path) -> Optional[GgufInfo]:
         expert_count=_as_int(get("expert_count")),
         chat_template=_as_str(metadata.get("tokenizer.chat_template")),
         sliding_window=_as_int(get("attention.sliding_window")),
+        full_attention_interval=_as_int(get("full_attention_interval")),
+        ssm_inner_size=_as_int(get("ssm.inner_size")),
+        ssm_state_size=_as_int(get("ssm.state_size")),
         nextn_predict_layers=_as_int(get("nextn_predict_layers")),
         tensor_count=tensor_count,
         metadata=metadata,
@@ -257,6 +287,20 @@ def apply_to_spec(spec, info: Optional[GgufInfo]):
                "absent from this build, so a separate draft model is needed")
         )
         changes["mtp_heads"] = info.has_mtp
+
+    # Most of a hybrid model's layers are recurrent and hold a fixed state
+    # rather than a cache that grows. Missing this over-states the memory by
+    # the interval, several times over, and rules the model out of plans it
+    # fits comfortably.
+    if info.is_hybrid and info.full_attention_interval != spec.full_attention_interval:
+        corrections.append(
+            f"hybrid attention: one full-attention layer every "
+            f"{info.full_attention_interval}, the rest recurrent"
+        )
+        changes["full_attention_interval"] = info.full_attention_interval
+    state_bytes = info.recurrent_state_bytes
+    if state_bytes and state_bytes != spec.recurrent_state_bytes:
+        changes["recurrent_state_bytes"] = state_bytes
 
     # A sliding window changes what the cache costs by several times over, so
     # reading it from the file rather than inferring it from the family is the

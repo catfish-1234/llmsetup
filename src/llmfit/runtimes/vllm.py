@@ -22,6 +22,25 @@ from llmfit.util.proc import first_line, run, spawn, which
 DEFAULT_PORT = 8000
 
 
+def kv_cache_dtype(config: RuntimeConfig) -> Optional[str]:
+    """The vLLM KV dtype implied by the configured cache type.
+
+    Derived at launch rather than stored, because the repair loop changes
+    `kv_cache_type` and a value snapshotted at tuning time would not follow it.
+    That cuts both ways: a repair that quantizes the cache would have had no
+    effect here, and one that restores precision would have left the quantized
+    setting in place while reporting the cache as restored.
+
+    vLLM names its own formats, so the llama.cpp-style names map rather than
+    pass through. Anything at or above 8-bit maps to fp8; there is no vLLM
+    equivalent of a 4-bit cache, so those do not map to one.
+    """
+    kind = (config.kv_cache_type or "f16").lower()
+    if kind in ("f16", "bf16", "f32", "auto"):
+        return None
+    return "fp8"
+
+
 class VllmRuntime(Runtime):
     name = "vllm"
     label = "vLLM"
@@ -72,8 +91,9 @@ class VllmRuntime(Runtime):
         quantization = config.extra.get("vllm_quantization")
         if quantization:
             cmd += ["--quantization", str(quantization)]
-        if config.extra.get("kv_cache_dtype"):
-            cmd += ["--kv-cache-dtype", str(config.extra["kv_cache_dtype"])]
+        kv_dtype = kv_cache_dtype(config)
+        if kv_dtype:
+            cmd += ["--kv-cache-dtype", kv_dtype]
         if spec.supports_tools:
             # Without these, tool calls come back as prose instead of structured calls.
             cmd += ["--enable-auto-tool-choice",

@@ -45,7 +45,12 @@ models:
     params_b: 27
     layers: 62
     hidden_size: 5120
-    kv_heads: 2       # back-derived from the measured ~16.4 GB KV cache at 262K
+    # Back-derived from the measured ~16.4 GB KV cache at 262K rather than read
+    # from a config, so it is a figure that reproduces the right total rather
+    # than a description of the architecture. If this model turns out to be
+    # hybrid or windowed, the real head count is higher and fewer layers cache.
+    # Either way the file settles it on download.
+    kv_heads: 2
     head_dim: 128
     max_context: 262144
     license: Apache-2.0
@@ -89,10 +94,16 @@ models:
     hf_repo: Qwen/Qwen3.6-35B-A3B
     ollama_name: qwen3.6:35b-a3b
     recommended_quants: [Q4_K_M, Q5_K_M, Q6_K]
+    full_attention_interval: 4
     arch_source: estimated
     notes: >
       MoE: needs memory for all 35B but only computes 3B per token, so it is far
       faster than a dense 35B. Excellent speed/quality point when it fits.
+      Also hybrid: three Gated DeltaNet layers to every full-attention layer, so
+      only a quarter of the layers keep a KV cache and long context costs about
+      a quarter of what the layer count suggests. The interval is what the
+      architecture write-ups agree on; the layer and head figures here are still
+      estimates and get replaced by the file's own values on download.
 
   - id: qwen3-coder-30b-a3b
     tokenizer_family: qwen3
