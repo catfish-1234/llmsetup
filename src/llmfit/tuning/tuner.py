@@ -401,8 +401,24 @@ def _runtime_specific(config: RuntimeConfig, candidate: Candidate,
             ))
         if spec.supports_tools:
             config.extra["tool_parser"] = _tool_parser(spec)
-        if config.kv_cache_type != "f16":
-            config.extra["kv_cache_dtype"] = "fp8"
+        # The KV dtype is derived from config.kv_cache_type at launch rather
+        # than stored here, so the repair loop's changes follow through.
+        if config.kv_cache_type != "f16" and config.context_tokens > 32768 \
+                and profile.primary_task in (Task.RAG, Task.AGENT, Task.SUMMARIZE):
+            # An fp8 cache is a large, usually safe saving, but it is the one
+            # setting that has been measured collapsing on long-context recall
+            # specifically, which is exactly what this workload depends on. Say
+            # so rather than either refusing the memory or staying quiet; the
+            # needle check tests it, and the repair restores precision if it
+            # fails.
+            decisions.append(TuningDecision(
+                "kv_cache_type", "fp8",
+                "worth watching: an 8-bit cache saves a lot of memory and is "
+                "usually indistinguishable, but it is long-context recall that "
+                "it degrades first, and that is what this use case rests on. "
+                "The needle check tests it and the repair restores precision "
+                "if it fails",
+            ))
 
     if config.runtime == "ollama":
         config.extra["ollama_port"] = 11434
