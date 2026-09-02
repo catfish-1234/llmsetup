@@ -43,6 +43,14 @@ def dense_params_b(spec: ModelSpec) -> float:
 
     Attention projections plus embeddings. Norms and the router are rounding
     error at this scale and are ignored rather than guessed at.
+
+    On a hybrid model the recurrent layers are counted as though they were
+    attention layers, because their projections are the same shape of thing at
+    roughly the same scale and the file does not state their dimensions in a
+    form this can use. It is an approximation, and the one place it matters is
+    the expert split for a hybrid mixture of experts; the figures are replaced
+    by the file's own on download, and an under-estimate here surfaces as an
+    out-of-memory the repair loop handles rather than as a wrong answer.
     """
     hidden = spec.hidden_size
     head_dim = spec.effective_head_dim

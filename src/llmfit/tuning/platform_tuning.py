@@ -17,7 +17,14 @@ import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
-from llmfit.types import GIB, Accelerator, HardwareProfile, RuntimeConfig
+from llmfit.types import (
+    GIB,
+    Accelerator,
+    HardwareProfile,
+    RuntimeConfig,
+    Task,
+    UseCaseProfile,
+)
 
 
 @dataclass
@@ -43,13 +50,15 @@ class PlatformAction:
 
 
 def plan_platform(hardware: HardwareProfile, config: RuntimeConfig,
-                  estimate_bytes: int = 0) -> List[PlatformAction]:
+                  estimate_bytes: int = 0,
+                  profile: Optional[UseCaseProfile] = None) -> List[PlatformAction]:
     """Machine-level adjustments worth making for this setup."""
     actions: List[PlatformAction] = []
     actions += _apple(hardware, estimate_bytes)
     actions += _amd(hardware)
     actions += _numa(hardware, config)
     actions += _nvidia(hardware)
+    actions += _batch_invariance(hardware, config, profile)
     return actions
 
 
@@ -199,6 +208,59 @@ def _nvidia(hardware: HardwareProfile) -> List[PlatformAction]:
         ),
         command="nvidia-smi topo -m",
     )]
+
+
+#: Batch-invariant kernels need tensor cores of this generation or newer.
+_BATCH_INVARIANT_MIN_COMPUTE = 8.0
+
+
+def _batch_invariance(hardware: HardwareProfile, config: RuntimeConfig,
+                      profile) -> List[PlatformAction]:
+    """Make the server give the same answer regardless of what it batched with.
+
+    A fixed seed and temperature zero are not enough. Floating-point addition
+    is not associative, so the same prompt accumulated in a different order,
+    because it happened to share a batch with three other requests, can come out
+    different. Batch-invariant kernels remove that, and it is the only thing
+    that does.
+
+    Offered rather than applied, because it costs real throughput: measured at
+    roughly 60% longer on the same work. That is a fine trade for a regression
+    suite and a poor one for an interactive endpoint, and only the person
+    running it knows which they have.
+    """
+    if config.runtime != "vllm" or profile is None:
+        return []
+    if profile.primary_task not in _REPRODUCIBLE_TASKS:
+        return []
+    capable = [g for g in hardware.gpus
+               if g.vendor is Accelerator.NVIDIA
+               and _compute_capability(g) >= _BATCH_INVARIANT_MIN_COMPUTE]
+    if not capable:
+        return []
+    return [PlatformAction(
+        title="Make results reproducible under concurrent load",
+        reason=(
+            "A seed fixes the sampler, not the arithmetic. Two identical "
+            "prompts can still differ when they are batched with different "
+            "neighbours, because the additions happen in a different order. "
+            "Batch-invariant kernels remove that, at roughly 60% longer per "
+            "request, so it is worth it for a regression suite and not for an "
+            "interactive endpoint."
+        ),
+        env={"VLLM_BATCH_INVARIANT": "1"},
+    )]
+
+
+def _compute_capability(gpu) -> float:
+    try:
+        return float(gpu.compute_capability)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+#: Where two runs disagreeing is a defect rather than variety.
+_REPRODUCIBLE_TASKS = {Task.EXTRACT, Task.CODING, Task.TRANSLATE}
 
 
 def describe(actions: List[PlatformAction]) -> List[str]:
