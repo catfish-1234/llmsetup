@@ -120,6 +120,7 @@ def tune(
                "presence_penalty": sampling.presence_penalty,
                "sampling_source": sampling.source},
     )
+    _fix_seed(config, profile, decisions)
     _runtime_specific(config, candidate, hardware, profile, decisions)
 
     # Deep settings last: they depend on the offload decision above, and the
@@ -487,6 +488,41 @@ def tool_parsers_for(spec) -> List[str]:
             if parser not in found:
                 found.append(parser)
     return found
+
+
+#: Chosen once and written down rather than generated, because the point of a
+#: seed is that the same setup gives the same answer tomorrow as today.
+_DEFAULT_SEED = 1337
+
+
+def _fix_seed(config, profile, decisions) -> None:
+    """Pin the sampler's seed where the task wants the same answer every time.
+
+    Worth being precise about what this buys, because most advice overstates it.
+    A fixed seed removes the sampler as a source of variation, which is what
+    makes a low-temperature run repeatable on an idle machine. It does not make
+    the engine deterministic: floating-point addition is not associative, so a
+    request batched with three others can accumulate in a different order and
+    come out different. That part is a platform setting, not a sampler one, and
+    is reported separately.
+    """
+    if config.seed is not None:
+        return
+    if profile.primary_task not in _DETERMINISTIC_TASKS:
+        return
+    config.seed = _DEFAULT_SEED
+    decisions.append(TuningDecision(
+        "seed", str(_DEFAULT_SEED),
+        "fixed so the same prompt gives the same answer between runs, which "
+        "this task depends on. Note that it removes the sampler as a source of "
+        "variation but not the arithmetic: under concurrent load the same "
+        "prompt can still batch differently and come out different",
+    ))
+
+
+#: Tasks where a repeated run producing a different answer is a defect rather
+#: than variety. Kept in step with the sampling module's own list.
+_DETERMINISTIC_TASKS = {Task.EXTRACT, Task.CODING, Task.TRANSLATE}
 
 
 def _tool_parser(spec) -> Optional[str]:

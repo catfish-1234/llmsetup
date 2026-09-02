@@ -94,6 +94,7 @@ class Pipeline:
             action.to_dict() for action in plan_platform(
                 self.hardware, config,
                 estimate_bytes=candidate.estimate.total,
+                profile=self.profile,
             )
         ]
         for action in result.platform_actions:
