@@ -248,8 +248,14 @@ class OffloadPlan:
     n_cpu_moe: int = 0
     #: Fraction of VRAM per GPU on a multi-card machine.
     tensor_split: List[float] = field(default_factory=list)
+    #: Which card to use when the model is not split. Meaningless otherwise.
     main_gpu: int = 0
-    split_mode: str = "layer"             # layer | row | none
+    #: ``layer`` gives each card a contiguous run of layers and tolerates a slow
+    #: link between them, which is what consumer PCIe is. ``tensor`` splits
+    #: within each layer and is faster at generation but only where the
+    #: interconnect is fast. ``none`` confines the model to one card. ``row`` is
+    #: deprecated upstream and superseded by ``tensor``, so it is not offered.
+    split_mode: str = "layer"             # layer | tensor | none
     #: Raw --override-tensor patterns for cases the simple knobs cannot express.
     override_tensors: List[str] = field(default_factory=list)
     rationale: str = ""
