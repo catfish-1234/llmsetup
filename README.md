@@ -244,6 +244,43 @@ lengths where it would be slower as well as worse, and reported in words that
 say how to undo it. Given the choice between a lossy cache and a shorter
 context, llmfit shortens the context.
 
+### Sizing from the model, not from the card
+
+Batch size was chosen from a table indexed on VRAM, before anything about the
+model was known. That is wrong in a case people hit constantly: a mixture of
+experts moves most of its weight to system RAM, so the card ends up holding
+attention and a cache and little else, and a 6 GB laptop card can then carry the
+same compute buffer as a 24 GB one running a dense model. Someone published
+exactly that setup running at `-ub 2048` with 350-400 prompt tokens per second;
+llmfit was giving that machine 256.
+
+The batch is now settled after placement, and the order of what gets given up
+is deliberate:
+
+1. **Quantize the KV cache** to the rung where it is still free.
+2. **Shrink the prompt batch**, because the context was the requirement and the
+   batch size was not. Practitioners report a third more usable context from
+   this trade with no throughput they could measure.
+3. **Move experts to RAM**, on a mixture of experts, before cutting the batch
+   further: only the experts that fire cross the bus, while a narrower batch is
+   paid on every token of every prompt.
+4. **Shorten the context**, and only then.
+5. **Spill layers to CPU**, which costs an order of magnitude.
+
+Then, once everything is placed, the batch grows back into whatever memory is
+left over.
+
+### Experts move by the tensor
+
+`--n-cpu-moe` works in whole layers, so freeing one byte past a layer boundary
+moves an entire layer's experts and leaves the card holding nothing in the space
+that frees. People reclaim it by hand with patterns like
+`-ot 'blk\.21\.ffn_down.*=CPU'` and arrive at the right layer by trial.
+
+The boundary is arithmetic, so llmfit computes it: whole layers where they fit,
+then the individual expert tensors of the layer that straddles the line. Every
+expert left on the card is one that does not cross the bus when it fires.
+
 ### Measuring, not just predicting
 
 Everything above computes. The memory model is exact arithmetic and the
@@ -499,7 +536,7 @@ The 3.9 floor is tested, not assumed: CI runs the full suite on 3.9, 3.10, 3.11,
 
 ```bash
 pip install -e ".[dev]"
-pytest                       # 714 tests, no GPU or network required
+pytest                       # 739 tests, no GPU or network required
 ruff check src/ tests/
 ```
 
