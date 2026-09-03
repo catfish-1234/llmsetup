@@ -13,6 +13,7 @@ from typing import Dict, List, Optional
 from llmfit.runtimes.base import Endpoint, Runtime, RuntimeUnavailable
 from llmfit.runtimes.gguf_store import fetch_gguf, fetch_projector
 from llmfit.runtimes.registry import register
+from llmfit.tuning.profiles import ReasoningEffort
 from llmfit.types import ModelSpec, RuntimeConfig
 from llmfit.util import http
 from llmfit.util.fs import app_dir, ensure_dir
@@ -87,6 +88,13 @@ class LlamaCppRuntime(Runtime):
             cmd += ["--seed", str(config.seed)]
         if config.threads:
             cmd += ["--threads", str(config.threads)]
+        if config.threads_batch:
+            # Prompt processing parallelises differently from generation: it is
+            # compute-bound where generation is memory-bound, so it can use the
+            # cores that would only contend during decode.
+            cmd += ["--threads-batch", str(config.threads_batch)]
+        if config.numa:
+            cmd += ["--numa", config.numa]
         # Flash attention is an explicit on/off in current llama-server; leaving
         # it unset lets it auto-select, which we do not want when the repair loop
         # has deliberately turned it off.
@@ -188,6 +196,11 @@ class LlamaCppRuntime(Runtime):
             # Moves only routed expert weights to system RAM; attention, the
             # router and the KV cache stay on the GPU.
             flags += ["--n-cpu-moe", str(offload.n_cpu_moe)]
+        if offload.n_cpu_ffn:
+            # The dense equivalent. Feed-forward weights are most of a dense
+            # layer's bytes and none of its attention, so moving them costs far
+            # less than moving the layer.
+            flags += ["--n-cpu-ffn", str(offload.n_cpu_ffn)]
         if offload.tensor_split:
             flags += ["--tensor-split", ",".join(str(v) for v in offload.tensor_split)]
         if offload.split_mode != "layer":
@@ -208,6 +221,11 @@ class LlamaCppRuntime(Runtime):
         reasoning = advanced.reasoning
         if reasoning.supported:
             flags += ["--reasoning", "on" if reasoning.enabled else "off"]
+            if reasoning.enabled and reasoning.effort is not ReasoningEffort.OFF:
+                # The tier was being computed and thrown away, so a model asked
+                # to think lightly and one asked to think hard got the same
+                # instruction.
+                flags += ["--reasoning-effort", reasoning.effort.value]
             if reasoning.enabled and reasoning.token_budget is not None:
                 # A hard ceiling on thinking. Without one, a reasoning model
                 # asked something ambiguous can spend its whole output budget

@@ -246,6 +246,11 @@ class OffloadPlan:
     total_layers: int = 0
     #: Move routed expert weights for the first N layers to system RAM.
     n_cpu_moe: int = 0
+    #: The same idea for a dense model: move the feed-forward weights of the
+    #: first N layers while attention and the cache stay on the accelerator.
+    #: Dropping whole layers instead sends their attention to the CPU too,
+    #: which is the expensive half, so this is the gentler way to lose memory.
+    n_cpu_ffn: int = 0
     #: Fraction of VRAM per GPU on a multi-card machine.
     tensor_split: List[float] = field(default_factory=list)
     #: Which card to use when the model is not split. Meaningless otherwise.
@@ -263,6 +268,18 @@ class OffloadPlan:
     @property
     def moe_offload_enabled(self) -> bool:
         return self.n_cpu_moe > 0
+
+    @property
+    def ffn_offload_enabled(self) -> bool:
+        return self.n_cpu_ffn > 0
+
+    @property
+    def keeps_every_layer_resident(self) -> bool:
+        """Whether the plan moves weights out of layers rather than moving
+        layers. Either kind of partial offload puts every layer back on the
+        accelerator, and the layer count has to follow or the command line
+        contradicts itself."""
+        return self.moe_offload_enabled or self.ffn_offload_enabled
 
     @property
     def notable(self) -> bool:

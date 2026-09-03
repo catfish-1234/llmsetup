@@ -475,6 +475,11 @@ class RuntimeConfig:
     #: operations the window makes impossible, which is what long-range recall
     #: and prefix reuse depend on.
     swa_full: bool = False
+    #: Threads for prompt processing, when it wants a different number from
+    #: generation. None follows the generation thread count.
+    threads_batch: Optional[int] = None
+    #: NUMA policy, on the multi-socket machines where one helps.
+    numa: Optional[str] = None
     served_name: Optional[str] = None
     #: Deep settings: sampler chain, reasoning budget, speculative decoding,
     #: tensor placement, RoPE scaling and serving behaviour. Typed rather than
