@@ -14,8 +14,9 @@ treating an MoE model as one undifferentiated blob.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
-from typing import Optional
+from typing import List, Optional, Tuple
 
 from llmfit.types import ModelSpec
 
@@ -81,6 +82,87 @@ def expert_bytes(spec: ModelSpec, bpw: float) -> int:
     if split is None:
         return 0
     return int(split.expert_params * 1e9 * bpw / 8)
+
+
+#: The routed expert tensors in one layer, as llama.cpp names them. Each is a
+#: separate matrix of similar size, which is what makes a fractional layer
+#: expressible at all: a third of a layer's experts can move while the rest stay.
+EXPERT_TENSORS = ("ffn_gate_exps", "ffn_up_exps", "ffn_down_exps")
+
+
+@dataclass
+class ExpertOffload:
+    """Which experts move to system RAM, down to the individual tensor.
+
+    ``--n-cpu-moe`` works in whole layers, so freeing one byte more than a
+    layer boundary moves an entire layer's experts and leaves hundreds of
+    megabytes of VRAM holding nothing. Naming tensors instead reclaims that.
+    People do this by hand with regexes and arrive at it by trial; the boundary
+    is arithmetic, so it can simply be computed.
+    """
+
+    whole_layers: int = 0
+    #: Tensors of the next layer that also move, when whole layers overshoot.
+    partial_layer: Optional[int] = None
+    partial_tensors: Tuple[str, ...] = ()
+
+    @property
+    def is_partial(self) -> bool:
+        return self.partial_layer is not None and bool(self.partial_tensors)
+
+    def override_patterns(self) -> List[str]:
+        """`--override-tensor` patterns expressing exactly this split.
+
+        Only the fractional part needs a pattern. The whole layers are said more
+        simply and more robustly with ``--n-cpu-moe``, which does not depend on
+        this build naming its tensors the way the regex expects.
+        """
+        if not self.is_partial:
+            return []
+        names = "|".join(self.partial_tensors)
+        return [f"blk\\.{self.partial_layer}\\.({names})=CPU"]
+
+
+def plan_expert_offload(
+    spec: ModelSpec,
+    bpw: float,
+    excess_bytes: int,
+) -> ExpertOffload:
+    """Free ``excess_bytes`` by moving as few expert weights as will do it.
+
+    Every expert left on the GPU is one that does not have to cross the bus when
+    it fires, so rounding up to a whole layer is not a rounding error, it is
+    speed given away. The remainder after the whole layers is expressed as
+    individual tensors of the next layer.
+    """
+    plan = ExpertOffload()
+    if excess_bytes <= 0 or not spec.is_moe or spec.layers <= 0:
+        return plan
+    per_layer = expert_bytes(spec, bpw) / spec.layers
+    if per_layer <= 0:
+        return plan
+
+    whole = int(excess_bytes // per_layer)
+    if whole >= spec.layers:
+        # Even every expert is not enough; the caller has to find the rest
+        # elsewhere, and there is no fraction left to be clever about.
+        return ExpertOffload(whole_layers=spec.layers)
+    plan.whole_layers = whole
+
+    remainder = excess_bytes - whole * per_layer
+    if remainder <= 0:
+        return plan
+
+    per_tensor = per_layer / len(EXPERT_TENSORS)
+    needed = min(len(EXPERT_TENSORS), math.ceil(remainder / per_tensor))
+    if needed >= len(EXPERT_TENSORS):
+        # The fraction is most of a layer, so take the layer and keep the
+        # command line simple.
+        plan.whole_layers = whole + 1
+        return plan
+    plan.partial_layer = whole
+    plan.partial_tensors = EXPERT_TENSORS[:needed]
+    return plan
 
 
 def layers_to_offload(

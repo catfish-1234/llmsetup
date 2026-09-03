@@ -118,12 +118,18 @@ def plan_offload(
         plan.rationale = plan.rationale or "the whole model fits on the GPU"
         return plan
 
-    layers = moe.layers_to_offload(spec, bpw, excess)
-    if layers <= 0:
+    offload = moe.plan_expert_offload(spec, bpw, excess)
+    layers = offload.whole_layers
+    if layers <= 0 and not offload.is_partial:
         return plan
 
     plan.n_cpu_moe = layers
     plan.gpu_layers = spec.layers        # every layer stays; only experts move
+    if offload.is_partial:
+        # Whole-layer offload rounds up, and the round-up is expert weights
+        # sitting in RAM that the card had room for. Naming the tensors of the
+        # boundary layer reclaims that fraction.
+        plan.override_tensors = offload.override_patterns()
     retained = moe.throughput_penalty(spec, layers)
     resident = moe.resident_bytes_with_offload(spec, bpw, layers)
     plan.rationale = (
@@ -133,6 +139,13 @@ def plan_offload(
         f"are active per token, so this costs far less speed than moving whole "
         f"layers would, expect roughly {retained:.0%} of full-GPU throughput"
     )
+    if offload.is_partial:
+        plan.rationale += (
+            f". A further {len(offload.partial_tensors)} of the 3 expert "
+            f"tensors in layer {offload.partial_layer} move as well, which is "
+            f"the part whole-layer offload would round away and leave the card "
+            f"holding nothing"
+        )
     return plan
 
 
