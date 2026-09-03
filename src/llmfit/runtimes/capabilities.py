@@ -24,7 +24,7 @@ from llmfit.util.proc import run, which
 
 #: Long-form flags only. Short aliases are unstable and ambiguous, and llmfit
 #: emits long forms everywhere.
-_FLAG_RE = re.compile(r"(?<![\w-])(--[a-z0-9][a-z0-9-]*)")
+_FLAG_RE = re.compile(r"(?<![\w-])(--[a-z0-9][a-z0-9.-]*)")
 
 _cache: Dict[Tuple[str, float], Set[str]] = {}
 

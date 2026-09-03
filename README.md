@@ -214,6 +214,25 @@ with the reason attached rather than running them behind your back:
   interleaving is worth real throughput. Suggested only there, never on Apple
   unified memory, where the idea does not apply.
 
+### Every option, and a decision about it
+
+llmfit emits 72 of the roughly 350 options llama-server accepts. Which of the
+rest are deliberate and which were oversights used to be knowable only by
+someone reading the upstream documentation and noticing, which is how several
+rounds of gaps in this project were found. That method only finds what somebody
+happens to read, and it kept finding things.
+
+So every option carries a recorded decision: used, an alias of one that is, the
+engine's own default, something belonging to whoever operates the server, a
+choice belonging to the person rather than the tool, or a considered gap with a
+note on what the work would be. A test checks the record against the code in
+both directions, so a flag emitted without a decision fails, and so does a
+decision claiming llmfit passes something it does not. `scripts/flag_coverage.py`
+diffs the record against an installed binary and names anything new.
+
+Writing the record found four options llmfit should have been using, and the
+test caught me recording all four as used before I had implemented any of them.
+
 ### Flags the installed binary actually has
 
 llama.cpp renames and retires flags between releases, and people run whatever
@@ -243,6 +262,20 @@ is a last-resort repair, priced as a real sacrifice, blocked at the context
 lengths where it would be slower as well as worse, and reported in words that
 say how to undo it. Given the choice between a lossy cache and a shorter
 context, llmfit shortens the context.
+
+### Losing memory gently on a dense model
+
+A dense model that did not fit lost whole layers from the accelerator, which
+costs an order of magnitude, because a dropped layer takes its attention to the
+CPU along with its weights and attention is the half that wants to be near the
+cache. `--n-cpu-ffn` moves only the feed-forward weights, which are most of a
+layer's bytes and none of its attention. llmfit was making that argument for
+mixture-of-experts models and not for dense ones, which is most models.
+
+A 32B at Q4 on a 12 GB card now keeps all 64 layers resident with the
+feed-forward of 48 of them in RAM, where before it dropped 29 layers outright.
+Where the feed-forward weights are not enough on their own, it says so and falls
+back rather than pretending.
 
 ### Two cards of different speeds
 
@@ -571,7 +604,7 @@ The 3.9 floor is tested, not assumed: CI runs the full suite on 3.9, 3.10, 3.11,
 
 ```bash
 pip install -e ".[dev]"
-pytest                       # 761 tests, no GPU or network required
+pytest                       # 796 tests, no GPU or network required
 ruff check src/ tests/
 ```
 

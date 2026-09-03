@@ -109,6 +109,12 @@ def plan_offload(
             )
 
     if not spec.is_moe or not hardware.gpus:
+        if not spec.is_moe and hardware.gpus and gpu_layers < spec.layers:
+            # Layers were dropped because the model did not fit. Moving the
+            # feed-forward weights instead keeps every layer's attention on the
+            # accelerator, which is the half that wants to be near the cache.
+            _plan_dense_ffn(plan, candidate, hardware, context_tokens, bpw,
+                            gpu_layers)
         if not plan.rationale:
             plan.rationale = (
                 f"all {gpu_layers} layers on the GPU" if plan.full_gpu
@@ -159,6 +165,33 @@ def plan_offload(
             f"holding nothing"
         )
     return plan
+
+
+def _plan_dense_ffn(plan: OffloadPlan, candidate: Candidate,
+                    hardware: HardwareProfile, context_tokens: int, bpw: float,
+                    gpu_layers: int) -> None:
+    """Trade feed-forward weights for the layers that were about to be dropped."""
+    spec = candidate.model
+    from llmfit.planner.memory import kv_cache_bytes, overhead_bytes
+
+    weights = spec.params_b * 1e9 * bpw / 8
+    resident = weights + kv_cache_bytes(spec, context_tokens) + overhead_bytes(spec)
+    excess = int(resident - hardware.usable_accel_bytes)
+    layers = moe.dense_ffn_layers_to_offload(spec, bpw, excess)
+    if layers <= 0 or layers >= spec.layers:
+        # Nothing to gain, or so much has to move that whole-layer offload is
+        # the honest description of what is happening.
+        return
+
+    plan.n_cpu_ffn = layers
+    plan.gpu_layers = spec.layers
+    plan.rationale = (
+        f"the feed-forward weights of {layers} of {spec.layers} layers moved to "
+        f"system RAM instead of dropping {spec.layers - gpu_layers} layers "
+        f"outright. Feed-forward is most of a layer's bytes and none of its "
+        f"attention, so this frees comparable memory while every layer's "
+        f"attention and cache stay on the accelerator"
+    )
 
 
 def _tensor_split(hardware: HardwareProfile, model_bytes: int = 0) -> List[float]:
