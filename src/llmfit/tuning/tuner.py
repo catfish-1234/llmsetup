@@ -64,6 +64,7 @@ def tune(
     parallel = _parallel(profile, decisions)
     batch, ubatch = _batch_sizes(hardware, profile, decisions)
     threads = _threads(hardware, candidate, decisions)
+    threads_batch = _threads_batch(hardware, candidate, threads, decisions)
     kv_type = candidate.estimate.kv_quant
     context = profile.context_tokens
 
@@ -113,6 +114,8 @@ def tune(
         batch_size=batch,
         ubatch_size=ubatch,
         threads=threads,
+        threads_batch=threads_batch,
+        numa=_numa_policy(hardware, candidate),
         parallel=parallel,
         kv_cache_type=kv_type,
         flash_attention=flash,
@@ -144,7 +147,11 @@ def tune(
         )
         # MoE expert offload can keep every layer on the GPU where partial layer
         # offload would otherwise have been forced.
-        if config.advanced.offload.moe_offload_enabled:
+        # Expert offload and dense feed-forward offload both keep every layer
+        # on the accelerator and move weights out of them instead, so the layer
+        # count has to follow. Without this the command asks for 35 layers and
+        # for the feed-forward weights of 48, which is not a configuration.
+        if config.advanced.offload.keeps_every_layer_resident:
             config.gpu_layers = config.advanced.offload.gpu_layers
         for line in config.advanced.explain():
             setting, _, reason = line.partition(": ")
@@ -450,6 +457,51 @@ def _batch_sizes(hardware: HardwareProfile, profile: UseCaseProfile, decisions):
 
     decisions.append(TuningDecision("batch/ubatch", f"{batch}/{ubatch}", reason))
     return batch, ubatch
+
+
+def _threads_batch(hardware: HardwareProfile, candidate: Candidate,
+                   threads, decisions):
+    """Threads for prompt processing, where it wants a different number.
+
+    The two phases do not parallelise alike. Generation is memory-bound, so
+    extra threads contend for the same bandwidth and hyperthreads actively hurt.
+    Prompt processing is compute-bound, and there the same hyperthreads have
+    real work to do. So when the model is on the CPU, prompt processing gets
+    every logical core while generation keeps the physical ones.
+    """
+    if threads is None or not hardware.logical_cores:
+        return None
+    if candidate.fits_on_gpu and hardware.gpus:
+        return None      # neither phase is doing CPU work worth splitting
+    if hardware.logical_cores <= threads:
+        return None
+    decisions.append(TuningDecision(
+        "threads_batch", str(hardware.logical_cores),
+        f"prompt processing gets all {hardware.logical_cores} logical cores "
+        f"while generation keeps {threads}: reading is compute-bound and can "
+        f"use hyperthreads, writing is memory-bound and is slowed by them",
+    ))
+    return hardware.logical_cores
+
+
+def _numa_policy(hardware: HardwareProfile, candidate: Candidate):
+    """NUMA policy, on the machines where one helps.
+
+    Interleaving is worth real throughput on a multi-socket box doing CPU-bound
+    work, and nothing at all anywhere else, so it is set exactly there. Apple
+    unified memory is not NUMA in this sense whatever the core count says.
+    """
+    if hardware.unified_memory or hardware.os != "linux":
+        return None
+    if candidate.fits_on_gpu and hardware.gpus:
+        return None
+    if (hardware.physical_cores or 0) < _NUMA_CORE_THRESHOLD:
+        return None
+    return "distribute"
+
+
+#: Below this a machine is not the multi-socket kind where interleaving helps.
+_NUMA_CORE_THRESHOLD = 32
 
 
 def _threads(hardware: HardwareProfile, candidate: Candidate, decisions) -> Optional[int]:

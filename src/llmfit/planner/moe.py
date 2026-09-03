@@ -123,6 +123,37 @@ class ExpertOffload:
         return [f"blk\\.{self.partial_layer}\\.({names})=CPU"]
 
 
+#: What fraction of a dense layer's weights are the feed-forward block. The
+#: standard shape is three matrices of hidden x intermediate against attention's
+#: four of roughly hidden x hidden, and intermediate runs about 3.5 times hidden
+#: on every model in circulation, so the feed-forward side dominates. Used as a
+#: proportion rather than a byte count, so it stays right across quantizations.
+DENSE_FFN_FRACTION = 0.65
+
+
+def dense_ffn_layers_to_offload(spec: ModelSpec, bpw: float,
+                                excess_bytes: int) -> int:
+    """Dense layers whose feed-forward weights should move to system RAM.
+
+    The alternative, and what llmfit did before, is to drop whole layers from
+    the accelerator. That sends their attention to the CPU as well, and
+    attention is the part that wants to be near the cache. Moving only the
+    feed-forward weights frees most of the same memory for a fraction of the
+    cost, which is the same argument that makes expert offload worth doing on a
+    mixture of experts.
+
+    Returns 0 for a mixture of experts, which has its own and better route, and
+    for a model that already fits.
+    """
+    if excess_bytes <= 0 or spec.is_moe or spec.layers <= 0:
+        return 0
+    weights = spec.params_b * 1e9 * bpw / 8
+    per_layer_ffn = weights * DENSE_FFN_FRACTION / spec.layers
+    if per_layer_ffn <= 0:
+        return 0
+    return min(spec.layers, math.ceil(excess_bytes / per_layer_ffn))
+
+
 def plan_expert_offload(
     spec: ModelSpec,
     bpw: float,
