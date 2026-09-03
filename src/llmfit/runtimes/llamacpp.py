@@ -190,9 +190,14 @@ class LlamaCppRuntime(Runtime):
             flags += ["--n-cpu-moe", str(offload.n_cpu_moe)]
         if offload.tensor_split:
             flags += ["--tensor-split", ",".join(str(v) for v in offload.tensor_split)]
-            flags += ["--main-gpu", str(offload.main_gpu)]
         if offload.split_mode != "layer":
             flags += ["--split-mode", offload.split_mode]
+        if offload.split_mode == "none":
+            # This names the one card to run on, and only means anything when
+            # the model is not being split at all. Passing it alongside a split
+            # says nothing: under a layer split the cache for a layer lives on
+            # whichever card owns that layer.
+            flags += ["--main-gpu", str(offload.main_gpu)]
         for pattern in offload.override_tensors:
             flags += ["--override-tensor", pattern]
 

@@ -12,7 +12,7 @@ from llmfit.planner.memory import (
     max_context_for_budget,
 )
 from llmfit.planner.score import explain, score_candidate
-from llmfit.runtimes.registry import choose_runtime
+from llmfit.runtimes.registry import choose_runtime, prefer_mlx_for
 from llmfit.types import (
     GIB,
     Candidate,
@@ -37,8 +37,9 @@ def build_plan(
     allow_partial_offload: bool = True,
 ) -> Plan:
     """Rank every viable (model, quant) pairing for this user and this machine."""
+    explicit = runtime is not None
     chosen_runtime, runtime_reason = (
-        (runtime, "explicitly requested") if runtime else choose_runtime(hardware, profile)
+        (runtime, "explicitly requested") if explicit else choose_runtime(hardware, profile)
     )
 
     viable = catalog.matching(profile)
@@ -86,6 +87,14 @@ def build_plan(
     candidates = _dedupe_by_model(candidates)[:MAX_CANDIDATES]
 
     notes.extend(_plan_notes(candidates, profile, hardware, parallel))
+
+    # The engine choice depends on which model won, so it is revisited now that
+    # one has. On Apple Silicon this is worth a large fraction of the generation
+    # speed for any model with an MLX build.
+    if not explicit and candidates:
+        upgrade = prefer_mlx_for(candidates[0].model, hardware, chosen_runtime)
+        if upgrade is not None:
+            chosen_runtime, runtime_reason = upgrade
 
     return Plan(
         candidates=candidates,
