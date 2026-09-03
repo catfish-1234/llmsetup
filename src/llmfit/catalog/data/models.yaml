@@ -15,7 +15,7 @@
 # overrides whatever is written here.
 
 schema_version: 1
-updated: "2026-08-29"
+updated: "2026-09-03"
 
 quant_bpw:            # effective bits per weight, including embedding overhead
   Q2_K:    3.35
@@ -697,3 +697,233 @@ models:
     ollama_name: qwen3-embedding:0.6b
     recommended_quants: [F16, Q8_0]
     arch_source: measured
+
+  # ---------------------------------------- added 2026-09-03 by `llmfit catalog refresh`
+  - id: qwen2.5-7b
+    name: Qwen2.5 7B Instruct
+    publisher: Qwen
+    params_b: 7.0
+    layers: 28
+    hidden_size: 3584
+    kv_heads: 4
+    head_dim: 128
+    max_context: 32768
+    license: apache-2.0
+    commercial_ok: true
+    quality_tier: 3
+    tasks:
+    - chat
+    - rag
+    - summarize
+    supports_tools: true
+    supports_vision: false
+    supports_json: true
+    hf_repo: Qwen/Qwen2.5-7B-Instruct
+    recommended_quants:
+    - Q4_K_M
+    - Q5_K_M
+    - Q6_K
+    - Q8_0
+    arch_source: measured
+    discovered: true
+    gguf_repo: bartowski/Qwen2.5-7B-Instruct-GGUF
+  - id: qwen2.5-3b
+    name: Qwen2.5 3B Instruct
+    publisher: Qwen
+    params_b: 3.0
+    layers: 36
+    hidden_size: 2048
+    kv_heads: 2
+    head_dim: 128
+    max_context: 32768
+    license: other
+    commercial_ok: false
+    quality_tier: 3
+    tasks:
+    - chat
+    - rag
+    - summarize
+    supports_tools: true
+    supports_vision: false
+    supports_json: true
+    hf_repo: Qwen/Qwen2.5-3B-Instruct
+    recommended_quants:
+    - Q4_K_M
+    - Q5_K_M
+    - Q6_K
+    - Q8_0
+    arch_source: measured
+    discovered: true
+    gguf_repo: Qwen/Qwen2.5-3B-Instruct-GGUF
+  - id: qwen2.5-1.5b
+    name: Qwen2.5 1.5B Instruct
+    publisher: Qwen
+    params_b: 1.5
+    layers: 28
+    hidden_size: 1536
+    kv_heads: 2
+    head_dim: 128
+    max_context: 32768
+    license: apache-2.0
+    commercial_ok: true
+    quality_tier: 3
+    tasks:
+    - chat
+    - rag
+    - summarize
+    supports_tools: true
+    supports_vision: false
+    supports_json: true
+    hf_repo: Qwen/Qwen2.5-1.5B-Instruct
+    recommended_quants:
+    - Q4_K_M
+    - Q5_K_M
+    - Q6_K
+    - Q8_0
+    arch_source: measured
+    discovered: true
+    gguf_repo: Qwen/Qwen2.5-1.5B-Instruct-GGUF
+  - id: qwen2.5-0.5b
+    name: Qwen2.5 0.5B Instruct
+    publisher: Qwen
+    params_b: 0.5
+    layers: 24
+    hidden_size: 896
+    kv_heads: 2
+    head_dim: 64
+    max_context: 32768
+    license: apache-2.0
+    commercial_ok: true
+    quality_tier: 3
+    tasks:
+    - chat
+    - rag
+    - summarize
+    supports_tools: true
+    supports_vision: false
+    supports_json: true
+    hf_repo: Qwen/Qwen2.5-0.5B-Instruct
+    recommended_quants:
+    - Q4_K_M
+    - Q5_K_M
+    - Q6_K
+    - Q8_0
+    arch_source: measured
+    discovered: true
+    gguf_repo: Qwen/Qwen2.5-0.5B-Instruct-GGUF
+  - id: dolphin-2.9.1-yi-1.5-34b
+    name: dolphin 2.9.1 yi 1.5 34b
+    publisher: dphn
+    params_b: 34.0
+    layers: 60
+    hidden_size: 7168
+    kv_heads: 8
+    head_dim: 128
+    max_context: 8192
+    license: apache-2.0
+    commercial_ok: true
+    quality_tier: 4
+    tasks:
+    - agent
+    - chat
+    - coding
+    - rag
+    - summarize
+    supports_tools: true
+    supports_vision: false
+    supports_json: true
+    hf_repo: dphn/dolphin-2.9.1-yi-1.5-34b
+    recommended_quants:
+    - Q4_K_M
+    - Q5_K_M
+    - Q6_K
+    - Q8_0
+    arch_source: measured
+    discovered: true
+    gguf_repo: mradermacher/dolphin-2.9.1-yi-1.5-34b-heretic-GGUF
+  - id: qwen3-4b-instruct-2507
+    name: Qwen3 4B Instruct 2507
+    publisher: Qwen
+    params_b: 4.0
+    layers: 36
+    hidden_size: 2560
+    kv_heads: 8
+    head_dim: 128
+    max_context: 262144
+    license: apache-2.0
+    commercial_ok: true
+    quality_tier: 3
+    tasks:
+    - chat
+    - rag
+    - summarize
+    supports_tools: true
+    supports_vision: false
+    supports_json: true
+    hf_repo: Qwen/Qwen3-4B-Instruct-2507
+    recommended_quants:
+    - Q4_K_M
+    - Q5_K_M
+    - Q6_K
+    - Q8_0
+    arch_source: measured
+    discovered: true
+    gguf_repo: MaziyarPanahi/Qwen3-4B-Instruct-2507-GGUF
+  - id: qwen2.5-14b
+    name: Qwen2.5 14B Instruct
+    publisher: Qwen
+    params_b: 14.0
+    layers: 48
+    hidden_size: 5120
+    kv_heads: 8
+    head_dim: 128
+    max_context: 32768
+    license: apache-2.0
+    commercial_ok: true
+    quality_tier: 3
+    tasks:
+    - chat
+    - rag
+    - summarize
+    supports_tools: true
+    supports_vision: false
+    supports_json: true
+    hf_repo: Qwen/Qwen2.5-14B-Instruct
+    recommended_quants:
+    - Q4_K_M
+    - Q5_K_M
+    - Q6_K
+    - Q8_0
+    arch_source: measured
+    discovered: true
+    gguf_repo: bartowski/Qwen2.5-14B-Instruct-GGUF
+  - id: qwen2.5-coder-7b
+    name: Qwen2.5 Coder 7B Instruct
+    publisher: Qwen
+    params_b: 7.0
+    layers: 28
+    hidden_size: 3584
+    kv_heads: 4
+    head_dim: 128
+    max_context: 32768
+    license: apache-2.0
+    commercial_ok: true
+    quality_tier: 3
+    tasks:
+    - agent
+    - chat
+    - coding
+    - rag
+    - summarize
+    supports_tools: true
+    supports_vision: false
+    supports_json: true
+    hf_repo: Qwen/Qwen2.5-Coder-7B-Instruct
+    recommended_quants:
+    - Q4_K_M
+    - Q5_K_M
+    - Q6_K
+    - Q8_0
+    arch_source: measured
+    discovered: true
+    gguf_repo: Qwen/Qwen2.5-Coder-7B-Instruct-GGUF
