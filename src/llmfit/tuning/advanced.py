@@ -8,9 +8,11 @@ has to fit a draft model into.
 
 from __future__ import annotations
 
+import math
 from typing import List, Optional, Tuple
 
 from llmfit.catalog.catalog import Catalog
+from llmfit.hardware.bandwidth import estimated_gpu_bandwidth_bytes
 from llmfit.planner import moe
 from llmfit.tuning.profiles import (
     AdvancedProfile,
@@ -87,14 +89,24 @@ def plan_offload(
                        main_gpu=0, split_mode="layer")
 
     if len(hardware.gpus) > 1:
-        plan.tensor_split = _tensor_split(hardware)
-        # The largest card holds the KV cache and the non-split tensors.
-        plan.main_gpu = max(range(len(hardware.gpus)),
-                            key=lambda i: hardware.gpus[i].vram_bytes)
-        plan.rationale = (
-            f"split across {len(hardware.gpus)} GPUs in proportion to their VRAM; "
-            f"GPU {plan.main_gpu} is largest and holds the KV cache"
-        )
+        plan.tensor_split = _tensor_split(hardware, candidate.estimate.weights)
+        speeds = {estimated_gpu_bandwidth_bytes(g) for g in hardware.gpus}
+        if len(speeds) > 1:
+            fastest = max(range(len(hardware.gpus)),
+                          key=lambda i: estimated_gpu_bandwidth_bytes(hardware.gpus[i]))
+            plan.rationale = (
+                f"split across {len(hardware.gpus)} GPUs by speed rather than by "
+                f"capacity, because under a layer split every token passes "
+                f"through each card in turn and the slowest one sets the pace. "
+                f"GPU {fastest} is the fastest here and takes the largest share "
+                f"that fits on it"
+            )
+        else:
+            plan.rationale = (
+                f"split across {len(hardware.gpus)} matched GPUs in proportion "
+                f"to their memory; each holds a contiguous run of layers, "
+                f"together with the cache for those layers"
+            )
 
     if not spec.is_moe or not hardware.gpus:
         if not plan.rationale:
@@ -149,11 +161,76 @@ def plan_offload(
     return plan
 
 
-def _tensor_split(hardware: HardwareProfile) -> List[float]:
-    total = sum(g.vram_bytes for g in hardware.gpus)
-    if total <= 0:
+def _tensor_split(hardware: HardwareProfile, model_bytes: int = 0) -> List[float]:
+    """How much of the model each GPU carries.
+
+    llama.cpp's automatic split, and llmfit's previous one, divide in proportion
+    to memory. That is the right answer only when the cards are the same speed.
+    Under a layer split every token walks through each card in turn, so the time
+    per token is the sum of the per-card times, and a card given work in
+    proportion to its capacity rather than its speed holds up everything behind
+    it. Pairing a 3090 with a 3060 is the common case: three times the bandwidth
+    on one side, and the memory-proportional split hands the slow card a third
+    of every forward pass.
+
+    So the work is divided by bandwidth, then capped by what each card can
+    physically hold, with the overflow going back to the others. Capacity is a
+    constraint here rather than the objective, which is the way round it should
+    have been.
+    """
+    gpus = hardware.gpus
+    if not gpus:
         return []
-    return [round(g.vram_bytes / total, 3) for g in hardware.gpus]
+    capacities = [float(g.vram_bytes) for g in gpus]
+    total_capacity = sum(capacities)
+    if total_capacity <= 0:
+        return []
+
+    speeds = [float(estimated_gpu_bandwidth_bytes(g)) for g in gpus]
+    if not any(speeds):
+        return [round(c / total_capacity, 3) for c in capacities]
+
+    # Nothing to solve when the cards match: the two answers coincide and the
+    # simpler one reads better in the report.
+    if len(set(speeds)) == 1:
+        return [round(c / total_capacity, 3) for c in capacities]
+
+    # Capacity ceilings, as fractions of the whole. Without a model size the
+    # cards are assumed full, which is the binding case anyway: that is when a
+    # split can fail to fit.
+    footprint = model_bytes or int(total_capacity)
+    ceilings = [c / footprint for c in capacities]
+
+    shares = [0.0] * len(gpus)
+    remaining = 1.0
+    open_indexes = list(range(len(gpus)))
+    for _ in range(len(gpus)):
+        speed_total = sum(speeds[i] for i in open_indexes)
+        if speed_total <= 0 or not open_indexes:
+            break
+        capped = []
+        for i in open_indexes:
+            want = remaining * speeds[i] / speed_total
+            if want > ceilings[i]:
+                shares[i] = ceilings[i]
+                capped.append(i)
+            else:
+                shares[i] = want
+        if not capped:
+            break
+        remaining -= sum(shares[i] for i in capped)
+        open_indexes = [i for i in open_indexes if i not in capped]
+
+    total_share = sum(shares)
+    if total_share <= 0:
+        return [round(c / total_capacity, 3) for c in capacities]
+
+    # Rounded down rather than to nearest. A card held at its capacity ceiling
+    # is at that ceiling because it cannot take more, and rounding its share up
+    # by a thousandth is how a split that fits on paper fails to on the card.
+    # llama.cpp normalises the proportions, so a set that sums slightly under
+    # one is fine and keeps every ratio on the safe side.
+    return [math.floor(share / total_share * 1000) / 1000 for share in shares]
 
 
 # --------------------------------------------------------------------------- #

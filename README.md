@@ -244,6 +244,41 @@ lengths where it would be slower as well as worse, and reported in words that
 say how to undo it. Given the choice between a lossy cache and a shorter
 context, llmfit shortens the context.
 
+### Two cards of different speeds
+
+llama.cpp's automatic split divides the model in proportion to memory, and
+llmfit's did the same. That is right only when the cards match. Under a layer
+split every token walks through each card in turn, so the time per token is the
+sum of the per-card times, and a card given work in proportion to its capacity
+rather than its speed holds up everything behind it. Pairing a 3090 with a 3060
+is the common case: three times the bandwidth on one side, and the
+memory-proportional split hands the slow card a third of every forward pass.
+
+The work is divided by bandwidth now, then capped by what each card can
+physically hold, with the overflow going back to the others. Capacity is a
+constraint rather than the objective, which is the way round it should have
+been. The shares round down, because a card sitting at its ceiling is there
+because it cannot take more.
+
+Two smaller corrections came out of reading the upstream multi-GPU
+documentation. `--main-gpu` names the single card to use when the model is not
+split at all, so passing it alongside a split says nothing; llmfit was passing
+it and describing that card as holding the KV cache, which is not how a layer
+split works and would send someone debugging in the wrong direction. And `row`
+split mode is deprecated upstream, so it is no longer offered.
+
+### On a Mac, the faster engine comes first
+
+MLX generates appreciably faster than llama.cpp on Apple Silicon. llmfit ranked
+it third, on the reasoning that the GGUF engines have broader model coverage,
+which was measured against a catalog recording exactly one MLX build. That is
+circular, and it cost Mac users real speed on every model that does have one.
+
+The engine cannot be chosen before the model, because it depends on the model,
+so that decision is revisited once one is picked: a model with an MLX build gets
+MLX, and everything else falls back to the GGUF engines. The report says plainly
+that this is a fallback rather than the better choice.
+
 ### Sizing from the model, not from the card
 
 Batch size was chosen from a table indexed on VRAM, before anything about the
@@ -536,7 +571,7 @@ The 3.9 floor is tested, not assumed: CI runs the full suite on 3.9, 3.10, 3.11,
 
 ```bash
 pip install -e ".[dev]"
-pytest                       # 739 tests, no GPU or network required
+pytest                       # 761 tests, no GPU or network required
 ruff check src/ tests/
 ```
 
