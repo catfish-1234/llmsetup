@@ -15,7 +15,7 @@
 # overrides whatever is written here.
 
 schema_version: 1
-updated: "2026-09-03"
+updated: "2026-09-07"
 
 quant_bpw:            # effective bits per weight, including embedding overhead
   Q2_K:    3.35
@@ -927,3 +927,233 @@ models:
     arch_source: measured
     discovered: true
     gguf_repo: Qwen/Qwen2.5-Coder-7B-Instruct-GGUF
+
+  # ---------------------------------------- added 2026-09-07 by `llmfit catalog refresh`
+  - id: qwen2.5-32b
+    name: Qwen2.5 32B Instruct
+    publisher: Qwen
+    params_b: 32.0
+    layers: 64
+    hidden_size: 5120
+    kv_heads: 8
+    head_dim: 128
+    max_context: 32768
+    license: apache-2.0
+    commercial_ok: true
+    quality_tier: 4
+    tasks:
+    - chat
+    - rag
+    - summarize
+    supports_tools: true
+    supports_vision: false
+    supports_json: true
+    hf_repo: Qwen/Qwen2.5-32B-Instruct
+    recommended_quants:
+    - Q4_K_M
+    - Q5_K_M
+    - Q6_K
+    - Q8_0
+    arch_source: measured
+    discovered: true
+    gguf_repo: bartowski/Qwen2.5-32B-Instruct-GGUF
+  - id: qwen3-30b-a3b
+    name: Qwen3 30B A3B
+    publisher: Qwen
+    params_b: 30.0
+    layers: 48
+    hidden_size: 2048
+    kv_heads: 4
+    head_dim: 128
+    max_context: 40960
+    license: apache-2.0
+    commercial_ok: true
+    quality_tier: 4
+    tasks:
+    - chat
+    supports_tools: false
+    supports_vision: false
+    supports_json: true
+    hf_repo: Qwen/Qwen3-30B-A3B
+    recommended_quants:
+    - Q4_K_M
+    - Q5_K_M
+    - Q6_K
+    - Q8_0
+    arch_source: measured
+    discovered: true
+    active_params_b: 3.0
+    gguf_repo: unsloth/Qwen3-30B-A3B-Thinking-2507-GGUF
+  - id: qwen3-4b-base
+    name: Qwen3 4B Base
+    publisher: Qwen
+    params_b: 4.0
+    layers: 36
+    hidden_size: 2560
+    kv_heads: 8
+    head_dim: 128
+    max_context: 32768
+    license: apache-2.0
+    commercial_ok: true
+    quality_tier: 3
+    tasks:
+    - chat
+    supports_tools: false
+    supports_vision: false
+    supports_json: true
+    hf_repo: Qwen/Qwen3-4B-Base
+    recommended_quants:
+    - Q4_K_M
+    - Q5_K_M
+    - Q6_K
+    - Q8_0
+    arch_source: measured
+    discovered: true
+    gguf_repo: mradermacher/Qwen3-4B-Base-custom-heresy-i1-GGUF
+  - id: qwen2.5-coder-14b
+    name: Qwen2.5 Coder 14B Instruct
+    publisher: Qwen
+    params_b: 14.0
+    layers: 48
+    hidden_size: 5120
+    kv_heads: 8
+    head_dim: 128
+    max_context: 32768
+    license: apache-2.0
+    commercial_ok: true
+    quality_tier: 3
+    tasks:
+    - agent
+    - chat
+    - coding
+    - rag
+    - summarize
+    supports_tools: true
+    supports_vision: false
+    supports_json: true
+    hf_repo: Qwen/Qwen2.5-Coder-14B-Instruct
+    recommended_quants:
+    - Q4_K_M
+    - Q5_K_M
+    - Q6_K
+    - Q8_0
+    arch_source: measured
+    discovered: true
+    gguf_repo: Qwen/Qwen2.5-Coder-14B-Instruct-GGUF
+  - id: qwen2.5-coder-32b
+    name: Qwen2.5 Coder 32B Instruct
+    publisher: Qwen
+    params_b: 32.0
+    layers: 64
+    hidden_size: 5120
+    kv_heads: 8
+    head_dim: 128
+    max_context: 32768
+    license: apache-2.0
+    commercial_ok: true
+    quality_tier: 4
+    tasks:
+    - agent
+    - chat
+    - coding
+    - rag
+    - summarize
+    supports_tools: true
+    supports_vision: false
+    supports_json: true
+    hf_repo: Qwen/Qwen2.5-Coder-32B-Instruct
+    recommended_quants:
+    - Q4_K_M
+    - Q5_K_M
+    - Q6_K
+    - Q8_0
+    arch_source: measured
+    discovered: true
+    gguf_repo: Qwen/Qwen2.5-Coder-32B-Instruct-GGUF
+  - id: tinyllama-1.1b-chat-v1.0
+    name: TinyLlama 1.1B Chat v1.0
+    publisher: TinyLlama
+    params_b: 1.1
+    layers: 22
+    hidden_size: 2048
+    kv_heads: 4
+    head_dim: 64
+    max_context: 2048
+    license: apache-2.0
+    commercial_ok: true
+    quality_tier: 3
+    tasks:
+    - agent
+    - chat
+    - coding
+    - rag
+    - summarize
+    supports_tools: true
+    supports_vision: false
+    supports_json: true
+    hf_repo: TinyLlama/TinyLlama-1.1B-Chat-v1.0
+    recommended_quants:
+    - Q4_K_M
+    - Q5_K_M
+    - Q6_K
+    - Q8_0
+    arch_source: measured
+    discovered: true
+    gguf_repo: TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF
+  - id: mistral-7b-instruct-v0.2
+    name: Mistral 7B Instruct v0.2
+    publisher: mistralai
+    params_b: 7.0
+    layers: 32
+    hidden_size: 4096
+    kv_heads: 8
+    head_dim: 128
+    max_context: 32768
+    license: apache-2.0
+    commercial_ok: true
+    quality_tier: 3
+    tasks:
+    - chat
+    - rag
+    - summarize
+    supports_tools: true
+    supports_vision: false
+    supports_json: true
+    hf_repo: mistralai/Mistral-7B-Instruct-v0.2
+    recommended_quants:
+    - Q4_K_M
+    - Q5_K_M
+    - Q6_K
+    - Q8_0
+    arch_source: measured
+    discovered: true
+    gguf_repo: TheBloke/Mistral-7B-Instruct-v0.2-GGUF
+  - id: qwen3-30b-a3b-instruct-2507
+    name: Qwen3 30B A3B Instruct 2507
+    publisher: Qwen
+    params_b: 30.0
+    layers: 48
+    hidden_size: 2048
+    kv_heads: 4
+    head_dim: 128
+    max_context: 262144
+    license: apache-2.0
+    commercial_ok: true
+    quality_tier: 4
+    tasks:
+    - chat
+    - rag
+    - summarize
+    supports_tools: true
+    supports_vision: false
+    supports_json: true
+    hf_repo: Qwen/Qwen3-30B-A3B-Instruct-2507
+    recommended_quants:
+    - Q4_K_M
+    - Q5_K_M
+    - Q6_K
+    - Q8_0
+    arch_source: measured
+    discovered: true
+    active_params_b: 3.0
+    gguf_repo: unsloth/Qwen3-30B-A3B-Instruct-2507-GGUF
