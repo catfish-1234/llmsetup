@@ -15,7 +15,7 @@
 # overrides whatever is written here.
 
 schema_version: 1
-updated: "2026-09-07"
+updated: "2026-09-10"
 
 quant_bpw:            # effective bits per weight, including embedding overhead
   Q2_K:    3.35
@@ -1157,3 +1157,31 @@ models:
     discovered: true
     active_params_b: 3.0
     gguf_repo: unsloth/Qwen3-30B-A3B-Instruct-2507-GGUF
+
+  # ---------------------------------------- added 2026-09-10 by `llmfit catalog refresh`
+  - id: qwen3-1.7b-base
+    name: Qwen3 1.7B Base
+    publisher: Qwen
+    params_b: 1.7
+    layers: 28
+    hidden_size: 2048
+    kv_heads: 8
+    head_dim: 128
+    max_context: 32768
+    license: apache-2.0
+    commercial_ok: true
+    quality_tier: 3
+    tasks:
+    - chat
+    supports_tools: false
+    supports_vision: false
+    supports_json: true
+    hf_repo: Qwen/Qwen3-1.7B-Base
+    recommended_quants:
+    - Q4_K_M
+    - Q5_K_M
+    - Q6_K
+    - Q8_0
+    arch_source: measured
+    discovered: true
+    gguf_repo: mradermacher/Entropy-Qwen3-1.7B-Base-i1-GGUF
