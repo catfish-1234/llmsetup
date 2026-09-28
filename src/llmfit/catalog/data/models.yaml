@@ -15,7 +15,7 @@
 # overrides whatever is written here.
 
 schema_version: 1
-updated: "2026-09-10"
+updated: "2026-09-28"
 
 quant_bpw:            # effective bits per weight, including embedding overhead
   Q2_K:    3.35
@@ -1185,3 +1185,33 @@ models:
     arch_source: measured
     discovered: true
     gguf_repo: mradermacher/Entropy-Qwen3-1.7B-Base-i1-GGUF
+
+  # ---------------------------------------- added 2026-09-28 by `llmfit catalog refresh`
+  - id: jirackultra-1b
+    name: JiRackUltra 1b
+    publisher: CMSManhattan
+    params_b: 1.0
+    layers: 28
+    hidden_size: 1536
+    kv_heads: 2
+    head_dim: 128
+    max_context: 131072
+    license: mit
+    commercial_ok: true
+    quality_tier: 3
+    tasks:
+    - chat
+    - rag
+    - summarize
+    supports_tools: true
+    supports_vision: false
+    supports_json: true
+    hf_repo: CMSManhattan/JiRackUltra_1b
+    recommended_quants:
+    - Q4_K_M
+    - Q5_K_M
+    - Q6_K
+    - Q8_0
+    arch_source: measured
+    discovered: true
+    gguf_repo: mradermacher/JiRackUltra_1b-i1-GGUF
