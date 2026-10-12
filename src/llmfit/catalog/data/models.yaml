@@ -15,7 +15,7 @@
 # overrides whatever is written here.
 
 schema_version: 1
-updated: "2026-10-08"
+updated: "2026-10-12"
 
 quant_bpw:            # effective bits per weight, including embedding overhead
   Q2_K:    3.35
@@ -1275,3 +1275,33 @@ models:
     arch_source: measured
     discovered: true
     gguf_repo: unsloth/DeepSeek-R1-Distill-Qwen-1.5B-GGUF
+
+  # ---------------------------------------- added 2026-10-12 by `llmfit catalog refresh`
+  - id: minicpm5-2b-dspark
+    name: MiniCPM5 2B DSpark
+    publisher: openbmb
+    params_b: 2.0
+    layers: 5
+    hidden_size: 2048
+    kv_heads: 2
+    head_dim: 128
+    max_context: 131072
+    license: apache-2.0
+    commercial_ok: true
+    quality_tier: 3
+    tasks:
+    - agent
+    - chat
+    - coding
+    supports_tools: true
+    supports_vision: false
+    supports_json: true
+    hf_repo: openbmb/MiniCPM5-2B-DSpark
+    recommended_quants:
+    - Q4_K_M
+    - Q5_K_M
+    - Q6_K
+    - Q8_0
+    arch_source: measured
+    discovered: true
+    gguf_repo: openbmb/MiniCPM5-2B-DSpark-GGUF
