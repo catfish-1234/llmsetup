@@ -12,6 +12,7 @@ hand-writing a launch command per model.
 
 from __future__ import annotations
 
+import shlex
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -43,7 +44,7 @@ def build_config(
     models: Dict[str, Any] = {}
     for spec, config, command in entries:
         models[spec.id] = {
-            "cmd": " ".join(command),
+            "cmd": shlex.join(command),
             "proxy": f"http://127.0.0.1:{config.port}",
             "ttl": ttl_seconds,
             "aliases": [spec.ollama_name] if spec.ollama_name else [],
