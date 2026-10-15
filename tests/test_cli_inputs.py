@@ -23,7 +23,7 @@ def test_nonpositive_cli_counts_are_usage_errors(flag, value, capsys):
                                     "context_tokens: nope", "context_tokens: .inf",
                                     "concurrent_users: many", "max_disk_gb: .nan",
                                     "needs_tools: maybe", "tasks: 42", "languages: 42",
-                                    "languages: null", "languages: [42]"])
+                                    "languages: [42]"])
 def test_bad_answers_file_reports_a_clean_error(tmp_path, capsys, answers):
     path = tmp_path / "answers.yaml"
     path.write_text(answers)
@@ -80,3 +80,7 @@ def test_answers_file_skips_interview_even_without_tasks(tmp_path, monkeypatch, 
 def test_profile_numeric_errors_name_the_field():
     with pytest.raises(LlmfitError, match="concurrent_users"):
         profile_from_answers({"concurrent_users": "many"})
+
+
+def test_null_languages_keep_the_default():
+    assert profile_from_answers({"languages": None}).languages == ["en"]
