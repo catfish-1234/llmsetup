@@ -392,7 +392,7 @@ def cmd_verify(args, console: Console) -> int:
         client=OpenAIClient(endpoint), spec=spec, config=config, profile=profile,
         hardware=hardware, console=console,
     )
-    names = args.checks.split(",") if args.checks else None
+    names = [name.strip() for name in args.checks.split(",")] if args.checks else None
     console.step(f"Verifying {args.model} at {args.base_url}")
     results = harness.run(names or _default_checks(profile, spec))
 

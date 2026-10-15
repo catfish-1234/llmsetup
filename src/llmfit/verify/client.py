@@ -214,9 +214,14 @@ class OpenAIClient:
         }
 
     def list_models(self) -> Dict[str, Any]:
-        response = http.request(self.endpoint.models_url, timeout=20)
+        response = http.request(self.endpoint.models_url,
+                                headers=self.endpoint.headers, timeout=20)
         if not response.ok:
             return {"ok": False, "error": response.error or response.body[:300],
                     "status": response.status}
-        data = response.json() or {}
-        return {"ok": True, "ids": [m.get("id") for m in data.get("data", [])]}
+        data = response.json()
+        if not isinstance(data, dict) or not isinstance(data.get("data"), list) or \
+                any(not isinstance(item, dict) for item in data["data"]):
+            return {"ok": False, "error": "unexpected model listing response shape",
+                    "status": response.status}
+        return {"ok": True, "ids": [m.get("id") for m in data["data"]]}
