@@ -68,7 +68,7 @@ interview → detect → plan → tune → provision → verify ⇄ repair → i
 The parts that make decisions (fit maths, tuning, failure diagnosis) are pure
 functions over data, so they can be tested without a GPU, without a network and
 without any inference engine installed. Only three stages touch the outside
-world, each behind a narrow seam. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+world, each behind a narrow seam. See [`docs/ARCHITECTURE.md`](ARCHITECTURE.md).
 
 ### The memory model
 
@@ -81,7 +81,7 @@ kv_cache  = 2 × layers × kv_heads × head_dim × context × bytes_per_element
 overhead  = compute buffers + activations + runtime fixed cost
 ```
 
-Three details that calculators usually get wrong:
+Details that sizing calculators can get wrong:
 
 - **Grouped-query attention.** The cache is sized by `kv_heads`, not by
   attention heads. Every modern model uses GQA, and ignoring it overstates the
@@ -425,4 +425,3 @@ Weights live **once**, in a shared store; every app is *linked* against it
 - **Open WebUI, Continue, Aider, Zed, Cursor.** Ready-to-paste config snippets
 - **llama-swap.** A generated config so one endpoint serves several models on
   demand, each with the command llmfit tuned for it
-
