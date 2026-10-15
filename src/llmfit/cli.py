@@ -42,6 +42,13 @@ from llmfit.util.units import gb
 VERSION = "0.1.0"
 
 
+def _positive_int(value: str) -> int:
+    number = int(value)
+    if number < 1:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return number
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -93,7 +100,7 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--gpu-vendor", choices=["nvidia", "amd", "apple", "intel"],
                        help="override the detected GPU vendor")
         p.add_argument("--cpu-only", action="store_true", help="ignore any GPU")
-        p.add_argument("--threads", type=int, help="override the physical core count")
+        p.add_argument("--threads", type=_positive_int, help="override the physical core count")
 
     def profile_flags(p: argparse.ArgumentParser) -> None:
         p.add_argument("--answers", type=Path,
@@ -103,10 +110,10 @@ def build_parser() -> argparse.ArgumentParser:
                             "translate|vision (repeatable)")
         p.add_argument("--client", action="append", dest="clients",
                        help="apps to register with (repeatable)")
-        p.add_argument("--context", type=int, dest="context_tokens",
+        p.add_argument("--context", type=_positive_int, dest="context_tokens",
                        help="context length in tokens")
         p.add_argument("--priority", choices=["speed", "balanced", "quality"])
-        p.add_argument("--users", type=int, dest="concurrent_users",
+        p.add_argument("--users", type=_positive_int, dest="concurrent_users",
                        help="concurrent users to size for")
         p.add_argument("--tools", dest="needs_tools", action="store_true",
                        default=None, help="require tool calling")
@@ -119,6 +126,8 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--commercial", dest="commercial_use", action="store_true",
                        default=None, help="only permissively licensed models")
         p.add_argument("--languages", help="comma-separated language codes")
+        p.add_argument("--offline", dest="offline_only", action="store_true", default=None,
+                       help="skip automatic catalog network updates")
         p.add_argument("--yes", action="store_true",
                        help="accept all defaults instead of asking")
 
@@ -156,7 +165,7 @@ def build_parser() -> argparse.ArgumentParser:
     hardware_flags(p_plan)
     profile_flags(p_plan)
     p_plan.add_argument("--runtime")
-    p_plan.add_argument("--top", type=int, default=5, help="how many to show")
+    p_plan.add_argument("--top", type=_positive_int, default=5, help="how many to show")
     p_plan.add_argument("--catalog", type=Path, action="append")
 
     p_verify = sub.add_parser("verify", help="test an endpoint you already have")
@@ -665,16 +674,17 @@ def _profile(args, console: Console) -> UseCaseProfile:
 
     for key in ("tasks", "clients", "context_tokens", "priority",
                 "concurrent_users", "needs_tools", "needs_json", "needs_vision",
-                "needs_embeddings", "commercial_use"):
+                "needs_embeddings", "commercial_use", "offline_only"):
         value = getattr(args, key, None)
         if value is not None:
             answers[key] = value
     if getattr(args, "languages", None):
         answers["languages"] = args.languages
 
-    interactive = sys.stdin.isatty() and not getattr(args, "yes", False)
+    interactive = (sys.stdin.isatty() and not getattr(args, "yes", False)
+                   and not getattr(args, "json", False))
     # Flags that already say what the model is for make the interview redundant.
-    have_enough = "tasks" in answers
+    have_enough = "tasks" in answers or getattr(args, "answers", None) is not None
 
     if interactive and not have_enough:
         return run_interview(console, defaults=answers)
