@@ -12,14 +12,20 @@ version = "0.1.0"
 description = "Interview-driven setup assistant for local open-weight LLMs: picks the model, tunes the runtime, proves it works, and registers it with every local LLM app you use."
 readme = "README.md"
 requires-python = ">=3.9"
-license = { text = "Apache-2.0" }
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
 keywords = ["llm", "local-llm", "gguf", "ollama", "llama.cpp", "lm-studio", "vllm", "mlx"]
 classifiers = [
   "Development Status :: 4 - Beta",
   "Environment :: Console",
   "Intended Audience :: Developers",
-  "License :: OSI Approved :: Apache Software License",
   "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 # Deliberately near-zero dependency: this tool runs on whatever machine the user
@@ -27,13 +33,16 @@ classifiers = [
 dependencies = ["PyYAML>=6.0"]
 
 [project.optional-dependencies]
-dev = ["pytest>=7", "pytest-cov>=4"]
+dev = ["pytest>=7", "pytest-cov>=4", "ruff==0.17.1"]
 
 [project.scripts]
 llmfit = "llmfit.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/catfish-1234/open-source-llm"
+Homepage = "https://github.com/catfish-1234/Open-source-llm"
+Source = "https://github.com/catfish-1234/Open-source-llm"
+Issues = "https://github.com/catfish-1234/Open-source-llm/issues"
+Documentation = "https://github.com/catfish-1234/Open-source-llm#readme"
 
 [tool.setuptools.packages.find]
 where = ["src"]
