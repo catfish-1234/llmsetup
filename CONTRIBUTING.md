@@ -27,11 +27,12 @@ Catalog entries live in `src/llmfit/catalog/data/models.yaml`. The fastest way
 to get the architecture right is to let the tool read it:
 
 ```bash
-python scripts/update_catalog.py --add <hf-repo-id>
+llmfit catalog add my-model --gguf ./my-model-Q4_K_M.gguf --publisher me
 ```
 
-That fetches the config, derives the fields llmfit needs, and marks provenance
-honestly. Check the diff before committing, particularly `params_b`, `layers`,
+That reads the local GGUF architecture and writes a user catalog overlay. Review
+the overlay from `llmfit catalog path` before adding an entry to the bundled
+catalog, particularly `params_b`, `layers`,
 `kv_heads` and `head_dim`, which drive the memory model.
 
 The catalog also refreshes itself on a schedule, so a model that is merely
@@ -42,13 +43,32 @@ pairing, or a publisher's sampling settings.
 ## Running the checks
 
 ```bash
-pip install -e ".[dev]"
-pytest                       # no GPU and no network required
+python -m venv .venv
+source .venv/bin/activate     # Windows: .venv\Scripts\Activate.ps1
+python -m pip install -e ".[dev]" "ruff==0.17.1"
+python -m pytest             # no GPU or downloaded model required
+python -m pytest --cov=llmfit --cov-report=term-missing
 ruff check src/ tests/ scripts/
 ```
 
 Every test runs against a temporary `LLMFIT_HOME`, so nothing touches your real
 model store, LM Studio folder, or saved profiles.
+UI integration tests bind local loopback sockets; an environment that forbids
+all socket creation cannot run those tests. Fake downloads and endpoints at the
+I/O boundary; do not make unit tests depend on the internet, installed engines,
+real credentials, a user's configuration, or a particular model being popular.
+
+Build and inspect distributable artifacts without publishing:
+
+```bash
+python -m pip install "build==1.3.0" "twine==6.2.0"
+python -m build
+python -m twine check dist/*
+```
+
+Test a wheel in a fresh virtual environment from outside the checkout; editable
+installs can hide missing catalog YAML or UI assets. Check that the console
+entry point, bundled resources, metadata, and license notices are included.
 
 The decision logic is deliberately pure: interview, planning, tuning and repair
 are dataclass transformations with no I/O, which is why the whole suite runs in
@@ -60,16 +80,29 @@ usually doing two jobs.
 
 This is the most useful bug report there is, and it needs three things:
 
-1. `llmfit report --markdown` from the run (it contains the machine, the plan,
+1. `llmfit report` from the run (it contains the machine, the plan,
    and every decision with its reason).
 2. What actually happened: the error, or the speed you measured.
 3. What you expected.
 
-Do not paste tokens or API keys; the report does not contain any, and llmfit
-never asks for one.
+Review reports and logs before sharing. Redact tokens, private URLs, paths, and
+server output you do not want to disclose. Follow [SECURITY.md](SECURITY.md) for
+suspected vulnerabilities.
 
 ## Pull requests
 
 - Explain *why* in the commit message. The what is in the diff.
 - A behaviour change needs a test that fails without it.
 - Comments should say why the code is the way it is, not restate what it does.
+- Start a focused branch from current `main`; keep unrelated changes in separate
+  PRs. Preserve command names, profile keys, and ordinary output contracts.
+- Include the exact lint and full-suite results, Python version, and any real
+  hardware or engine validation. Distinguish predictions from measurements.
+- Use full commit SHAs for third-party Actions, read-only CI permissions unless
+  a specific job needs writes, and environment variables for untrusted workflow
+  inputs. Never interpolate such inputs directly into shell code.
+- Do not add credentials or model weights. Retain Apache-2.0 notices and review
+  the licenses of any copied or vendored material. Downloaded model licenses are
+  independent of this project's software license.
+- Publication, naming migrations, and changes to support policy need their own
+  explicit maintainer decision. See [the naming proposal](docs/POSITIONING.md).
