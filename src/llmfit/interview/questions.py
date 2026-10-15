@@ -12,6 +12,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable, List, Optional
 
+from llmfit.util.errors import LlmfitError
+
 
 @dataclass
 class Option:
@@ -169,8 +171,19 @@ def infer_flags(answers: dict) -> dict:
     the verifier tests it, without making the user answer a question they already
     effectively answered.
     """
-    tasks = set(answers.get("tasks") or [])
+    if not isinstance(answers, dict):
+        raise LlmfitError("answers must be a mapping")
+    raw_tasks = answers.get("tasks") or []
+    if not isinstance(raw_tasks, (str, list, tuple)):
+        raise LlmfitError("tasks must be a list")
+    tasks = {getattr(task, "value", str(task)) for task in
+             ([raw_tasks] if isinstance(raw_tasks, str) else raw_tasks)}
     derived = dict(answers)
+
+    try:
+        context = int(derived.get("context_tokens") or 0)
+    except (ValueError, TypeError, OverflowError):
+        raise LlmfitError("context_tokens must be a finite whole number") from None
 
     if "agent" in tasks:
         derived.setdefault("needs_tools", True)
@@ -180,11 +193,11 @@ def infer_flags(answers: dict) -> dict:
         derived.setdefault("needs_vision", True)
     # Completion sees the file around the cursor, not a conversation, and every
     # token of context is latency paid on every keystroke.
-    if "autocomplete" in tasks and int(derived.get("context_tokens") or 0) == 0:
+    if "autocomplete" in tasks and context == 0:
         derived["context_tokens"] = 8192
     if "rag" in tasks:
         derived.setdefault("needs_embeddings", True)
         # Retrieval over documents is not useful in a short window.
-        if int(derived.get("context_tokens") or 0) < 16384:
+        if context < 16384:
             derived["context_tokens"] = 32768
     return {k: v for k, v in derived.items() if v is not None}

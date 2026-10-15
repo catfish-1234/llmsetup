@@ -13,6 +13,7 @@ and an interactive one cannot drift apart.
 
 from __future__ import annotations
 
+import math
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, TextIO
@@ -184,18 +185,25 @@ def _read(reader, emit, prompt: str) -> str:
 def load_answers(path: Path) -> Dict[str, Any]:
     """Read an answers file (the same shape `llmfit setup --save-profile` writes)."""
     try:
-        data = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
+        data = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
     except (OSError, yaml.YAMLError) as exc:
         raise LlmfitError(f"could not read answers file {path}: {exc}",
                           hint="it must be valid YAML or JSON") from None
+    if data is None:
+        data = {}
     if not isinstance(data, dict):
         raise LlmfitError(f"{path} must contain a mapping of answers")
     # Accept a full saved profile as well as a bare answers file.
-    return data.get("profile", data)
+    answers = data.get("profile", data)
+    if not isinstance(answers, dict):
+        raise LlmfitError(f"the profile in {path} must contain a mapping of answers")
+    return answers
 
 
 def profile_from_answers(answers: Dict[str, Any]) -> UseCaseProfile:
     """Validate answers into a profile, with clear errors on bad values."""
+    if not isinstance(answers, dict):
+        raise LlmfitError("answers must be a mapping")
     data = dict(answers)
 
     data["tasks"] = _enum_list(data.get("tasks") or ["chat"], Task, "task")
@@ -208,30 +216,56 @@ def profile_from_answers(answers: Dict[str, Any]) -> UseCaseProfile:
             hint="use one of: " + ", ".join(p.value for p in Priority),
         ) from None
 
-    context = int(data.get("context_tokens") or 8192)
+    context = _number(data.get("context_tokens") or 8192, "context_tokens", int)
     if context < 512:
         raise LlmfitError(f"context_tokens={context} is too small to be usable",
                           hint="512 is the practical minimum; 8192 is a good default")
     data["context_tokens"] = context
 
-    users = int(data.get("concurrent_users") or 1)
+    users = _number(data.get("concurrent_users") or 1, "concurrent_users", int)
     data["concurrent_users"] = max(1, users)
 
     if data.get("max_disk_gb") is not None:
-        data["max_disk_gb"] = float(data["max_disk_gb"])
+        data["max_disk_gb"] = _number(data["max_disk_gb"], "max_disk_gb", float)
+        if data["max_disk_gb"] <= 0:
+            raise LlmfitError("max_disk_gb must be positive")
     if isinstance(data.get("languages"), str):
         data["languages"] = [p.strip() for p in data["languages"].split(",") if p.strip()]
-    data.setdefault("languages", ["en"])
+    if data.get("languages") is None:
+        data["languages"] = ["en"]
+    if not isinstance(data["languages"], (list, tuple)) or \
+            any(not isinstance(language, str) for language in data["languages"]):
+        raise LlmfitError("languages must be a list of language codes")
 
     for flag in ("needs_tools", "needs_json", "needs_vision", "needs_embeddings",
                  "needs_reasoning", "commercial_use", "offline_only"):
-        data[flag] = bool(data.get(flag, False))
+        value = data.get(flag, False)
+        if isinstance(value, str):
+            normal = value.strip().lower()
+            if normal not in ("true", "false", "yes", "no", "on", "off", "1", "0"):
+                raise LlmfitError(f"{flag} must be true or false, got {value!r}")
+            value = normal in ("true", "yes", "on", "1")
+        data[flag] = bool(value)
 
     known = set(UseCaseProfile.__dataclass_fields__)
     return UseCaseProfile(**{k: v for k, v in data.items() if k in known})
 
 
+def _number(value, field: str, caster):
+    try:
+        number = caster(value)
+        if isinstance(value, bool) or not math.isfinite(number):
+            raise ValueError
+        return number
+    except (TypeError, ValueError, OverflowError):
+        raise LlmfitError(f"{field} must be a finite number, got {value!r}") from None
+
+
 def _enum_list(values, enum_cls, label: str):
+    if isinstance(values, str):
+        values = [values]
+    if not isinstance(values, (list, tuple)):
+        raise LlmfitError(f"{label}s must be a list")
     out = []
     for value in values:
         if isinstance(value, enum_cls):
