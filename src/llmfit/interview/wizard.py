@@ -231,7 +231,8 @@ def profile_from_answers(answers: Dict[str, Any]) -> UseCaseProfile:
             raise LlmfitError("max_disk_gb must be positive")
     if isinstance(data.get("languages"), str):
         data["languages"] = [p.strip() for p in data["languages"].split(",") if p.strip()]
-    data.setdefault("languages", ["en"])
+    if data.get("languages") is None:
+        data["languages"] = ["en"]
     if not isinstance(data["languages"], (list, tuple)) or \
             any(not isinstance(language, str) for language in data["languages"]):
         raise LlmfitError("languages must be a list of language codes")
