@@ -8,6 +8,7 @@ connection at 90% should not start over.
 
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import re
@@ -258,6 +259,9 @@ def download_file(
     attempt = 0
     while True:
         existing = part.stat().st_size if part.exists() else 0
+        if remote.size is not None and existing > remote.size:
+            part.unlink()
+            existing = 0
         headers = _auth_headers()
         if existing:
             headers["Range"] = f"bytes={existing}-"
@@ -265,14 +269,31 @@ def download_file(
         try:
             req = urllib.request.Request(remote.url, headers=headers)
             with urllib.request.urlopen(req, timeout=timeout) as resp:
-                total = remote.size
-                length = resp.headers.get("Content-Length")
-                if total is None and length:
-                    total = int(length) + existing
                 # A server that ignores Range restarts the file; don't append to it.
                 mode = "ab" if (existing and resp.status == 206) else "wb"
                 if mode == "wb":
                     existing = 0
+
+                total = remote.size
+                length = resp.headers.get("Content-Length")
+                response_size = int(length) if length is not None else None
+                if resp.status == 206:
+                    match = re.fullmatch(r"bytes (\d+)-(\d+)/(\d+|\*)",
+                                         resp.headers.get("Content-Range", ""))
+                    if not match or int(match[1]) != existing or int(match[2]) < existing:
+                        raise ProvisionError("server returned an invalid download range",
+                                             hint=f"partial file kept at {part}; retry later")
+                    range_size = int(match[2]) - existing + 1
+                    range_total = None if match[3] == "*" else int(match[3])
+                    if (response_size is not None and response_size != range_size) or \
+                            (range_total is not None and int(match[2]) >= range_total) or \
+                            (total is not None and range_total is not None and
+                             total != range_total):
+                        raise ProvisionError("server returned inconsistent download sizes")
+                    total = total if total is not None else range_total
+                    response_size = range_size
+                if total is None and response_size is not None:
+                    total = response_size + existing
 
                 downloaded = existing
                 with open(part, mode) as handle:
@@ -284,16 +305,31 @@ def download_file(
                         downloaded += len(chunk)
                         if progress:
                             progress(downloaded, total)
+                if (total is not None and downloaded != total) or \
+                        (response_size is not None and downloaded - existing != response_size):
+                    raise OSError(f"incomplete download: received {downloaded} bytes; "
+                                  f"expected {total}")
             os.replace(part, dest)
             return dest
 
-        except (urllib.error.URLError, OSError, urllib.error.HTTPError) as exc:
+        except (urllib.error.URLError, OSError, http.client.IncompleteRead) as exc:
+            # The final byte may have arrived before a previous process stopped.
+            # A 416 confirms the remote length; only promote an exact match.
+            if isinstance(exc, urllib.error.HTTPError) and exc.code == 416:
+                match = re.fullmatch(r"bytes \*/(\d+)",
+                                     exc.headers.get("Content-Range", ""))
+                if match and existing > 0 and existing == int(match[1]) and \
+                        (remote.size is None or existing == remote.size):
+                    os.replace(part, dest)
+                    if progress:
+                        progress(existing, existing)
+                    return dest
             attempt += 1
             if attempt > retries:
                 raise ProvisionError(
                     f"download of {remote.filename} failed after {retries} retries: {exc}",
                     hint=(f"the partial file is kept at {part}; rerun to resume, "
-                          "or download it manually and pass --model-path"),
+                          "or download it manually into the model store"),
                 ) from None
             time.sleep(min(30, 2 ** attempt))
 
