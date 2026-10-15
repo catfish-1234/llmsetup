@@ -20,6 +20,7 @@ from llmfit.types import (
     Task,
     UseCaseProfile,
 )
+from llmfit.util.errors import LlmfitError
 from llmfit.util.log import Console
 from llmfit.verify.checks import ALL_CHECKS, CheckContext
 from llmfit.verify.client import OpenAIClient
@@ -99,6 +100,13 @@ class Harness:
         or the model is incoherent, every later result is noise, and the repair
         loop wants the first real signature rather than a cascade.
         """
+        names = list(names)
+        unknown = [name for name in names if name not in ALL_CHECKS]
+        if unknown:
+            raise LlmfitError(
+                f"unknown verification check(s): {', '.join(unknown)}",
+                hint="valid checks: " + ", ".join(sorted(ALL_CHECKS)),
+            )
         ctx = self.context()
         results: List[CheckResult] = []
 
@@ -145,7 +153,9 @@ def _run_one(check, name: str, ctx: CheckContext) -> CheckResult:
         result = check(ctx)
     except Exception as exc:
         result = CheckResult(
-            name=name, status=CheckStatus.FAIL, severity=Severity.ADVISORY,
+            # A broken check cannot establish that a required capability works.
+            # Keep ordinary, intentionally advisory failures as returned by checks.
+            name=name, status=CheckStatus.FAIL, severity=Severity.CRITICAL,
             message=f"the check raised an unexpected error: {exc}",
             failure_signature=sig.classify_or_unknown(str(exc)),
             detail=repr(exc),
