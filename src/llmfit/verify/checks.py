@@ -100,7 +100,7 @@ def check_health(ctx: CheckContext) -> CheckResult:
 
     ids = [i for i in listing.get("ids", []) if i]
     wanted = ctx.client.endpoint.model
-    if ids and not any(_names_match(wanted, str(i)) for i in ids):
+    if not any(_names_match(wanted, str(i)) for i in ids):
         # Serving *something*, but not what we configured, a real failure mode
         # when a previous model is still resident.
         return _fail(
