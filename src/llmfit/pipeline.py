@@ -115,6 +115,9 @@ class Pipeline:
                 hint=runtime.install_hint(),
             )
         config = runtime.ensure_model(candidate.model, config, self.console)
+        # Repairs compare against the weights actually provisioned, including
+        # the very first repair. Defaulting to the repaired quant skips its fetch.
+        self._provisioned_quant = config.quant
         self._ensure_draft_model(runtime, config)
 
         # Ground truth beats the catalog: correct the plan from the real file.
