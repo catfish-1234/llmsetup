@@ -19,6 +19,7 @@ two can never disagree about what the tool does.
 from __future__ import annotations
 
 import json
+import shlex
 import threading
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -276,8 +277,8 @@ def _setup_command(candidate, profile) -> str:
     over the command instead, so the irreversible step stays an explicit,
     inspectable choice, and so the terminal remains the source of truth.
     """
-    parts = ["llmfit setup", f"--model {candidate.model.id}",
-             f"--quant {candidate.quant}", f"--context {profile.context_tokens}"]
+    parts = ["llmfit setup", f"--model {shlex.quote(candidate.model.id)}",
+             f"--quant {shlex.quote(candidate.quant)}", f"--context {profile.context_tokens}"]
     for task in profile.tasks:
         parts.append(f"--task {task.value}")
     if profile.needs_tools:

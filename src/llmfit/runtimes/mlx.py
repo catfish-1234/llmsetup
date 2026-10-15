@@ -9,6 +9,7 @@ the catalog has an ``mlx_repo`` and the user asked for speed.
 from __future__ import annotations
 
 import platform
+import shlex
 from typing import Dict, List, Optional
 
 from llmfit.runtimes.base import Endpoint, Runtime, RuntimeUnavailable
@@ -97,7 +98,7 @@ class MlxRuntime(Runtime):
     def config_files(self, spec: ModelSpec, config: RuntimeConfig) -> Dict[str, str]:
         cmd = self.launch_command(spec, config)
         return {f"start-{spec.id}-mlx.sh":
-                "#!/usr/bin/env bash\nset -euo pipefail\n\nexec " + " ".join(cmd) + "\n"}
+                "#!/usr/bin/env bash\nset -euo pipefail\n\nexec " + shlex.join(cmd) + "\n"}
 
 
 register(MlxRuntime())
