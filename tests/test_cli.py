@@ -4,10 +4,18 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from llmfit.cli import build_parser, main
 from llmfit.hardware.detect import apply_overrides, detect_hardware
 from llmfit.report.render import render_markdown
 from llmfit.types import GIB, Accelerator, Task, UseCaseProfile
+
+
+@pytest.fixture(autouse=True)
+def no_catalog_network(monkeypatch):
+    # CLI tests exercise the bundled snapshot; updater tests fake their source.
+    monkeypatch.setenv("LLMFIT_AUTO_UPDATE", "0")
 
 
 class TestParser:
