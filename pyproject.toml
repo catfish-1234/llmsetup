@@ -3,7 +3,7 @@
 # PYSEC-2026-1918 and PYSEC-2026-3447. `wheel` is deliberately absent, because modern
 # setuptools vendors what it needs, and listing it only pinned an extra package
 # with its own advisories (CVE-2026-24049).
-requires = ["setuptools>=78.1.1"]
+requires = ["setuptools>=84.0.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
