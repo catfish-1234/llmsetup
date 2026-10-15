@@ -73,8 +73,8 @@ def safe_subpath(root: Path, *components: str) -> Path:
     sanitiser alone.
     """
     candidate = root.joinpath(*(safe_component(c) for c in components))
-    root_resolved = root.resolve() if root.exists() else root.absolute()
-    resolved = candidate.resolve() if candidate.exists() else candidate.absolute()
+    root_resolved = root.resolve()
+    resolved = candidate.resolve()
     if root_resolved != resolved and root_resolved not in resolved.parents:
         raise ValueError(
             f"refusing to build a path outside {root}: {'/'.join(map(str, components))}"

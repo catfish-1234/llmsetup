@@ -10,6 +10,7 @@ about what it changed and leaves their editor config intact.
 from __future__ import annotations
 
 import json
+import shlex
 from typing import Dict, List
 
 from llmfit.runtimes.base import Endpoint
@@ -71,9 +72,9 @@ def snippets(endpoint: Endpoint, spec: ModelSpec,
             "name": "Any OpenAI-compatible client / SDK",
             "path": "environment variables",
             "format": "shell",
-            "content": (f'export OPENAI_BASE_URL="{openai_base}"\n'
-                        f'export OPENAI_API_KEY="{DUMMY_KEY}"\n'
-                        f'export OPENAI_MODEL="{model}"\n'),
+            "content": (f"export OPENAI_BASE_URL={shlex.quote(openai_base)}\n"
+                        f"export OPENAI_API_KEY={shlex.quote(DUMMY_KEY)}\n"
+                        f"export OPENAI_MODEL={shlex.quote(model)}\n"),
         },
     }
 
