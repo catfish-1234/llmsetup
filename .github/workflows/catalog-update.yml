@@ -27,28 +27,44 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   update:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    env:
+      LLMFIT_AUTO_UPDATE: "0"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.11"
 
       - name: Install
-        run: pip install -e ".[dev]"
+        run: python -m pip install -c requirements-ci.txt -e ".[dev]" ruff
+
+      - name: Lint code and maintenance scripts
+        run: ruff check src/ tests/ scripts/
 
       - name: Discover and merge new models
         id: update
+        env:
+          LLMFIT_MAX_NEW: ${{ github.event.inputs.max_new || '8' }}
+          LLMFIT_MIN_DOWNLOADS: ${{ github.event.inputs.min_downloads || '5000' }}
+          LLMFIT_DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
         run: |
+          extra_args=()
+          if [[ "$LLMFIT_DRY_RUN" == "true" ]]; then
+            extra_args+=(--dry-run)
+          fi
           python scripts/update_catalog.py \
-            --max-new "${{ github.event.inputs.max_new || '8' }}" \
-            --min-downloads "${{ github.event.inputs.min_downloads || '5000' }}" \
-            ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
+            --max-new "$LLMFIT_MAX_NEW" \
+            --min-downloads "$LLMFIT_MIN_DOWNLOADS" \
+            "${extra_args[@]}"
 
       - name: Check whether the catalog changed
         id: diff

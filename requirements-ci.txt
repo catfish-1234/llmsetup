@@ -1,0 +1,11 @@
+# Exact direct tool versions for reproducible CI behavior, including Python 3.9.
+# Runtime library ranges stay in pyproject.toml for downstream compatibility.
+pytest==8.4.2
+pytest-cov==6.2.1
+coverage==7.10.7
+ruff==0.17.1
+PyYAML==6.0.3
+build==1.3.0
+twine==6.2.0
+pip-audit==2.9.0
+bandit==1.8.6
