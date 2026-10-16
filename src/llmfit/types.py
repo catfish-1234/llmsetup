@@ -258,6 +258,10 @@ class ModelSpec:
     ollama_name: Optional[str] = None    # tag pullable via `ollama pull`
     hf_repo: Optional[str] = None        # safetensors repo (vLLM / MLX)
     mlx_repo: Optional[str] = None
+    # Full Hub commit SHAs. Missing pins are resolved and saved at provisioning.
+    gguf_revision: Optional[str] = None
+    hf_revision: Optional[str] = None
+    mlx_revision: Optional[str] = None
     chat_template: Optional[str] = None
     recommended_quants: List[str] = field(default_factory=lambda: ["Q4_K_M"])
     #: Models sharing a vocabulary. Speculative decoding requires the draft and

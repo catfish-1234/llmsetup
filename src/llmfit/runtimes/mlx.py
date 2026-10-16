@@ -12,6 +12,7 @@ import platform
 import shlex
 from typing import Dict, List, Optional
 
+from llmfit.download import pin_revision
 from llmfit.runtimes.base import Endpoint, Runtime, RuntimeUnavailable
 from llmfit.runtimes.registry import register
 from llmfit.types import ModelSpec, RuntimeConfig
@@ -56,7 +57,17 @@ class MlxRuntime(Runtime):
                 f"no MLX-converted build of {spec.name} in the catalog; using "
                 f"{spec.hf_repo}, which MLX will convert on load"
             )
-        config.model_path = repo
+        revision = spec.mlx_revision if spec.mlx_repo else spec.hf_revision
+        config.extra["model_revision"] = pin_revision(repo, revision)
+        result = run([
+            "python3", "-c",
+            "import sys; from huggingface_hub import snapshot_download; "
+            "print(snapshot_download(repo_id=sys.argv[1], revision=sys.argv[2]))",
+            repo, config.extra["model_revision"],
+        ], timeout=7200)
+        if not result.ok or not result.stdout.strip():
+            raise RuntimeUnavailable(f"could not download {repo} at the pinned revision")
+        config.model_path = result.stdout.strip()
         return config
 
     def launch_command(self, spec: ModelSpec, config: RuntimeConfig) -> List[str]:
