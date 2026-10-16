@@ -8,6 +8,7 @@ override earlier entries by ``id`` and may add new ones.
 
 from __future__ import annotations
 
+import math
 import os
 from dataclasses import replace
 from pathlib import Path
@@ -193,18 +194,35 @@ def load_catalog(extra_paths: Optional[Iterable[Path]] = None,
                                    hint="reinstall llmfit")
             continue
         data = _read_yaml(path)
-        quant_bpw.update({str(k): float(v) for k, v in (data.get("quant_bpw") or {}).items()})
+        version = data.get("schema_version", 1)
+        if type(version) is not int or version != 1:
+            raise CatalogError(f"unsupported schema_version {version!r} in {path}; expected 1")
+        table = data.get("quant_bpw", {})
+        if not isinstance(table, dict):
+            raise CatalogError(f"quant_bpw must be a mapping in {path}")
+        for key, value in table.items():
+            converted = _coerce_types({"params_b": value}, f"quant_bpw[{key}]", path)
+            quant_bpw[str(key)] = converted["params_b"]
         updated = data.get("updated") or updated
-        for raw in data.get("models") or []:
+        entries = data.get("models", [])
+        if not isinstance(entries, list):
+            raise CatalogError(f"models must be a list in {path}")
+        seen = set()
+        for raw in entries:
             if not isinstance(raw, dict) or "id" not in raw:
                 raise CatalogError(f"catalog entry without an 'id' in {path}")
             model_id = raw["id"]
+            if not isinstance(model_id, str) or not model_id.strip():
+                raise CatalogError(f"model id must be a nonempty string in {path}: {model_id!r}")
+            if model_id in seen:
+                raise CatalogError(f"duplicate model id {model_id!r} in {path}")
+            seen.add(model_id)
             # A later layer that repeats an id patches the earlier entry field by
             # field, so a user can override just `ollama_name` without restating
             # the whole model. Patching must not require a complete entry, so the
             # existence check comes before we try to build a full ModelSpec.
             if model_id in merged:
-                merged[model_id] = _patch(merged[model_id], raw)
+                merged[model_id] = _patch(merged[model_id], raw, path)
             else:
                 merged[model_id] = _to_spec(raw, path)
             _record_extras(extras, model_id, raw)
@@ -217,10 +235,12 @@ def load_catalog(extra_paths: Optional[Iterable[Path]] = None,
 
 def _read_yaml(path: Path) -> dict:
     try:
-        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
     except (OSError, yaml.YAMLError) as exc:
         raise CatalogError(f"could not read catalog {path}: {exc}",
                            hint="the file must be valid YAML") from None
+    if data is None:
+        data = {}
     if not isinstance(data, dict):
         raise CatalogError(f"catalog {path} must be a YAML mapping")
     return data
@@ -243,6 +263,7 @@ def _to_spec(raw: dict, path: Path) -> ModelSpec:
         spec = ModelSpec(**fields)
     except TypeError as exc:
         raise CatalogError(f"bad catalog entry {raw.get('id')!r} in {path}: {exc}") from None
+    _validate_spec(spec, path)
     return spec
 
 
@@ -252,10 +273,12 @@ def _record_extras(store: Dict[str, dict], model_id: str, raw: dict) -> None:
         store.setdefault(model_id, {}).update(found)
 
 
-def _patch(base: ModelSpec, raw: dict) -> ModelSpec:
+def _patch(base: ModelSpec, raw: dict, path: Path) -> ModelSpec:
     changes = {k: v for k, v in raw.items() if k in _SPEC_FIELDS and k != "id"}
-    changes = _coerce_types(changes, base.id, Path("<overlay>"))
-    return replace(base, **changes)
+    changes = _coerce_types(changes, base.id, path)
+    spec = replace(base, **changes)
+    _validate_spec(spec, path)
+    return spec
 
 
 #: Fields the memory model does arithmetic on. A string here does not fail at
@@ -286,30 +309,35 @@ def _coerce_types(fields: Dict[str, Any], model_id: str, path: Path) -> Dict[str
     out = dict(fields)
 
     for name, caster in _NUMERIC_FIELDS.items():
-        if name not in out or out[name] is None:
+        if name not in out:
             continue
         value = out[name]
+        if value is None and name in {"active_params_b", "head_dim", "max_disk_gb", "sliding_window"}:
+            continue
         if isinstance(value, bool) or not isinstance(value, (int, float, str)):
             raise CatalogError(
                 f"{model_id}.{name} must be a number, got {value!r} in {path}"
             )
         try:
+            number = float(value)
+            if not math.isfinite(number) or (caster is int and not number.is_integer()):
+                raise ValueError
             out[name] = caster(value)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             raise CatalogError(
                 f"{model_id}.{name} must be a number, got {value!r} in {path}"
             ) from None
-        if out[name] <= 0:
+        if out[name] < 0 or (out[name] == 0 and name != "recurrent_state_bytes"):
             raise CatalogError(
                 f"{model_id}.{name} must be positive, got {out[name]} in {path}"
             )
 
     for name in _BOOL_FIELDS:
-        if name in out and out[name] is not None:
-            out[name] = bool(out[name])
+        if name in out and not isinstance(out[name], bool):
+            raise CatalogError(f"{model_id}.{name} must be a boolean in {path}")
 
     for name in _LIST_FIELDS:
-        if name in out and out[name] is not None:
+        if name in out:
             value = out[name]
             if isinstance(value, str):
                 value = [value]
@@ -317,11 +345,41 @@ def _coerce_types(fields: Dict[str, Any], model_id: str, path: Path) -> Dict[str
                 raise CatalogError(
                     f"{model_id}.{name} must be a list, got {value!r} in {path}"
                 )
-            out[name] = [str(item) for item in value]
+            if not all(isinstance(item, str) and item.strip() for item in value):
+                raise CatalogError(f"{model_id}.{name} must contain nonempty strings in {path}")
+            out[name] = list(value)
 
     for name in ("id", "name", "publisher", "license", "notes"):
-        if name in out and out[name] is not None:
-            out[name] = str(out[name])
+        if name in out and (not isinstance(out[name], str) or
+                            (name != "notes" and not out[name].strip())):
+            raise CatalogError(f"{model_id}.{name} must be a string in {path}")
 
     return out
+
+
+def _validate_spec(spec: ModelSpec, path: Path) -> None:
+    from llmfit.download import validate_repo, validate_revision
+    from llmfit.util.errors import ProvisionError
+
+    for field in ("gguf_repo", "hf_repo", "mlx_repo", "gguf_revision", "hf_revision", "mlx_revision"):
+        value = getattr(spec, field)
+        if value is not None:
+            try:
+                if not isinstance(value, str):
+                    raise ProvisionError("must be a string")
+                if field.endswith("_repo"):
+                    setattr(spec, field, validate_repo(value))
+                else:
+                    setattr(spec, field, validate_revision(value))
+            except ProvisionError as exc:
+                raise CatalogError(f"{spec.id}.{field}: {exc.message} in {path}") from None
+    if not 1 <= spec.quality_tier <= 5:
+        raise CatalogError(f"{spec.id}.quality_tier must be between 1 and 5 in {path}")
+    if spec.active_params_b is not None and spec.active_params_b > spec.params_b:
+        raise CatalogError(f"{spec.id}.active_params_b exceeds params_b in {path}")
+    unknown = set(spec.tasks) - {task.value for task in Task}
+    if unknown:
+        raise CatalogError(f"{spec.id}.tasks has unknown values {sorted(unknown)!r} in {path}")
+    if not spec.recommended_quants:
+        raise CatalogError(f"{spec.id}.recommended_quants must not be empty in {path}")
 
