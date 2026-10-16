@@ -88,26 +88,15 @@ class OllamaRuntime(Runtime):
                      console: Console) -> RuntimeConfig:
         self._ensure_server(console)
 
-        if spec.ollama_name and not config.extra.get("force_gguf"):
-            console.info(f"pulling {spec.ollama_name} …")
-            result = run(["ollama", "pull", spec.ollama_name], timeout=7200)
-            if not result.ok:
-                console.warn(
-                    f"`ollama pull {spec.ollama_name}` failed; falling back to a "
-                    "direct GGUF download"
-                )
-                config.extra["force_gguf"] = True
-            else:
-                console.ok(f"pulled {spec.ollama_name}")
-
-        if config.extra.get("force_gguf") or not spec.ollama_name:
-            path = fetch_gguf(spec, config.quant, console)
-            config.model_path = str(path)
-            config.extra["from_gguf"] = True
-            console.warn(
-                "Ollama copies GGUF weights into its own store, so this model "
-                "will occupy disk twice (shared store + Ollama)"
-            )
+        # Native Ollama tags are mutable and cannot be pulled by digest. Import
+        # the shared pinned GGUF instead, so a tag update cannot change a rerun.
+        path = fetch_gguf(spec, config.quant, console)
+        config.model_path = str(path)
+        config.extra["from_gguf"] = True
+        console.warn(
+            "Ollama copies GGUF weights into its own store, so this model "
+            "will occupy disk twice (shared store + Ollama)"
+        )
 
         # Build the tuned derived model.
         tag = self.derived_name(spec)
