@@ -1,0 +1,10 @@
+# Plans use local catalogs; setup may still download weights through its engine.
+tasks: [coding, agent]
+clients: [continue]
+context_tokens: 8192
+priority: balanced
+concurrent_users: 1
+needs_tools: true
+commercial_use: true
+languages: [en]
+offline_only: true
