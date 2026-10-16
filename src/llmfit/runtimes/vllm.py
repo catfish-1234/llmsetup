@@ -12,6 +12,7 @@ from __future__ import annotations
 import shlex
 from typing import Dict, List, Optional
 
+from llmfit.download import pin_revision
 from llmfit.runtimes.base import Endpoint, Runtime, RuntimeUnavailable
 from llmfit.runtimes.registry import register
 from llmfit.types import ModelSpec, RuntimeConfig
@@ -72,6 +73,7 @@ class VllmRuntime(Runtime):
         # vLLM downloads through huggingface_hub on first launch; doing it
         # ourselves would just duplicate its cache.
         config.model_path = spec.hf_repo
+        config.extra["model_revision"] = pin_revision(spec.hf_repo, spec.hf_revision)
         console.info(f"vLLM will fetch {spec.hf_repo} on first start")
         return config
 
@@ -86,6 +88,9 @@ class VllmRuntime(Runtime):
             "--gpu-memory-utilization", str(config.extra.get("gpu_memory_utilization", 0.90)),
             "--max-num-seqs", str(max(config.parallel, 1)),
         ]
+        revision = config.extra.get("model_revision") or spec.hf_revision
+        if revision:
+            cmd += ["--revision", revision, "--tokenizer-revision", revision]
         tensor_parallel = int(config.extra.get("tensor_parallel_size", 1))
         if tensor_parallel > 1:
             cmd += ["--tensor-parallel-size", str(tensor_parallel)]

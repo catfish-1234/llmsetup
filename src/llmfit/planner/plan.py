@@ -39,7 +39,7 @@ def build_plan(
     """Rank every viable (model, quant) pairing for this user and this machine."""
     explicit = runtime is not None
     chosen_runtime, runtime_reason = (
-        (runtime, "explicitly requested") if explicit else choose_runtime(hardware, profile)
+        (runtime, "explicitly requested") if runtime is not None else choose_runtime(hardware, profile)
     )
 
     viable = catalog.matching(profile)

@@ -404,11 +404,11 @@ def render_markdown(result: SetupResult) -> str:
         lines.append("llmfit does not apply these, because they change the machine "
                      "outside the scope of setting up a model:")
         lines.append("")
-        for action in result.platform_actions:
-            tag = "**required**" if not action["optional"] else "optional"
-            lines.append(f"- {tag} **{action['title']}**: {action['reason']}")
-            if action.get("command"):
-                lines.append(f"  ```bash\n  {action['command']}\n  ```")
+        for platform_action in result.platform_actions:
+            tag = "**required**" if not platform_action["optional"] else "optional"
+            lines.append(f"- {tag} **{platform_action['title']}**: {platform_action['reason']}")
+            if platform_action.get("command"):
+                lines.append(f"  ```bash\n  {platform_action['command']}\n  ```")
         lines.append("")
 
     advanced = getattr(result.config, "advanced", None)
