@@ -10,6 +10,13 @@ is substantial feature overlap. Calling this project merely “llmfit” creates
 confusion in search, installation instructions, binary resolution, and support.
 There is no affiliation implied by the shared name.
 
+Registry check on 2026-10-16: [PyPI `llmfit`](https://pypi.org/project/llmfit/)
+is already occupied (version 1.1.17); its metadata links to AlexsJones/llmfit.
+`pip install llmfit` therefore installs that distribution, not this repository.
+PyPI normalizes case and runs of `-`, `_`, and `.`; spelling variants do not
+establish a distinct available name. GitHub repository names are owner-scoped,
+but the shared project/CLI name still creates search and PATH collisions.
+
 Use **“llmfit — local model setup assistant (catfish-1234)”** in the README,
 issue reports, and development documentation now. Lead with its workflow:
 interview → explained plan → runtime tuning → capability checks → bounded repair

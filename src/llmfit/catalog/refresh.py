@@ -221,7 +221,7 @@ def refresh(console: Console, catalog: Catalog, check_remote: bool = True,
                 continue
             checked += 1
             try:
-                files = list_repo_files(spec.gguf_repo, timeout=15)
+                files = list_repo_files(spec.gguf_repo, timeout=15, revision=spec.gguf_revision)
             except Exception as exc:  # a refresh must not abort on one bad entry
                 findings.append({"model": spec.id, "kind": "unreachable",
                                  "detail": str(exc)[:200], "source": spec.gguf_repo})
