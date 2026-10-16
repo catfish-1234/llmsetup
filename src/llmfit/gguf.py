@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import struct
 from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -62,7 +63,7 @@ class GgufInfo:
     #: nothing and only the file can answer.
     nextn_predict_layers: Optional[int] = None
     tensor_count: int = 0
-    metadata: Dict[str, Any] = None
+    metadata: Dict[str, Any] = dataclass_field(default_factory=dict)
 
     @property
     def head_dim(self) -> Optional[int]:

@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 import platform
 import re
-from typing import Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, cast
 
 from llmfit.util.proc import run
 
@@ -74,7 +74,8 @@ def _linux_physical_cores() -> Optional[int]:
     except OSError:
         return None
 
-    pairs, current = set(), {}
+    pairs = set()
+    current: Dict[str, str] = {}
     for line in text.splitlines():
         if not line.strip():
             if "physical id" in current and "core id" in current:
@@ -132,7 +133,7 @@ def memory_bytes() -> Tuple[int, Optional[int]]:
 
             status = MemoryStatusEx()
             status.dwLength = ctypes.sizeof(MemoryStatusEx)
-            ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status))
+            cast(Any, ctypes).windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status))
             return int(status.ullTotalPhys), int(status.ullAvailPhys)
         except Exception:
             pass

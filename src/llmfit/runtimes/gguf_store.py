@@ -18,6 +18,7 @@ from llmfit.download import (
     make_progress_printer,
     pick_gguf,
     pick_mmproj,
+    saved_revision,
     sibling_shards,
 )
 from llmfit.types import ModelSpec
@@ -33,7 +34,9 @@ def store_path(spec: ModelSpec, quant: str) -> Path:
     can extend or share, and an unsanitised id would let an entry place a
     multi-gigabyte download anywhere on disk.
     """
-    return safe_subpath(model_store(), spec.publisher, spec.id, quant)
+    directory = safe_subpath(model_store(), spec.publisher, spec.id, quant)
+    revision = spec.gguf_revision or (saved_revision(spec.gguf_repo) if spec.gguf_repo else None)
+    return safe_subpath(directory, revision) if revision else directory
 
 
 def find_local(spec: ModelSpec, quant: str) -> Optional[Path]:
@@ -77,7 +80,7 @@ def fetch_projector(spec: ModelSpec, quant: str, console: Console) -> Optional[P
         return None
 
     try:
-        files = list_repo_files(spec.gguf_repo)
+        files = list_repo_files(spec.gguf_repo, revision=spec.gguf_revision)
     except Exception as exc:  # the projector is never worth aborting the run for
         console.warn(f"could not list {spec.gguf_repo} for a vision projector: {exc}")
         return None
@@ -95,6 +98,8 @@ def fetch_projector(spec: ModelSpec, quant: str, console: Console) -> Optional[P
 
 def fetch_gguf(spec: ModelSpec, quant: str, console: Console) -> Path:
     """Ensure the GGUF is in the shared store and return its path."""
+    if spec.gguf_repo and not spec.gguf_revision:
+        spec.gguf_revision = saved_revision(spec.gguf_repo)
     existing = find_local(spec, quant)
     if existing:
         console.ok(f"weights already present: {existing}")
@@ -107,7 +112,10 @@ def fetch_gguf(spec: ModelSpec, quant: str, console: Console) -> Path:
         )
 
     console.info(f"listing {spec.gguf_repo} …")
-    files = list_repo_files(spec.gguf_repo)
+    files = list_repo_files(spec.gguf_repo, revision=spec.gguf_revision)
+    if files:
+        # Keep the resolved pin in the saved setup as well as the local lock.
+        spec.gguf_revision = files[0].revision
     chosen = pick_gguf(files, quant)
     if chosen is None:
         available = sorted({
