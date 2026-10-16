@@ -54,6 +54,7 @@ class UiServer(ThreadingHTTPServer):
 
 
 class Handler(BaseHTTPRequestHandler):
+    server: UiServer
     server_version = "llmfit"
     sys_version = ""
 

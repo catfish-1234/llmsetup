@@ -140,10 +140,10 @@ def tune(
     if catalog is not None:
         from llmfit.tuning.advanced import plan_advanced
 
-        candidate._presence_penalty = sampling.presence_penalty
         config.advanced = plan_advanced(
             candidate, hardware, profile, catalog, context,
             gpu_layers, _bpw(candidate), runtime,
+            presence_penalty=sampling.presence_penalty or 0.0,
         )
         # MoE expert offload can keep every layer on the GPU where partial layer
         # offload would otherwise have been forced.

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import platform
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from llmfit.hardware import cpu as cpu_probe
 from llmfit.hardware.gpu import detect_gpus
@@ -22,7 +22,8 @@ def detect_hardware(probe_gpus: bool = True) -> HardwareProfile:
         warnings.append("could not read system RAM; assuming 8 GB (override with --ram)")
         ram_total = 8 * GIB
 
-    gpus, gpu_warnings = ([], [])
+    gpus: List[GPU] = []
+    gpu_warnings: List[str] = []
     if probe_gpus:
         try:
             gpus, gpu_warnings = detect_gpus()
@@ -87,10 +88,10 @@ def apply_overrides(profile: HardwareProfile, overrides: Dict[str, Any]) -> Hard
                 f"GPU declared by user: {vram / GIB:.0f} GB {vendor.value}"
             )
     elif vendor_name and updated.gpus:
-        vendor = _vendor(vendor_name)
-        if vendor:
+        declared_vendor = _vendor(vendor_name)
+        if declared_vendor:
             for gpu in updated.gpus:
-                gpu.vendor = vendor
+                gpu.vendor = declared_vendor
 
     if overrides.get("cpu_only"):
         updated.gpus = []
