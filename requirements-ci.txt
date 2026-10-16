@@ -2,7 +2,7 @@
 # Runtime library ranges stay in pyproject.toml for downstream compatibility.
 pytest==8.4.2
 pytest-cov==6.2.1
-coverage==7.10.7
+coverage==7.16.2
 ruff==0.17.1
 PyYAML==6.0.3
 build==1.6.1
