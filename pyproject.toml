@@ -3,7 +3,10 @@
 # PYSEC-2026-1918 and PYSEC-2026-3447. `wheel` is deliberately absent, because modern
 # setuptools vendors what it needs, and listing it only pinned an extra package
 # with its own advisories (CVE-2026-24049).
-requires = ["setuptools>=78.1.1"]
+requires = [
+    "setuptools>=78.1.1; python_version < '3.10'",
+    "setuptools>=84.0.0; python_version >= '3.10'",
+]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -53,6 +56,10 @@ llmfit = ["catalog/data/*.yaml", "ui/static/*.html"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+
+[tool.mypy]
+mypy_path = "src"
+explicit_package_bases = true
 
 [tool.ruff]
 line-length = 100

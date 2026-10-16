@@ -45,10 +45,13 @@ pairing, or a publisher's sampling settings.
 ```bash
 python -m venv .venv
 source .venv/bin/activate     # Windows: .venv\Scripts\Activate.ps1
-python -m pip install -e ".[dev]" "ruff==0.17.1"
+python -m pip install -c requirements-ci.txt -e ".[dev]"
 python -m pytest             # no GPU or downloaded model required
 python -m pytest --cov=llmfit --cov-report=term-missing
 ruff check src/ tests/ scripts/
+# Type checks run on Python 3.10+ (CI uses 3.12):
+python -m pip install -c requirements-ci.txt mypy types-PyYAML
+mypy src/llmfit
 ```
 
 Every test runs against a temporary `LLMFIT_HOME`, so nothing touches your real

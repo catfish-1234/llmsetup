@@ -47,6 +47,7 @@ def plan_advanced(
     gpu_layers: int,
     bpw: float,
     runtime: str = "llamacpp",
+    presence_penalty: float = 0.0,
 ) -> AdvancedProfile:
     """Derive every deep setting for this model on this machine."""
     spec = candidate.model
@@ -58,9 +59,7 @@ def plan_advanced(
         reasoning=plan_reasoning(spec, profile),
         rope=plan_rope(spec, context_tokens),
         sampler=plan_sampler(spec, profile,
-                             presence_penalty=float(
-                                 getattr(candidate, "_presence_penalty", 0.0)
-                                 or 0.0)),
+                             presence_penalty=presence_penalty),
         serving=plan_serving(profile, runtime, hardware),
     )
 
