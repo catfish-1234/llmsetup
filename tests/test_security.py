@@ -119,8 +119,8 @@ class TestRepoValidation:
             _ = RemoteFile("../../evil", "m.gguf").url
 
     def test_url_construction_works_for_a_real_repo(self):
-        url = RemoteFile("Qwen/Qwen3-8B-GGUF", "Qwen3-8B-Q4_K_M.gguf").url
-        assert url.endswith("/Qwen/Qwen3-8B-GGUF/resolve/main/Qwen3-8B-Q4_K_M.gguf")
+        url = RemoteFile("Qwen/Qwen3-8B-GGUF", "Qwen3-8B-Q4_K_M.gguf", revision="a" * 40).url
+        assert url.endswith(f"/Qwen/Qwen3-8B-GGUF/resolve/{'a' * 40}/Qwen3-8B-Q4_K_M.gguf")
         assert ".." not in url
 
 
