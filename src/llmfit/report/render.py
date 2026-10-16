@@ -7,6 +7,7 @@ was not tested, the report says so rather than implying it works.
 
 from __future__ import annotations
 
+import shlex
 from pathlib import Path
 from typing import List
 
@@ -282,7 +283,7 @@ def _render_next_steps(result: SetupResult, console: Console) -> None:
     console.print(console.bold("Run it yourself"))
     try:
         command = get_runtime(result.plan.runtime).launch_command(spec, config)
-        console.info(" ".join(command))
+        console.info(shlex.join(command))
     except Exception:
         pass
 
@@ -458,7 +459,7 @@ def render_markdown(result: SetupResult) -> str:
         lines.append("## Running it without llmfit")
         lines.append("")
         lines.append("```bash")
-        lines.append(" ".join(command))
+        lines.append(shlex.join(command))
         lines.append("```")
         lines.append("")
     except Exception:

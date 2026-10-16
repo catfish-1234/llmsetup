@@ -7,6 +7,7 @@ these flags with whatever their engine offers.
 
 from __future__ import annotations
 
+import shlex
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -351,7 +352,7 @@ class LlamaCppRuntime(Runtime):
 
 
 def _quote(value: str) -> str:
-    return value if all(c.isalnum() or c in "-_./:=" for c in value) else f'"{value}"'
+    return shlex.quote(value)
 
 
 register(LlamaCppRuntime())
