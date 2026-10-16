@@ -151,7 +151,7 @@ def explain(candidate: Candidate, profile: UseCaseProfile) -> str:
         k: candidate.score_breakdown.get(k, 0) * w
         for k, w in weights.items()
     }
-    top = sorted(contributions, key=contributions.get, reverse=True)[:2]
+    top = sorted(contributions, key=lambda name: contributions[name], reverse=True)[:2]
     phrases = {
         "quality": "strongest output quality in what fits",
         "speed": "fastest of the viable options",

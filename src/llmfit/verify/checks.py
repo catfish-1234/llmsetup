@@ -18,7 +18,7 @@ import statistics
 import time
 import zlib
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from llmfit.hardware.bandwidth import estimate_tokens_per_second
 from llmfit.types import (
@@ -415,7 +415,7 @@ def check_json(ctx: CheckContext) -> CheckResult:
 
     # Prefer constrained decoding, which makes valid JSON a guarantee rather
     # than a hope. Fall back to plain prompting if the server rejects it.
-    formats = [
+    formats: List[Optional[dict]] = [
         {"type": "json_schema",
          "json_schema": {"name": "person", "schema": _JSON_SCHEMA, "strict": True}},
         {"type": "json_object"},
@@ -683,7 +683,7 @@ def check_infill(ctx: CheckContext) -> CheckResult:
 
     text = (result.get("text") or "").strip()
     latency = float(result.get("latency_s") or 0.0)
-    metrics = {"latency_s": round(latency, 3)}
+    metrics: Dict[str, Any] = {"latency_s": round(latency, 3)}
 
     if not text:
         return _fail(name, severity,
@@ -754,7 +754,7 @@ def check_prefill(ctx: CheckContext) -> CheckResult:
     # The number people actually experience: how long they stare at nothing
     # before the first word, with the context they asked for filled.
     full_context_wait = ctx.config.context_tokens / rate if rate else 0.0
-    metrics = {
+    metrics: Dict[str, Any] = {
         "prefill_tokens_per_second": round(rate, 1),
         "prefill_prompt_tokens": tokens,
         "full_context_wait_s": round(full_context_wait, 1),
