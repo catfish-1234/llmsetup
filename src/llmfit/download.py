@@ -8,6 +8,7 @@ connection at 90% should not start over.
 
 from __future__ import annotations
 
+import hashlib
 import http.client
 import json
 import os
@@ -21,7 +22,7 @@ from pathlib import Path
 from typing import Callable, List, Optional
 
 from llmfit.util.errors import ProvisionError
-from llmfit.util.fs import ensure_dir
+from llmfit.util.fs import app_dir, ensure_dir, write_text
 from llmfit.util.units import human_bytes
 
 HF_ENDPOINT = os.environ.get("HF_ENDPOINT", "https://huggingface.co").rstrip("/")
@@ -34,11 +35,13 @@ class RemoteFile:
     repo: str
     filename: str
     size: Optional[int] = None
+    revision: Optional[str] = None
 
     @property
     def url(self) -> str:
         repo = urllib.parse.quote(validate_repo(self.repo), safe="/")
-        return f"{HF_ENDPOINT}/{repo}/resolve/main/{urllib.parse.quote(self.filename)}"
+        revision = validate_revision(self.revision)
+        return f"{HF_ENDPOINT}/{repo}/resolve/{revision}/{urllib.parse.quote(self.filename)}"
 
     @property
     def is_split(self) -> bool:
@@ -80,11 +83,41 @@ def _auth_headers() -> dict:
     return headers
 
 
-def list_repo_files(repo: str, timeout: float = 30.0) -> List[RemoteFile]:
-    """List files in a HF repo. Raises ProvisionError with an actionable hint."""
+def validate_revision(revision: Optional[str]) -> str:
+    """Only immutable Hub commit IDs are suitable for downloads."""
+    if not isinstance(revision, str) or not re.fullmatch(r"[0-9a-fA-F]{40}", revision):
+        raise ProvisionError(f"expected a full model commit SHA, got {revision!r}")
+    return revision.lower()
+
+
+def _revision_path(repo: str) -> Path:
+    key = hashlib.sha256(f"{HF_ENDPOINT}/{validate_repo(repo)}".encode()).hexdigest()
+    return app_dir() / "revisions" / f"{key}.txt"
+
+
+def saved_revision(repo: str) -> Optional[str]:
+    path = _revision_path(repo)
+    return validate_revision(path.read_text().strip()) if path.exists() else None
+
+
+def pin_revision(repo: str, revision: Optional[str] = None, timeout: float = 30.0) -> str:
+    """Resolve once and persist the commit; explicit catalog pins take precedence."""
+    if revision is not None:
+        return validate_revision(revision)
+    saved = saved_revision(repo)
+    if saved:
+        return saved
+    sha = validate_revision(_repo_info(repo, timeout=timeout).get("sha"))
+    write_text(_revision_path(repo), sha + "\n")
+    return sha
+
+
+def _repo_info(repo: str, revision: Optional[str] = None, timeout: float = 30.0) -> dict:
     # Validated then quoted: the value comes from catalog YAML, and an unchecked
     # one with ".." or a query character can redirect the request off /api/models/.
     url = f"{HF_ENDPOINT}/api/models/{urllib.parse.quote(validate_repo(repo), safe='/')}"
+    if revision:
+        url += f"/revision/{validate_revision(revision)}"
     req = urllib.request.Request(url, headers=_auth_headers())
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -108,11 +141,21 @@ def list_repo_files(repo: str, timeout: float = 30.0) -> List[RemoteFile]:
             hint="check connectivity, or point HF_ENDPOINT at a mirror",
         ) from None
 
+    if not isinstance(data, dict):
+        raise ProvisionError(f"invalid model metadata for {repo}")
+    return data
+
+
+def list_repo_files(repo: str, timeout: float = 30.0,
+                    revision: Optional[str] = None) -> List[RemoteFile]:
+    """List and download every shard/projector from the same pinned commit."""
+    sha = pin_revision(repo, revision, timeout)
+    data = _repo_info(repo, sha, timeout)
     files = []
     for sibling in data.get("siblings", []):
         name = sibling.get("rfilename")
         if name:
-            files.append(RemoteFile(repo, name, sibling.get("size")))
+            files.append(RemoteFile(repo, name, sibling.get("size"), sha))
     return files
 
 

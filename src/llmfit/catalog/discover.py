@@ -26,7 +26,7 @@ import urllib.request
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence
 
-from llmfit.download import HF_ENDPOINT, _auth_headers, validate_repo
+from llmfit.download import HF_ENDPOINT, _auth_headers, pin_revision, saved_revision, validate_repo
 from llmfit.util.log import Console
 
 # Quality gates. These exist to keep the catalog a curated set rather than a
@@ -114,6 +114,9 @@ class Candidate:
             entry["active_params_b"] = round(self.active_params_b, 2)
         if self.gguf_repo:
             entry["gguf_repo"] = self.gguf_repo
+        revision = saved_revision(self.repo)
+        if revision:
+            entry["hf_revision"] = revision
         return entry
 
 
@@ -152,7 +155,11 @@ def fetch_config(repo: str, timeout: float = 20.0) -> Optional[Dict[str, Any]]:
     except Exception:
         # An invalid repo id is simply skipped, not fatal to discovery.
         return None
-    data = _get_json(f"{HF_ENDPOINT}/{safe}/resolve/main/config.json", timeout)
+    try:
+        revision = pin_revision(repo, timeout=timeout)
+    except Exception:
+        return None
+    data = _get_json(f"{HF_ENDPOINT}/{safe}/resolve/{revision}/config.json", timeout)
     return data if isinstance(data, dict) else None
 
 
