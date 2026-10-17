@@ -19,8 +19,8 @@ asserting it.
 ## Pipeline
 
 ```
-  interview  ──►  detect  ──►  plan  ──►  tune  ──►  provision  ──►  verify ◄──┐
-  (what for?)   (what on?)   (what?)   (how?)      (install)      (does it?)   │
+  detect  ──►  interview  ──►  plan  ──►  tune  ──►  provision  ──►  verify ◄──┐
+  (automatic)  (goals only)   (what?)   (how?)      (install)      (does it?)   │
                                                                        │       │
                                                                        ▼       │
                                                                     repair ────┘
@@ -60,9 +60,14 @@ planner *and* the set of checks the verifier runs. One answer, two uses: a
 requirement the user states is a requirement the tool proves.
 
 ### detect
-Hardware detection is best-effort and always overridable. Every field is
-optional; a missing value degrades the plan (more conservative headroom) rather
-than crashing it. Detection never requires root and never installs anything.
+Detection runs before the goal interview. It scans CPU, core counts, OS,
+architecture, RAM, GPUs and VRAM, disk space, and all six runtime adapters.
+Each runtime and GPU vendor is probed independently. A failed probe produces a
+warning and conservative defaults, without asking the user for specs. Unknown
+RAM means 2 GiB, unknown GPU capacity means CPU inference, and unknown free VRAM
+reserves 20% of reported capacity. Known free memory limits the planning budget.
+Advanced hardware flags remain available for diagnostics and simulated plans.
+Detection does not install anything or require root.
 
 ### plan: the fit maths
 Memory is modelled explicitly rather than with rules of thumb, because rules of
@@ -108,7 +113,17 @@ each with a cost (how much quality/speed it gives up) and a predicate (when it
 is applicable). The loop applies the cheapest applicable untried strategy,
 re-runs only the affected checks, and records every step in a journal so the
 final report can explain *why* the settings ended up as they did. Bounded
-retries, monotonic de-escalation, no infinite loops.
+retries, monotonic de-escalation, no infinite loops. Context reduction and model
+fallback can repeat only while making finite progress. Model switches preserve
+a reduced context window. Provisioning and server failures become blocking
+checks, so recovery can act on them. An unclassified blocking failure still
+blocks success.
+
+The outer pipeline tries compatible installed engines, then a user-local
+checksum-verified portable llama.cpp build on CPU. Runtime changes preserve the
+remaining repair budget. Failed setups are not registered with other apps.
+Only exhausted recovery emits manual instructions. See
+[AUTOMATIC_SETUP.md](AUTOMATIC_SETUP.md) for bounds and installation details.
 
 ### interop
 The requirement is "I can still see this model in LM Studio and everywhere else."

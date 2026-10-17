@@ -97,6 +97,7 @@ def wait_for(
     timeout: float = 120.0,
     interval: float = 1.0,
     on_tick: Optional[Callable[[float], None]] = None,
+    raise_errors: bool = False,
 ) -> bool:
     """Poll ``predicate`` until true or timeout. Returns whether it became true."""
     deadline = time.monotonic() + timeout
@@ -105,13 +106,16 @@ def wait_for(
             if predicate():
                 return True
         except Exception:
-            pass
+            if raise_errors:
+                raise
         if on_tick:
             on_tick(deadline - time.monotonic())
         time.sleep(interval)
     try:
         return predicate()
     except Exception:
+        if raise_errors:
+            raise
         return False
 
 
