@@ -10,7 +10,7 @@ requires = [
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "llmfit"
+name = "llmsetup"
 version = "0.1.0"
 description = "Interview-driven setup assistant for local open-weight LLMs: picks the model, tunes the runtime, proves it works, and registers it with every local LLM app you use."
 readme = "README.md"
@@ -39,7 +39,7 @@ dependencies = ["PyYAML>=6.0"]
 dev = ["pytest>=7", "pytest-cov>=4", "ruff==0.17.1"]
 
 [project.scripts]
-llmfit = "llmfit.cli:main"
+llmsetup = "llmsetup.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/catfish-1234/Open-source-llm"
@@ -51,7 +51,7 @@ Documentation = "https://github.com/catfish-1234/Open-source-llm#readme"
 where = ["src"]
 
 [tool.setuptools.package-data]
-llmfit = ["catalog/data/*.yaml", "ui/static/*.html"]
+llmsetup = ["catalog/data/*.yaml", "ui/static/*.html"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

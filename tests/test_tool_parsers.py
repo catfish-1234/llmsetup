@@ -12,18 +12,18 @@ from __future__ import annotations
 import pytest
 from conftest import make_hardware
 
-from llmfit.planner.plan import build_plan
-from llmfit.repair.strategies import (
+from llmsetup.planner.plan import build_plan
+from llmsetup.repair.strategies import (
     COST_ORDER,
     STRATEGIES,
     RepairState,
     _try_tool_parser,
     strategies_for,
 )
-from llmfit.runtimes.vllm import VllmRuntime
-from llmfit.tuning.tuner import tool_parsers_for, tune
-from llmfit.types import ModelSpec, RuntimeConfig, Task, UseCaseProfile
-from llmfit.verify import signatures as sig
+from llmsetup.runtimes.vllm import VllmRuntime
+from llmsetup.tuning.tuner import tool_parsers_for, tune
+from llmsetup.types import ModelSpec, RuntimeConfig, Task, UseCaseProfile
+from llmsetup.verify import signatures as sig
 
 
 def spec(**kwargs) -> ModelSpec:

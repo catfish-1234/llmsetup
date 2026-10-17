@@ -15,8 +15,8 @@ from contextlib import contextmanager
 
 import pytest
 
-from llmfit.ui.server import STATIC, Handler, UiServer, _setup_command
-from llmfit.util.log import Console
+from llmsetup.ui.server import STATIC, Handler, UiServer, _setup_command
+from llmsetup.util.log import Console
 
 
 @contextmanager
@@ -149,7 +149,7 @@ class TestApi:
 
     def test_questions_mirror_the_cli_wizard(self):
         """One question bank drives both, so the two can never drift."""
-        from llmfit.interview.questions import QUESTIONS
+        from llmsetup.interview.questions import QUESTIONS
 
         with running_server() as base:
             _, data = get(base + "/api/questions")
@@ -202,9 +202,9 @@ class TestHandoffCommand:
     def _command(self, answers):
         from conftest import make_hardware
 
-        from llmfit.catalog.catalog import load_catalog
-        from llmfit.interview.wizard import profile_from_answers
-        from llmfit.planner.plan import build_plan
+        from llmsetup.catalog.catalog import load_catalog
+        from llmsetup.interview.wizard import profile_from_answers
+        from llmsetup.planner.plan import build_plan
 
         profile = profile_from_answers(answers)
         plan = build_plan(profile, make_hardware(), load_catalog())
@@ -212,7 +212,7 @@ class TestHandoffCommand:
 
     def test_includes_the_model_quant_and_context(self):
         command = self._command({"tasks": ["coding"], "context_tokens": 32768})
-        assert command.startswith("llmfit setup --model ")
+        assert command.startswith("llmsetup setup --model ")
         assert "--quant " in command
         assert "--context 32768" in command
 
@@ -227,7 +227,7 @@ class TestHandoffCommand:
 
     def test_the_command_actually_parses(self):
         """A handed-over command that the CLI rejects would be worse than none."""
-        from llmfit.cli import build_parser
+        from llmsetup.cli import build_parser
 
         command = self._command({"tasks": ["coding"], "needs_tools": True,
                                  "context_tokens": 16384})

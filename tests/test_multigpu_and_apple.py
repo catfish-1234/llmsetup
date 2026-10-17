@@ -1,4 +1,4 @@
-"""Two machines llmfit was configuring worse than a careful person would.
+"""Two machines llmsetup was configuring worse than a careful person would.
 
 A rig with two different cards, where dividing the work by capacity hands the
 slow card a share of every forward pass it cannot keep up with. And a Mac, where
@@ -10,12 +10,12 @@ from __future__ import annotations
 
 import pytest
 
-from llmfit.catalog.catalog import load_catalog
-from llmfit.hardware.bandwidth import estimated_gpu_bandwidth_bytes
-from llmfit.planner.plan import build_plan
-from llmfit.runtimes.registry import prefer_mlx_for
-from llmfit.tuning.advanced import _tensor_split
-from llmfit.types import (
+from llmsetup.catalog.catalog import load_catalog
+from llmsetup.hardware.bandwidth import estimated_gpu_bandwidth_bytes
+from llmsetup.planner.plan import build_plan
+from llmsetup.runtimes.registry import prefer_mlx_for
+from llmsetup.tuning.advanced import _tensor_split
+from llmsetup.types import (
     GIB,
     GPU,
     Accelerator,
@@ -105,8 +105,8 @@ class TestMismatchedCards:
 
 class TestWhatGetsEmittedForASplit:
     def _flags(self, hardware, catalog):
-        from llmfit.runtimes.llamacpp import LlamaCppRuntime
-        from llmfit.tuning.tuner import tune
+        from llmsetup.runtimes.llamacpp import LlamaCppRuntime
+        from llmsetup.tuning.tuner import tune
 
         profile = UseCaseProfile(tasks=[Task.CHAT], context_tokens=8192)
         plan = build_plan(profile, hardware, catalog)
@@ -131,7 +131,7 @@ class TestWhatGetsEmittedForASplit:
         """It used to say the largest card holds the KV cache, which is not how
         a layer split works and would send someone debugging in the wrong
         direction."""
-        from llmfit.tuning.tuner import tune
+        from llmsetup.tuning.tuner import tune
 
         profile = UseCaseProfile(tasks=[Task.CHAT], context_tokens=8192)
         hardware = rig(*FAST_SLOW)
@@ -142,7 +142,7 @@ class TestWhatGetsEmittedForASplit:
 
 
 class TestAppleSilicon:
-    """MLX generates appreciably faster than llama.cpp on this hardware. llmfit
+    """MLX generates appreciably faster than llama.cpp on this hardware. llmsetup
     ranked it third, justified by the GGUF engines having broader coverage,
     which was measured against a catalog that recorded exactly one MLX build."""
 
@@ -172,7 +172,7 @@ class TestAppleSilicon:
         assert prefer_mlx_for(model, mac(), "mlx") is None
 
     def test_an_explicit_runtime_is_never_overridden(self, catalog):
-        """Someone who names an engine has a reason, and it is not llmfit's to
+        """Someone who names an engine has a reason, and it is not llmsetup's to
         second-guess."""
         restricted = catalog.restrict_to("qwen3-8b")
         plan = build_plan(UseCaseProfile(tasks=[Task.CHAT], context_tokens=8192),

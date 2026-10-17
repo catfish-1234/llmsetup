@@ -5,10 +5,10 @@ from __future__ import annotations
 import pytest
 from conftest import make_hardware
 
-from llmfit.planner.plan import build_plan, plan_embedding_model
-from llmfit.planner.score import WEIGHTS
-from llmfit.types import Priority, Task, UseCaseProfile
-from llmfit.util.errors import PlanningError
+from llmsetup.planner.plan import build_plan, plan_embedding_model
+from llmsetup.planner.score import WEIGHTS
+from llmsetup.types import Priority, Task, UseCaseProfile
+from llmsetup.util.errors import PlanningError
 
 
 class TestFit:

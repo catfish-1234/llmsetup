@@ -1,7 +1,7 @@
 # Repeating a setup
 
 Hugging Face model downloads resolve a full commit SHA before fetching files.
-The first resolution is saved under `$LLMFIT_HOME/revisions/` (keyed by endpoint
+The first resolution is saved under `$LLMSETUP_HOME/revisions/` (keyed by endpoint
 and repository); subsequent runs reuse it. GGUF shards and vision projectors use
 that same commit, and different revisions occupy separate store directories.
 Existing local files without revision metadata remain usable, but their origin

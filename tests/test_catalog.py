@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import pytest
 
-from llmfit.catalog.catalog import load_catalog
-from llmfit.types import Task, UseCaseProfile
-from llmfit.util.errors import CatalogError
+from llmsetup.catalog.catalog import load_catalog
+from llmsetup.types import Task, UseCaseProfile
+from llmsetup.util.errors import CatalogError
 
 
 class TestIntegrity:
