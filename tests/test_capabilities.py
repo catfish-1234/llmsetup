@@ -14,8 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from llmfit.runtimes import capabilities
-from llmfit.runtimes.llamacpp import _VALUELESS_FLAGS
+from llmsetup.runtimes import capabilities
+from llmsetup.runtimes.llamacpp import _VALUELESS_FLAGS
 
 
 @pytest.fixture(autouse=True)
@@ -103,7 +103,7 @@ class TestAskingTheBinary:
         assert len(calls) == 1
 
     def test_short_flags_are_ignored(self, monkeypatch):
-        """Short aliases are ambiguous and unstable, and llmfit emits long forms
+        """Short aliases are ambiguous and unstable, and llmsetup emits long forms
         everywhere, so matching on them would only create false positives."""
         self._fake(monkeypatch, "\n".join(
             [f"  -{chr(97 + i)}, --long-{i} N" for i in range(15)]))
@@ -116,7 +116,7 @@ def test_every_standalone_flag_is_declared_as_taking_no_value():
     standalone flag missing from the table would eat the token after it. That
     fails silently and produces a command that is subtly wrong rather than
     obviously broken."""
-    source = Path("src/llmfit/runtimes/llamacpp.py").read_text(encoding="utf-8")
+    source = Path("src/llmsetup/runtimes/llamacpp.py").read_text(encoding="utf-8")
     appended = set(re.findall(r'(?:cmd|flags)\.append\("(--[a-z-]+)"\)', source))
     missing = appended - _VALUELESS_FLAGS
     assert not missing, f"add these to _VALUELESS_FLAGS: {sorted(missing)}"
@@ -128,8 +128,8 @@ def test_importing_one_adapter_does_not_hide_the_others():
     single adapter first therefore left every other engine invisible for the
     rest of the process, which is exactly what a caller reaching for one
     runtime by name does."""
-    import llmfit.runtimes.llamacpp  # noqa: F401
-    from llmfit.runtimes.registry import all_runtimes
+    import llmsetup.runtimes.llamacpp  # noqa: F401
+    from llmsetup.runtimes.registry import all_runtimes
 
     names = {r.name for r in all_runtimes()}
     assert {"llamacpp", "ollama", "vllm", "lmstudio", "mlx"} <= names

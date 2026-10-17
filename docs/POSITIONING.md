@@ -1,39 +1,50 @@
-# Positioning and naming proposal
+# Project name and migration
 
-Status: proposal only. No package, executable, repository, or version is renamed.
+The project is now **llmsetup**, a Python setup assistant for local open-weight
+LLMs under Apache-2.0. The distribution name, Python import, and CLI command are
+all `llmsetup`. The version remains `0.1.0`.
 
-This repository is `catfish-1234/Open-source-llm`, a Python setup assistant under
-Apache-2.0. The unrelated [AlexsJones/llmfit](https://github.com/AlexsJones/llmfit)
-is a Rust project under MIT with hardware detection, model recommendations,
-CLI/TUI and dashboard interfaces, runtime providers, and benchmarking. There
-is substantial feature overlap. Calling this project merely “llmfit” creates
-confusion in search, installation instructions, binary resolution, and support.
-There is no affiliation implied by the shared name.
+The source repository stays at
+[catfish-1234/Open-source-llm](https://github.com/catfish-1234/Open-source-llm).
+The GitHub repository is not being renamed. Install from that repository;
+this rename does not publish a package, create a tag, or create a release.
 
-Registry check on 2026-10-16: [PyPI `llmfit`](https://pypi.org/project/llmfit/)
-is already occupied (version 1.1.17); its metadata links to AlexsJones/llmfit.
-`pip install llmfit` therefore installs that distribution, not this repository.
-PyPI normalizes case and runs of `-`, `_`, and `.`; spelling variants do not
-establish a distinct available name. GitHub repository names are owner-scoped,
-but the shared project/CLI name still creates search and PATH collisions.
+## Why the name changed
 
-Use **“llmfit — local model setup assistant (catfish-1234)”** in the README,
-issue reports, and development documentation now. Lead with its workflow:
-interview → explained plan → runtime tuning → capability checks → bounded repair
-→ application registrations. Describe measured results and limitations rather
-than claiming unique features or better performance without comparative data.
-Install from this exact repository in a virtual environment so an unrelated
-`llmfit` executable on PATH does not silently select the wrong tool.
+The former name, `llmfit`, collided with the unrelated
+[AlexsJones/llmfit](https://github.com/AlexsJones/llmfit) Rust project under MIT.
+That project also covers hardware detection, model recommendations, runtime
+providers, and benchmarking. The shared name caused confusion in search,
+installation instructions, executable lookup, and support. There is no affiliation.
 
-Before a first public distribution, the recommendation is to choose a distinct
-name. **`local-llm-setup` is a candidate, not an approved or availability-checked
-name.** Check PyPI normalized names, existing executable names, GitHub search,
-and applicable trademark concerns before deciding. The present private repo
-and package metadata do not establish registry availability or naming rights.
+A registry check on 2026-10-16 found [PyPI `llmfit`](https://pypi.org/project/llmfit/)
+occupied by version 1.1.17, whose metadata links to AlexsJones/llmfit.
+`pip install llmfit` installs that distribution, not this repository.
 
-A later migration proposal should list the chosen distribution name, import
-path, CLI name, and data-directory policy separately. Preserve the current
-`llmfit` command as a documented compatibility wrapper for a stated period,
-keep existing profiles and stores readable, test both entry points, and provide
-an explicit migration guide. A rename or publication requires a separate
-maintainer decision; this note authorizes neither.
+The maintainer confirmed that `llmsetup` was available on PyPI and npm on
+2026-10-16 and selected it for this project. This records availability at the
+time of the decision, not publication or a reservation. This repository remains
+a Python project; no npm package is added.
+
+## Migrating an existing installation
+
+1. Install this checkout in a fresh virtual environment using the README's
+   instructions. Run `llmsetup` or `python -m llmsetup`. The old command and
+   import name are not installed as compatibility aliases.
+2. Update scripts and imports from `llmfit` to `llmsetup`. Environment variables
+   now use the `LLMSETUP_` prefix instead of `LLMFIT_`, including `HOME`,
+   `MODEL_STORE`, `CATALOG`, `CATALOG_URL`, and `AUTO_UPDATE` settings.
+3. Default app data now uses a directory named `llmsetup`: `$XDG_DATA_HOME/llmsetup`
+   or `~/.local/share/llmsetup` on Unix, and `%LOCALAPPDATA%\llmsetup` on Windows.
+   To reuse an existing data directory without moving it, set `LLMSETUP_HOME` to
+   its path. If you used a separate model store, set `LLMSETUP_MODEL_STORE` to
+   that path too. Profiles, catalog overlays, reports, and saved revision records
+   keep the same formats. Nothing is moved or deleted automatically.
+4. Regenerate launch scripts and app registrations when you need the new names.
+   Generated model aliases now use the `llmsetup-` prefix. Existing registrations
+   and model files are left in place; check destinations before replacing them.
+
+The workflow remains interview, planning, runtime tuning, capability checks,
+bounded repair, and app registration. Memory and speed figures are estimates
+until tested with an actual engine. Report measured results and the checks that
+ran, without implying that a smoke test establishes general model quality.

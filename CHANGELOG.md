@@ -13,10 +13,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Offline integration tests covering CLI setup, verification, saved reports,
   cleanup, failure handling, and dry runs. ([#17])
 - A mypy gate for the library, with fixes for existing type errors. ([#17])
-- A `python -m llmfit` entry point and complete developer installation tooling.
+- A `python -m llmsetup` entry point and complete developer installation tooling.
   ([#5])
 
 ### Changed
+
+- Renamed the project from `llmfit` to `llmsetup`, including the distribution,
+  Python module, CLI, environment variables, and generated names. The version
+  remains 0.1.0 and the GitHub repository URL is unchanged. See the
+  [migration notes](docs/POSITIONING.md#migrating-an-existing-installation).
 
 - Model downloads use pinned Hugging Face commit revisions, persisted first-use
   resolutions, and optional explicit catalog pins. Shards and vision projectors

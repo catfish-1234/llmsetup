@@ -3,8 +3,8 @@
 import pytest
 import yaml
 
-from llmfit.catalog.catalog import load_catalog
-from llmfit.util.errors import CatalogError
+from llmsetup.catalog.catalog import load_catalog
+from llmsetup.util.errors import CatalogError
 
 
 @pytest.mark.parametrize("patch,field", [

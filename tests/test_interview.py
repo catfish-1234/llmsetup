@@ -6,16 +6,16 @@ import io
 
 import pytest
 
-from llmfit.interview.questions import QUESTIONS, infer_flags
-from llmfit.interview.wizard import (
+from llmsetup.interview.questions import QUESTIONS, infer_flags
+from llmsetup.interview.wizard import (
     load_answers,
     profile_from_answers,
     run_interview,
     save_profile,
 )
-from llmfit.types import Client, Priority, Task, UseCaseProfile
-from llmfit.util.errors import LlmfitError
-from llmfit.util.log import Console
+from llmsetup.types import Client, Priority, Task, UseCaseProfile
+from llmsetup.util.errors import LlmsetupError
+from llmsetup.util.log import Console
 
 
 def task_numbers(*names):
@@ -25,7 +25,7 @@ def task_numbers(*names):
     breaks the moment an option is inserted, which says nothing about the
     behaviour it was meant to pin.
     """
-    from llmfit.interview.questions import TASK_OPTIONS
+    from llmsetup.interview.questions import TASK_OPTIONS
 
     order = [option.value for option in TASK_OPTIONS]
     return ",".join(str(order.index(name) + 1) for name in names)
@@ -131,16 +131,16 @@ class TestWizard:
 
 class TestValidation:
     def test_rejects_an_unknown_task_with_the_valid_list(self):
-        with pytest.raises(LlmfitError) as excinfo:
+        with pytest.raises(LlmsetupError) as excinfo:
             profile_from_answers({"tasks": ["nonsense"]})
         assert "chat" in excinfo.value.hint
 
     def test_rejects_an_unknown_priority(self):
-        with pytest.raises(LlmfitError):
+        with pytest.raises(LlmsetupError):
             profile_from_answers({"priority": "fastest"})
 
     def test_rejects_an_unusably_small_context(self):
-        with pytest.raises(LlmfitError):
+        with pytest.raises(LlmsetupError):
             profile_from_answers({"context_tokens": 10})
 
     def test_clamps_concurrent_users_to_at_least_one(self):
@@ -179,5 +179,5 @@ class TestRoundTrip:
     def test_a_malformed_answers_file_reports_clearly(self, tmp_path):
         path = tmp_path / "bad.yaml"
         path.write_text("- this is a list, not a mapping\n")
-        with pytest.raises(LlmfitError):
+        with pytest.raises(LlmsetupError):
             profile_from_answers(load_answers(path))

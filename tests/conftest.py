@@ -1,6 +1,6 @@
 """Shared fixtures.
 
-Every test runs against a temporary LLMFIT_HOME so nothing touches the
+Every test runs against a temporary LLMSETUP_HOME so nothing touches the
 developer's real model store, LM Studio folder, or saved profiles.
 """
 
@@ -13,8 +13,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from llmfit.catalog.catalog import load_catalog
-from llmfit.types import (
+from llmsetup.catalog.catalog import load_catalog
+from llmsetup.types import (
     GIB,
     GPU,
     Accelerator,
@@ -27,11 +27,11 @@ from llmfit.types import (
 
 @pytest.fixture(autouse=True)
 def isolated_home(tmp_path, monkeypatch):
-    monkeypatch.setenv("LLMFIT_HOME", str(tmp_path / "home"))
-    monkeypatch.setenv("LLMFIT_MODEL_STORE", str(tmp_path / "models"))
+    monkeypatch.setenv("LLMSETUP_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("LLMSETUP_MODEL_STORE", str(tmp_path / "models"))
     monkeypatch.setenv("LMSTUDIO_MODELS_DIR", str(tmp_path / "lmstudio"))
     monkeypatch.setenv("JAN_DATA_DIR", str(tmp_path / "jan"))
-    monkeypatch.delenv("LLMFIT_CATALOG", raising=False)
+    monkeypatch.delenv("LLMSETUP_CATALOG", raising=False)
     return tmp_path
 
 
