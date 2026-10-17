@@ -68,6 +68,13 @@ It uses conservative assumptions, reports them, and proceeds. If the requested
 context cannot fit, planning tries shorter windows while keeping the required
 capabilities.
 
+You can also ask for a specific model by name during setup. llmsetup explains
+how that model fits your hardware, including the quantization and context it
+can hold and the speed to expect, and points out better-fitting alternatives
+when the fit is poor. If you keep the model, planning and recovery tune
+everything else around it instead of swapping it out. See
+[asking for a specific model](docs/AUTOMATIC_SETUP.md#asking-for-a-specific-model).
+
 Setup retries transient provisioning failures and server starts, replaces
 corrupt managed weights, tries cached weights when downloads are blocked, and
 can reduce context, change quantization, offload

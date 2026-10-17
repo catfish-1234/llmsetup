@@ -15,6 +15,22 @@ uses a 2 GiB assumption. Unknown GPU capacity uses CPU inference. Unknown free
 VRAM reserves 20% of detected capacity. Known available RAM and VRAM limit the
 budget. The CLI and saved hardware report record these assumptions.
 
+## Asking for a specific model
+
+You can name a model during the interview, and llmsetup talks it through
+before planning around it. It explains how that model fits your hardware: the
+quantization your memory can hold, the context window that fits alongside it,
+the speed to expect, and which of your tasks it serves well or badly. When the
+fit is poor, it says so plainly and names the closest alternatives that would
+fit better.
+
+If you keep that model after hearing the tradeoffs, llmsetup optimizes for
+it. Planning holds your model fixed and tunes everything else: quantization,
+context length, GPU offload, and runtime choice. Recovery can still lower the
+context or change the quantization to get it running, but it does not quietly
+swap in a different model. It switches away from your pick only when the
+repair budget is exhausted, and the report says exactly what changed and why.
+
 ## What recovery tries
 
 Planning first tries the requested context, then halves it down to 512 tokens
