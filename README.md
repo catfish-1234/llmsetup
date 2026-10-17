@@ -1,10 +1,13 @@
 # llmsetup
 
-llmsetup helps you choose and run an open-weight LLM on your own hardware. It
-asks what you need, estimates which models will fit, and recommends a model and
-runtime settings. It can then download weights, start a server, check the
-capabilities you asked for, try bounded repairs, and register the model with
-other local apps.
+llmsetup sets up an open-weight LLM on your machine. It scans your hardware and
+installed runtimes first, then asks what you want to do, such as coding, chat,
+or running agents. You never need to enter hardware specs. It picks a model,
+downloads the weights, starts a server, tests the capabilities you need, and
+registers the working setup with your local apps.
+
+When something fails, it tries repairs and fallback options automatically.
+It only gives you a manual step after those options have failed.
 
 This is the Python project at
 [catfish-1234/Open-source-llm](https://github.com/catfish-1234/Open-source-llm),
@@ -32,43 +35,53 @@ llmsetup --help
 On Windows, activate with `.venv\Scripts\Activate.ps1` in PowerShell. For
 source development, use `python -m pip install -e .`.
 
-You can detect hardware and make plans without a GPU or inference engine.
-To run a model, install an engine separately. `llmsetup runtimes` lists detected
-engines and installation hints. Adapters are available for Ollama, llama.cpp,
-LM Studio, vLLM, MLX, and TabbyAPI. Their model formats and hardware support differ.
+You can make plans without a GPU or inference engine. Adapters cover Ollama,
+llama.cpp, LM Studio, vLLM, MLX, and TabbyAPI. Setup prefers an installed engine.
+If that engine is missing or fails, it tries compatible installed alternatives,
+including llama.cpp on CPU. As a last resort, it can install a pinned, checksum-verified llama.cpp build in
+its own data directory and run on CPU. It does not need administrator access.
 
-## Make a plan
-
-```bash
-llmsetup detect
-llmsetup runtimes
-
-# Use the bundled catalog without automatic network refreshes.
-llmsetup catalog auto-update --disable
-
-# Plan for a machine with 24 GB VRAM and 64 GB RAM.
-llmsetup plan --vram 24 --ram 64 --gpu-vendor nvidia \
-  --task coding --task agent --context 32768 --commercial --yes
-
-# Show tuning decisions without downloading weights or starting a server.
-llmsetup setup --dry-run --vram 24 --ram 64 --gpu-vendor nvidia \
-  --task coding --context 32768 --yes
-```
-
-Memory overrides describe the machine to plan for. They do not reserve memory
-or change the machine. `--yes` skips interview questions. A dry run writes a
-local report but runs no verification, so it cannot tell you whether a model
-works on your hardware.
-
-After reviewing the plan and installing an engine, run a setup:
+## Plan or set up a model
 
 ```bash
-llmsetup setup --runtime ollama --task coding --context 8192 --yes
+# Scan the machine and ask about your goals.
+llmsetup setup
+
+# Skip the interview when you already know what you want.
+llmsetup plan --task coding --task agent --context 32768 --commercial --yes
+
+# Inspect tuning without installing an engine, downloading weights, or starting a server.
+llmsetup setup --dry-run --task coding --context 32768 --yes
+
+# Download, start, verify, and repair automatically.
+llmsetup setup --task coding --context 8192 --yes
 ```
 
-Setup can download many gigabytes, start a server, create a tuned model, write
-reports, and register models with detected apps. `--no-register` skips app
-registration. `--no-repair` reports failures without trying repairs.
+`--yes` skips goal questions. A dry run writes a local report but runs no
+verification, so it cannot tell you whether a model works on your hardware.
+Use `llmsetup detect` to inspect the scan, or `llmsetup runtimes` to inspect
+runtime availability. Neither command installs anything.
+
+Detection covers OS, CPU and core counts, RAM, GPUs and VRAM, and installed
+runtimes where they can be detected. A failed probe does not ask you for specs.
+It uses conservative assumptions, reports them, and proceeds. If the requested
+context cannot fit, planning tries shorter windows while keeping the required
+capabilities.
+
+Setup retries transient provisioning failures and server starts, replaces
+corrupt managed weights, tries cached weights when downloads are blocked, and
+can reduce context, change quantization, offload
+to CPU, swap models, or switch runtimes. Recovery has a fixed budget. The report
+shows the final settings and repair history. A blocked network, an unsupported
+portable runtime, or a requirement no available model can satisfy may still
+need your help. The final error gives the next step. See
+[automatic setup and recovery](docs/AUTOMATIC_SETUP.md) for the limits.
+
+Setup can download many gigabytes, install the local fallback engine, start a
+server, write reports, and register verified models with detected apps.
+`--no-register` skips app registration. `--no-repair` disables repairs, extra
+provisioning attempts, installation, and runtime fallback. Download transport
+retries still apply. A preferred `--runtime` may change during recovery.
 
 After verification, llmsetup stops servers it started. Shared Ollama and
 LM Studio daemons keep running. The report includes a command to start the model
@@ -82,7 +95,7 @@ llmsetup plan --answers examples/coding.yaml --json
 llmsetup setup --answers examples/coding.yaml --dry-run --report setup.md
 
 # Plan for CPU inference.
-llmsetup plan --cpu-only --ram 16 --task chat --context 8192 --yes
+llmsetup plan --cpu-only --task chat --context 8192 --yes
 
 # Check an existing OpenAI-compatible server. Give its root URL, without /v1.
 llmsetup verify --base-url http://127.0.0.1:11434 --model qwen3:8b \

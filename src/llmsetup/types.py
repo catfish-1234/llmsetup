@@ -139,17 +139,22 @@ class GPU:
         return self.vram_bytes / GIB
 
     @property
+    def available_vram_bytes(self) -> int:
+        return max(0, min(self.vram_bytes, self.vram_free_bytes)
+                   if self.vram_free_bytes is not None else self.vram_bytes)
+
+    @property
     def supports_flash_attention(self) -> bool:
         """CUDA (SM 7.5+) and Metal have usable flash-attention kernels."""
         if self.vendor is Accelerator.APPLE:
             return True
         if self.vendor is Accelerator.NVIDIA:
             if not self.compute_capability:
-                return True  # assume a modern card; repair can turn it off
+                return False  # unknown CUDA capability: use the conservative setting
             try:
                 return float(self.compute_capability) >= 7.5
             except ValueError:
-                return True
+                return False
         return False
 
 
@@ -168,6 +173,7 @@ class HardwareProfile:
     gpus: List[GPU] = field(default_factory=list)
     disk_free_bytes: int = 0
     detection_warnings: List[str] = field(default_factory=list)
+    runtime_availability: Dict[str, bool] = field(default_factory=dict)
 
     @property
     def accelerator(self) -> Accelerator:
@@ -194,8 +200,11 @@ class HardwareProfile:
         conservative fraction so the desktop stays alive.
         """
         if self.unified_memory:
-            return int(self.ram_bytes * 0.70)
-        return self.total_vram_bytes
+            budget = int(self.ram_bytes * 0.70)
+            if self.ram_available_bytes is not None:
+                budget = min(budget, int(self.ram_available_bytes * 0.8))
+            return budget
+        return sum(g.available_vram_bytes for g in self.gpus)
 
     @property
     def usable_cpu_bytes(self) -> int:
@@ -205,7 +214,8 @@ class HardwareProfile:
         the user has open all need room, and an OOM killer that takes out the
         desktop is a worse outcome than a smaller model.
         """
-        base = self.ram_available_bytes or self.ram_bytes
+        base = (self.ram_available_bytes if self.ram_available_bytes is not None
+                else self.ram_bytes)
         return int(base * 0.75)
 
     @property

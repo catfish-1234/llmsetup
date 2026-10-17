@@ -16,11 +16,22 @@ def detect_hardware(probe_gpus: bool = True) -> HardwareProfile:
     """Describe the current machine. Never raises; gaps become warnings."""
     warnings = []
 
-    physical, logical = cpu_probe.core_counts()
-    ram_total, ram_available = cpu_probe.memory_bytes()
+    def probe(label, function, default):
+        try:
+            return function()
+        except Exception as exc:
+            warnings.append(f"could not detect {label} ({exc}); using {default!r}")
+            return default
+
+    physical, logical = probe("CPU cores", cpu_probe.core_counts, (1, 1))
+    ram_total, ram_available = probe("RAM", cpu_probe.memory_bytes, (0, None))
     if not ram_total:
-        warnings.append("could not read system RAM; assuming 8 GB (override with --ram)")
-        ram_total = 8 * GIB
+        warnings.append("could not read system RAM; conservatively assuming 2 GB")
+        ram_total = 2 * GIB
+    if ram_available is None:
+        warnings.append("available RAM unknown; reserving 25% of total RAM for other work")
+    if not physical or not logical:
+        warnings.append("CPU core count incomplete; using one core where unknown")
 
     gpus: List[GPU] = []
     gpu_warnings: List[str] = []
@@ -31,21 +42,38 @@ def detect_hardware(probe_gpus: bool = True) -> HardwareProfile:
             gpu_warnings = [f"GPU detection failed ({exc}); planning for CPU only"]
     warnings.extend(gpu_warnings)
 
-    unified = cpu_probe.is_apple_silicon()
+    unified = probe("unified memory", cpu_probe.is_apple_silicon, False)
+    usable = []
+    for gpu in gpus:
+        if gpu.vram_bytes <= 0:
+            warnings.append(f"{gpu.name}: VRAM unknown; using CPU instead")
+            continue
+        if gpu.vram_free_bytes is None and not unified:
+            gpu.vram_free_bytes = int(gpu.vram_bytes * 0.8)
+            warnings.append(f"{gpu.name}: free VRAM unknown; reserving 20%")
+        if gpu.vendor is Accelerator.NVIDIA and not gpu.compute_capability:
+            warnings.append(f"{gpu.name}: CUDA capability unknown; disabling flash attention initially")
+        usable.append(gpu)
+    gpus = usable
+    from llmsetup.runtimes.registry import scan_runtimes
+
+    inventory, runtime_warnings = scan_runtimes()
+    warnings.extend(runtime_warnings)
     if not gpus and not unified:
         warnings.append("no GPU detected; planning for CPU inference")
 
     profile = HardwareProfile(
-        os=platform.system().lower(),
-        arch=cpu_probe.normalized_arch(),
-        cpu_name=cpu_probe.cpu_name(),
-        physical_cores=physical,
-        logical_cores=logical,
+        os=probe("OS", platform.system, "unknown").lower(),
+        arch=probe("architecture", cpu_probe.normalized_arch, "unknown"),
+        cpu_name=probe("CPU name", cpu_probe.cpu_name, "unknown"),
+        physical_cores=physical or 1,
+        logical_cores=logical or physical or 1,
         ram_bytes=ram_total,
         ram_available_bytes=ram_available,
         unified_memory=unified,
         gpus=gpus,
-        disk_free_bytes=free_bytes(model_store()),
+        disk_free_bytes=probe("free disk space", lambda: free_bytes(model_store()), 0),
+        runtime_availability=inventory,
         detection_warnings=warnings,
     )
     return profile
