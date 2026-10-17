@@ -7,10 +7,10 @@ from pathlib import Path
 import pytest
 from conftest import make_hardware
 
-from llmfit.cli import main
-from llmfit.runtimes.base import Endpoint, Runtime
-from llmfit.runtimes.registry import _REGISTRY
-from llmfit.util.http import HttpResponse
+from llmsetup.cli import main
+from llmsetup.runtimes.base import Endpoint, Runtime
+from llmsetup.runtimes.registry import _REGISTRY
+from llmsetup.util.http import HttpResponse
 
 
 class OfflineRuntime(Runtime):
@@ -42,8 +42,8 @@ class OfflineRuntime(Runtime):
 
 @pytest.fixture
 def offline(monkeypatch):
-    monkeypatch.setenv("LLMFIT_AUTO_UPDATE", "0")
-    monkeypatch.setattr("llmfit.cli.detect_hardware", lambda **kw: make_hardware())
+    monkeypatch.setenv("LLMSETUP_AUTO_UPDATE", "0")
+    monkeypatch.setattr("llmsetup.cli.detect_hardware", lambda **kw: make_hardware())
     monkeypatch.setattr(socket, "socket", lambda *a, **kw: pytest.fail("unexpected network"))
     runtime = OfflineRuntime()
     monkeypatch.setitem(_REGISTRY, runtime.name, runtime)
@@ -69,7 +69,7 @@ def test_full_setup_verifies_saves_reports_and_cleans_up(offline, healthy, monke
             data = {"choices": [{"message": {"content": text}, "finish_reason": "stop"}]}
         return HttpResponse(200, json.dumps(data))
 
-    monkeypatch.setattr("llmfit.util.http.request", request)
+    monkeypatch.setattr("llmsetup.util.http.request", request)
     report = tmp_path / "report.md"
     args = ["setup", "--model", "qwen3-8b", "--runtime", offline.name, "--task", "chat",
             "--context", "8192", "--yes", "--offline", "--quick", "--no-register",

@@ -10,11 +10,19 @@ from __future__ import annotations
 
 import pytest
 
-from llmfit.download import RemoteFile, dynamic_variants, pick_gguf
-from llmfit.tuning import publisher
-from llmfit.tuning.platform_tuning import plan_platform
-from llmfit.tuning.sampling import sampling_for
-from llmfit.types import GIB, GPU, Accelerator, HardwareProfile, RuntimeConfig, Task, UseCaseProfile
+from llmsetup.download import RemoteFile, dynamic_variants, pick_gguf
+from llmsetup.tuning import publisher
+from llmsetup.tuning.platform_tuning import plan_platform
+from llmsetup.tuning.sampling import sampling_for
+from llmsetup.types import (
+    GIB,
+    GPU,
+    Accelerator,
+    HardwareProfile,
+    RuntimeConfig,
+    Task,
+    UseCaseProfile,
+)
 
 
 def machine(**overrides):
@@ -119,7 +127,7 @@ class TestSamplingFollowsPublishers:
     def test_an_unlisted_family_says_so_rather_than_inventing_a_citation(self, catalog):
         sampling = sampling_for(catalog.require("qwen3.8-27b"),
                                 UseCaseProfile(tasks=[Task.CHAT]))
-        assert sampling.source == "llmfit task defaults"
+        assert sampling.source == "llmsetup task defaults"
 
 
 # --------------------------------------------------------------------------- #

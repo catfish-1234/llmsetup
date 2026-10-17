@@ -1,4 +1,4 @@
-# llmfit architecture
+# llmsetup architecture
 
 ## The problem
 
@@ -13,7 +13,7 @@ answering a chain of questions where every answer depends on the previous one:
 6. When it doesn't, *why* not, and what do you change?
 7. And can they still open it in LM Studio afterwards, or is it trapped?
 
-`llmfit` answers all seven, in that order, and verifies each answer instead of
+`llmsetup` answers all seven, in that order, and verifies each answer instead of
 asserting it.
 
 ## Pipeline
@@ -31,7 +31,7 @@ asserting it.
 ```
 
 Each stage is a pure-ish function from one dataclass to the next
-(`llmfit.types`). That is the central design constraint: the interesting logic
+(`llmsetup.types`). That is the central design constraint: the interesting logic
 (fit math, tuning, failure diagnosis) is a pure transformation over plain data,
 so it is unit-testable without a GPU, without a network, and without any
 inference engine installed. Only `provision`, `verify` and `interop` touch the

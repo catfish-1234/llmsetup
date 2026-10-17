@@ -6,14 +6,14 @@ from dataclasses import replace
 
 import pytest
 
-from llmfit.download import RemoteFile, list_repo_files, pin_revision
-from llmfit.runtimes.gguf_store import store_path
-from llmfit.runtimes.mlx import MlxRuntime
-from llmfit.runtimes.vllm import VllmRuntime
-from llmfit.types import RuntimeConfig
-from llmfit.util.errors import ProvisionError
-from llmfit.util.log import Console
-from llmfit.util.proc import CommandResult
+from llmsetup.download import RemoteFile, list_repo_files, pin_revision
+from llmsetup.runtimes.gguf_store import store_path
+from llmsetup.runtimes.mlx import MlxRuntime
+from llmsetup.runtimes.vllm import VllmRuntime
+from llmsetup.types import RuntimeConfig
+from llmsetup.util.errors import ProvisionError
+from llmsetup.util.log import Console
+from llmsetup.util.proc import CommandResult
 
 SHA = "a" * 40
 
@@ -76,7 +76,7 @@ def test_mlx_downloads_snapshot_and_serves_local_path(catalog, monkeypatch):
         commands.append(command)
         return CommandResult(0, f"/cache/snapshots/{SHA}\n", "")
 
-    monkeypatch.setattr("llmfit.runtimes.mlx.run", run)
+    monkeypatch.setattr("llmsetup.runtimes.mlx.run", run)
     runtime = MlxRuntime()
     config = runtime.ensure_model(spec, RuntimeConfig("mlx", spec.id, "Q4_K_M", 8192),
                                   Console(quiet=True))
@@ -86,7 +86,7 @@ def test_mlx_downloads_snapshot_and_serves_local_path(catalog, monkeypatch):
 
 
 def test_discovery_reads_and_records_the_pinned_config(monkeypatch):
-    from llmfit.catalog.discover import Candidate, fetch_config
+    from llmsetup.catalog.discover import Candidate, fetch_config
 
     urls = []
 
@@ -103,7 +103,7 @@ def test_discovery_reads_and_records_the_pinned_config(monkeypatch):
 
 
 def test_ollama_imports_gguf_without_pulling_a_mutable_tag(catalog, monkeypatch, tmp_path):
-    from llmfit.runtimes.ollama import OllamaRuntime
+    from llmsetup.runtimes.ollama import OllamaRuntime
 
     runtime = OllamaRuntime()
     spec = catalog.require("qwen3-8b")
@@ -111,8 +111,8 @@ def test_ollama_imports_gguf_without_pulling_a_mutable_tag(catalog, monkeypatch,
     model_path = tmp_path / "pinned.gguf"
     commands = []
     monkeypatch.setattr(runtime, "_ensure_server", lambda console: None)
-    monkeypatch.setattr("llmfit.runtimes.ollama.fetch_gguf", lambda *a: model_path)
-    monkeypatch.setattr("llmfit.runtimes.ollama.run", lambda cmd, **kw:
+    monkeypatch.setattr("llmsetup.runtimes.ollama.fetch_gguf", lambda *a: model_path)
+    monkeypatch.setattr("llmsetup.runtimes.ollama.run", lambda cmd, **kw:
                         commands.append(cmd) or CommandResult(0, "", ""))
     runtime.ensure_model(spec, config, Console(quiet=True))
     assert all("pull" not in command for command in commands)
@@ -120,14 +120,14 @@ def test_ollama_imports_gguf_without_pulling_a_mutable_tag(catalog, monkeypatch,
 
 
 def test_projector_uses_same_commit_as_downloaded_weights(catalog, monkeypatch):
-    from llmfit.runtimes.gguf_store import fetch_gguf, fetch_projector
+    from llmsetup.runtimes.gguf_store import fetch_gguf, fetch_projector
 
     files = [RemoteFile("a/b", "model-Q4_K_M.gguf", 1, SHA),
              RemoteFile("a/b", "mmproj-f16.gguf", 1, SHA)]
     pins = []
-    monkeypatch.setattr("llmfit.runtimes.gguf_store.list_repo_files", lambda repo, **kw:
+    monkeypatch.setattr("llmsetup.runtimes.gguf_store.list_repo_files", lambda repo, **kw:
                         pins.append(kw["revision"]) or files)
-    monkeypatch.setattr("llmfit.runtimes.gguf_store.download_file", lambda file, dest, *a: dest)
+    monkeypatch.setattr("llmsetup.runtimes.gguf_store.download_file", lambda file, dest, *a: dest)
     spec = replace(catalog.require("qwen3-8b"), gguf_repo="a/b")
     weights = fetch_gguf(spec, "Q4_K_M", Console(quiet=True))
     projector = fetch_projector(spec, "Q4_K_M", Console(quiet=True))

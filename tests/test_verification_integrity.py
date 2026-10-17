@@ -5,15 +5,15 @@ import json
 import pytest
 from conftest import make_hardware
 
-from llmfit.cli import main
-from llmfit.runtimes.base import Endpoint
-from llmfit.types import CheckResult, CheckStatus, RuntimeConfig, Severity, UseCaseProfile
-from llmfit.util.errors import LlmfitError
-from llmfit.util.http import HttpResponse
-from llmfit.util.log import Console
-from llmfit.verify.checks import check_health
-from llmfit.verify.client import OpenAIClient
-from llmfit.verify.harness import ALL_CHECKS, Harness
+from llmsetup.cli import main
+from llmsetup.runtimes.base import Endpoint
+from llmsetup.types import CheckResult, CheckStatus, RuntimeConfig, Severity, UseCaseProfile
+from llmsetup.util.errors import LlmsetupError
+from llmsetup.util.http import HttpResponse
+from llmsetup.util.log import Console
+from llmsetup.verify.checks import check_health
+from llmsetup.verify.client import OpenAIClient
+from llmsetup.verify.harness import ALL_CHECKS, Harness
 
 
 def harness(catalog):
@@ -45,8 +45,8 @@ def test_unknown_checks_are_rejected_before_any_request(catalog, monkeypatch):
     def unexpected(*args, **kwargs):
         pytest.fail("must validate names before contacting the endpoint")
 
-    monkeypatch.setattr("llmfit.util.http.request", unexpected)
-    with pytest.raises(LlmfitError, match="unknown verification check"):
+    monkeypatch.setattr("llmsetup.util.http.request", unexpected)
+    with pytest.raises(LlmsetupError, match="unknown verification check"):
         harness(catalog).run(["helath"])
 
 
@@ -71,7 +71,7 @@ def test_empty_model_listing_does_not_prove_health(catalog, monkeypatch):
 
 @pytest.mark.parametrize("payload", [None, [], {}, {"data": "wrong"}, {"data": [None]}])
 def test_malformed_model_listing_is_a_failure(payload, monkeypatch):
-    monkeypatch.setattr("llmfit.util.http.request", lambda *a, **kw:
+    monkeypatch.setattr("llmsetup.util.http.request", lambda *a, **kw:
                         HttpResponse(200, json.dumps(payload)))
     assert not OpenAIClient(Endpoint("http://localhost", "m", "external")).list_models()["ok"]
 
@@ -81,7 +81,7 @@ def test_model_listing_sends_endpoint_auth_headers(monkeypatch):
         assert kwargs["headers"] == {"Authorization": "Bearer test-token"}
         return HttpResponse(200, '{"data": [{"id": "m"}]}')
 
-    monkeypatch.setattr("llmfit.util.http.request", request)
+    monkeypatch.setattr("llmsetup.util.http.request", request)
     client = OpenAIClient(Endpoint("http://localhost", "m", "external",
                                   headers={"Authorization": "Bearer test-token"}))
     assert client.list_models() == {"ok": True, "ids": ["m"]}

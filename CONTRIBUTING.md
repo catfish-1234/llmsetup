@@ -1,11 +1,11 @@
 # Contributing
 
-The most valuable contribution to llmfit is usually not code. It is a catalog
+The most valuable contribution to llmsetup is usually not code. It is a catalog
 entry, or a report of a machine where the plan was wrong.
 
 ## The one rule
 
-**No entry is better than a guessed one.** Every number llmfit prints is used to
+**No entry is better than a guessed one.** Every number llmsetup prints is used to
 decide whether a model fits in someone's memory. A plausible-looking guess that
 is 20% low turns into an out-of-memory error on a stranger's machine, and they
 have no way to know it came from a guess. So:
@@ -13,25 +13,25 @@ have no way to know it came from a guess. So:
 - Numbers you read out of a config, a model card, or a GGUF header are facts.
   Mark the entry `arch_source: measured`.
 - Numbers you inferred from a family resemblance are estimates. Mark them
-  `arch_source: estimated`, and llmfit will re-derive them from the real file
+  `arch_source: estimated`, and llmsetup will re-derive them from the real file
   once the weights are on disk.
 - Numbers you cannot find, leave out. An incomplete entry is refused loudly at
   load time, which is the correct outcome.
 
-The same applies to sampling defaults: `src/llmfit/tuning/publisher.py` requires
+The same applies to sampling defaults: `src/llmsetup/tuning/publisher.py` requires
 a `source` on every entry, because "this feels right" is not a model card.
 
 ## Adding a model
 
-Catalog entries live in `src/llmfit/catalog/data/models.yaml`. The fastest way
+Catalog entries live in `src/llmsetup/catalog/data/models.yaml`. The fastest way
 to get the architecture right is to let the tool read it:
 
 ```bash
-llmfit catalog add my-model --gguf ./my-model-Q4_K_M.gguf --publisher me
+llmsetup catalog add my-model --gguf ./my-model-Q4_K_M.gguf --publisher me
 ```
 
 That reads the local GGUF architecture and writes a user catalog overlay. Review
-the overlay from `llmfit catalog path` before adding an entry to the bundled
+the overlay from `llmsetup catalog path` before adding an entry to the bundled
 catalog, particularly `params_b`, `layers`,
 `kv_heads` and `head_dim`, which drive the memory model.
 
@@ -47,14 +47,14 @@ python -m venv .venv
 source .venv/bin/activate     # Windows: .venv\Scripts\Activate.ps1
 python -m pip install -c requirements-ci.txt -e ".[dev]"
 python -m pytest             # no GPU or downloaded model required
-python -m pytest --cov=llmfit --cov-report=term-missing
+python -m pytest --cov=llmsetup --cov-report=term-missing
 ruff check src/ tests/ scripts/
 # Type checks run on Python 3.10+ (CI uses 3.12):
 python -m pip install -c requirements-ci.txt mypy types-PyYAML
-mypy src/llmfit
+mypy src/llmsetup
 ```
 
-Every test runs against a temporary `LLMFIT_HOME`, so nothing touches your real
+Every test runs against a temporary `LLMSETUP_HOME`, so nothing touches your real
 model store, LM Studio folder, or saved profiles.
 UI integration tests bind local loopback sockets; an environment that forbids
 all socket creation cannot run those tests. Fake downloads and endpoints at the
@@ -83,7 +83,7 @@ usually doing two jobs.
 
 This is the most useful bug report there is, and it needs three things:
 
-1. `llmfit report` from the run (it contains the machine, the plan,
+1. `llmsetup report` from the run (it contains the machine, the plan,
    and every decision with its reason).
 2. What actually happened: the error, or the speed you measured.
 3. What you expected.
@@ -108,4 +108,4 @@ suspected vulnerabilities.
   the licenses of any copied or vendored material. Downloaded model licenses are
   independent of this project's software license.
 - Publication, naming migrations, and changes to support policy need their own
-  explicit maintainer decision. See [the naming proposal](docs/POSITIONING.md).
+  explicit maintainer decision. See [the naming and migration notes](docs/POSITIONING.md).

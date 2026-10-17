@@ -17,13 +17,13 @@ depends on the last one:
 6. When it doesn't, why, and what to change
 7. Whether you can still open it in LM Studio, or it is stuck in one tool
 
-llmfit works through all seven in order, and tests each answer rather than
+llmsetup works through all seven in order, and tests each answer rather than
 claiming it.
 
 ## What a run looks like
 
 ```
-$ llmfit setup
+$ llmsetup setup
 
 Let's work out what you need.
   What will you use the model for?          → coding, agents
@@ -139,7 +139,7 @@ cursor and asked to join them. Instruction-tuned models generally cannot do that
 at all, however good they are at writing code in a chat window, because they
 were never taught the tokens that express it.
 
-So asking for it changes the whole plan rather than a setting. llmfit picks a
+So asking for it changes the whole plan rather than a setting. llmsetup picks a
 model trained to infill, sized by *active* parameters rather than total, because
 that is what decides how long the editor waits: a 30B mixture of experts that
 activates 3B answers at 3B speed. It routes to an engine that has the endpoint,
@@ -173,14 +173,14 @@ runs" from "it runs well". Each is reported with the reason it was chosen:
 | **MoE expert offload** | A mixture-of-experts model is ~96% routed expert weights, and only a few experts fire per token. Those stacks go to system RAM while attention and the KV cache stay on the GPU. This is what makes a 117B model runnable on a 12 GB card, and it costs far less speed than moving whole layers, because only *active* parameters cross. |
 | **Speculative decoding** | Drafting ahead and verifying in one pass, in whichever form the model supports. Some models carry multi-token prediction heads inside their own weights, which costs no download and no second resident model, so nothing else competes when a build has them. Failing that, a small draft model from the catalog (same vocabulary, at least 5x smaller) when the task has predictable output and there is memory to spare. Failing that, drafting from the prompt itself, which costs nothing and pays when the answer quotes its source. Whether a build has the heads is read out of the file, because publishers ship an MTP build and a plain build of the same model. |
 | **Reasoning budget** | `--reasoning on/off` and effort tiers. Suppressing the thinking block takes time-to-first-token from seconds to a fraction of one, so extraction and translation get it off while agents keep it. |
-| **Publisher-recommended sampling** | Model authors publish the settings they evaluated their own model with, and those beat any generic default. Qwen3 in thinking mode wants `temp 0.6 / top-p 0.95`; the same model with thinking off wants `0.7 / 0.8` and a presence penalty of 1.5; Gemma 3 wants `temp 1.0 / top-k 64`; Mistral wants `0.15`. llmfit starts from the card for the family *and the mode it will actually run in*, then lets the task adjust only within what the publisher sanctioned. It refuses an adjustment the card explicitly warns against, such as greedy decoding on a Qwen3 reasoning model, which sends it into infinite repetition. Every entry cites its source. |
+| **Publisher-recommended sampling** | Model authors publish the settings they evaluated their own model with, and those beat any generic default. Qwen3 in thinking mode wants `temp 0.6 / top-p 0.95`; the same model with thinking off wants `0.7 / 0.8` and a presence penalty of 1.5; Gemma 3 wants `temp 1.0 / top-k 64`; Mistral wants `0.15`. llmsetup starts from the card for the family *and the mode it will actually run in*, then lets the task adjust only within what the publisher sanctioned. It refuses an adjustment the card explicitly warns against, such as greedy decoding on a Qwen3 reasoning model, which sends it into infinite repetition. Every entry cites its source. |
 | **Reproducibility** | Extraction, coding and translation get a fixed seed, and the plan says what that does and does not buy. A seed removes the sampler as a source of variation; it does not make the engine deterministic, because floating-point addition is not associative and a request batched with three others accumulates in a different order. Where that matters and the hardware supports it, batch-invariant kernels are offered as an opt-in step with their real cost attached, which is roughly 60% longer per request. |
 | **Tool-call parsers** | vLLM has to be told which shape a family emits tool calls in, and the shapes are not interchangeable. Only families with a documented parser get one; the rest get none, because a plausible-looking default causes the exact failure it is meant to prevent, where the model emits a good call and the server hands back prose. Which parser a build actually wants is settled by trying, so the tool check has a repair that walks the family's candidates. |
 | **Full sampler chain** | DRY, XTC, top-n-sigma, typical-p, mirostat, penalty windows, and the *order* they run in, which changes output as much as the values. Code gets no repetition penalties at all, because repeated tokens in code are usually correct. |
 | **RoPE / YaRN** | Context past the trained window, planned only when you ask for more than the model natively has, with the quality cost stated. |
 | **Multi-GPU** | Tensor split proportional to VRAM, with the largest card holding the KV cache. |
-| **Dynamic quantizations** | Not every layer deserves the same precision. Dynamic/imatrix builds (`UD-Q4_K_XL`) keep the layers that hurt most under quantization at higher precision and squeeze the rest, and measure better than the plain K-quant of the same size. llmfit prefers them when the repo publishes one and falls back cleanly when it doesn't, while still honouring an explicit quant you asked for. |
-| **Vision projector** | A vision model is two files: the language model and a separate projector that turns image embeddings into tokens. Download only the first and the endpoint accepts images and answers, confidently, about what it cannot see. llmfit fetches the projector alongside the weights, prefers a full-precision one (vision towers degrade faster under quantization than the language model does, and the file is small), budgets memory for it, links it into LM Studio beside the model, and can repair a setup that is missing it. |
+| **Dynamic quantizations** | Not every layer deserves the same precision. Dynamic/imatrix builds (`UD-Q4_K_XL`) keep the layers that hurt most under quantization at higher precision and squeeze the rest, and measure better than the plain K-quant of the same size. llmsetup prefers them when the repo publishes one and falls back cleanly when it doesn't, while still honouring an explicit quant you asked for. |
+| **Vision projector** | A vision model is two files: the language model and a separate projector that turns image embeddings into tokens. Download only the first and the endpoint accepts images and answers, confidently, about what it cannot see. llmsetup fetches the projector alongside the weights, prefers a full-precision one (vision towers degrade faster under quantization than the language model does, and the file is small), budgets memory for it, links it into LM Studio beside the model, and can repair a setup that is missing it. |
 | **Serving** | Continuous batching, prefix caching (the biggest win for agents and RAG, where a long prefix repeats every turn), chunked prefill. |
 
 A simple setup still produces a simple command line: everything here stays off
@@ -190,12 +190,12 @@ decisions that were actually made.
 ### The machine, not just the engine
 
 Some of the biggest wins are not flags at all. They are settings on the machine
-that the engine cannot reach, and llmfit reports them as explicit, opt-in steps
+that the engine cannot reach, and llmsetup reports them as explicit, opt-in steps
 with the reason attached rather than running them behind your back:
 
 - **Apple Silicon.** macOS caps how much unified memory the GPU may wire down
   (roughly 65–75% of RAM). A model that fits in principle will fall back to CPU
-  without `sudo sysctl iogpu.wired_limit_mb=N`. llmfit raises it only when the
+  without `sudo sysctl iogpu.wired_limit_mb=N`. llmsetup raises it only when the
   plan actually exceeds the default budget, and never above 85% of RAM, so the
   OS keeps room to breathe.
 - **AMD.** ROCm ships kernels for a subset of GFX targets. Cards that need
@@ -208,7 +208,7 @@ with the reason attached rather than running them behind your back:
 
 ### Every option, and a decision about it
 
-llmfit emits 72 of the roughly 350 options llama-server accepts. Which of the
+llmsetup emits 72 of the roughly 350 options llama-server accepts. Which of the
 rest are deliberate and which were oversights used to be knowable only by
 someone reading the upstream documentation and noticing, which is how several
 rounds of gaps in this project were found. That method only finds what somebody
@@ -219,10 +219,10 @@ engine's own default, something belonging to whoever operates the server, a
 choice belonging to the person rather than the tool, or a considered gap with a
 note on what the work would be. A test checks the record against the code in
 both directions, so a flag emitted without a decision fails, and so does a
-decision claiming llmfit passes something it does not. `scripts/flag_coverage.py`
+decision claiming llmsetup passes something it does not. `scripts/flag_coverage.py`
 diffs the record against an installed binary and names anything new.
 
-Writing the record found four options llmfit should have been using, and the
+Writing the record found four options llmsetup should have been using, and the
 test caught me recording all four as used before I had implemented any of them.
 
 ### Flags the installed binary actually has
@@ -232,7 +232,7 @@ their package manager last shipped. A command written against today's
 documentation fails on a perfectly good older build, and one written against an
 old build gives up features the new one has.
 
-So llmfit asks the binary. `--help` lists every flag it accepts, which turns
+So llmsetup asks the binary. `--help` lists every flag it accepts, which turns
 that whole class of breakage into a question with an answer: anything the build
 does not recognise is dropped, and the setup runs with one feature less instead
 of the server refusing to start behind 400 lines of usage text. The answer is
@@ -253,7 +253,7 @@ So `q8_0` is chosen freely, and anything below it is never a silent default: it
 is a last-resort repair, priced as a real sacrifice, blocked at the context
 lengths where it would be slower as well as worse, and reported in words that
 say how to undo it. Given the choice between a lossy cache and a shorter
-context, llmfit shortens the context.
+context, llmsetup shortens the context.
 
 ### Losing memory gently on a dense model
 
@@ -261,7 +261,7 @@ A dense model that did not fit lost whole layers from the accelerator, which
 costs an order of magnitude, because a dropped layer takes its attention to the
 CPU along with its weights and attention is the half that wants to be near the
 cache. `--n-cpu-ffn` moves only the feed-forward weights, which are most of a
-layer's bytes and none of its attention. llmfit was making that argument for
+layer's bytes and none of its attention. llmsetup was making that argument for
 mixture-of-experts models and not for dense ones, which is most models.
 
 A 32B at Q4 on a 12 GB card now keeps all 64 layers resident with the
@@ -272,7 +272,7 @@ back rather than pretending.
 ### Two cards of different speeds
 
 llama.cpp's automatic split divides the model in proportion to memory, and
-llmfit's did the same. That is right only when the cards match. Under a layer
+llmsetup's did the same. That is right only when the cards match. Under a layer
 split every token walks through each card in turn, so the time per token is the
 sum of the per-card times, and a card given work in proportion to its capacity
 rather than its speed holds up everything behind it. Pairing a 3090 with a 3060
@@ -287,14 +287,14 @@ because it cannot take more.
 
 Two smaller corrections came out of reading the upstream multi-GPU
 documentation. `--main-gpu` names the single card to use when the model is not
-split at all, so passing it alongside a split says nothing; llmfit was passing
+split at all, so passing it alongside a split says nothing; llmsetup was passing
 it and describing that card as holding the KV cache, which is not how a layer
 split works and would send someone debugging in the wrong direction. And `row`
 split mode is deprecated upstream, so it is no longer offered.
 
 ### On a Mac, the faster engine comes first
 
-MLX generates appreciably faster than llama.cpp on Apple Silicon. llmfit ranked
+MLX generates appreciably faster than llama.cpp on Apple Silicon. llmsetup ranked
 it third, on the reasoning that the GGUF engines have broader model coverage,
 which was measured against a catalog recording exactly one MLX build. That is
 circular, and it cost Mac users real speed on every model that does have one.
@@ -312,7 +312,7 @@ experts moves most of its weight to system RAM, so the card ends up holding
 attention and a cache and little else, and a 6 GB laptop card can then carry the
 same compute buffer as a 24 GB one running a dense model. Someone published
 exactly that setup running at `-ub 2048` with 350-400 prompt tokens per second;
-llmfit was giving that machine 256.
+llmsetup was giving that machine 256.
 
 The batch is now settled after placement, and the order of what gets given up
 is deliberate:
@@ -337,7 +337,7 @@ moves an entire layer's experts and leaves the card holding nothing in the space
 that frees. People reclaim it by hand with patterns like
 `-ot 'blk\.21\.ffn_down.*=CPU'` and arrive at the right layer by trial.
 
-The boundary is arithmetic, so llmfit computes it: whole layers where they fit,
+The boundary is arithmetic, so llmsetup computes it: whole layers where they fit,
 then the individual expert tensors of the layer that straddles the line. Every
 expert left on the card is one that does not cross the bus when it fires.
 
@@ -350,7 +350,7 @@ micro-batch of 2048 rather than the default 512. Measurements put that gap at
 25-30% of prompt throughput on some hardware, and it is not the kind of thing a
 formula recovers: it comes from kernel shapes and cache sizes.
 
-`llmfit setup --sweep` runs the candidates through llama-bench and keeps what
+`llmsetup setup --sweep` runs the candidates through llama-bench and keeps what
 wins. Three rules keep it honest:
 
 - **Nothing is benchmarked that would not fit.** Candidates go through the same
@@ -366,7 +366,7 @@ wins. Three rules keep it honest:
   printing too: settings nobody checked and settings that were checked and held
   up are different things.
 
-This is the one place llmfit can beat careful manual work outright, and not
+This is the one place llmsetup can beat careful manual work outright, and not
 because the method is clever. A person tries three configurations and stops; a
 machine sits through all of them in a fixed order and writes down the spread.
 
@@ -408,7 +408,7 @@ your context ended up at 24,576 instead of silently handing you a worse setup.
 ### Ground truth beats the catalog
 
 The catalog is dated YAML with per-entry provenance (`measured` vs `estimated`).
-When weights land on disk, llmfit reads the **real** architecture out of the GGUF
+When weights land on disk, llmsetup reads the **real** architecture out of the GGUF
 header and recomputes the plan against it. A wrong catalog guess becomes a
 corrected estimate instead of an OOM at inference time.
 
@@ -424,4 +424,4 @@ Weights live **once**, in a shared store; every app is *linked* against it
 - **Jan.** Model folder plus `model.json`
 - **Open WebUI, Continue, Aider, Zed, Cursor.** Ready-to-paste config snippets
 - **llama-swap.** A generated config so one endpoint serves several models on
-  demand, each with the command llmfit tuned for it
+  demand, each with the command llmsetup tuned for it
