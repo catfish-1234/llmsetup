@@ -49,7 +49,31 @@ def all_runtimes() -> List[Runtime]:
 
 
 def available_runtimes() -> List[Runtime]:
-    return [r for r in all_runtimes() if r.is_available()]
+    inventory, _ = scan_runtimes()
+    return [r for r in all_runtimes() if inventory[r.name]]
+
+
+def scan_runtimes() -> Tuple[Dict[str, bool], List[str]]:
+    """Probe each adapter independently so one broken installation cannot hide others."""
+    inventory, warnings = {}, []
+    for runtime in all_runtimes():
+        try:
+            inventory[runtime.name] = runtime.is_available()
+        except Exception as exc:
+            inventory[runtime.name] = False
+            warnings.append(f"could not probe {runtime.label} ({exc}); treating it as unavailable")
+    return inventory, warnings
+
+
+def recovery_order(hardware: HardwareProfile, profile: UseCaseProfile) -> List[str]:
+    """Compatible installed alternatives in preference order."""
+    order = _preference_order(hardware, profile)
+    if Task.AUTOCOMPLETE in profile.tasks:
+        order = ["llamacpp"]
+    installed = hardware.runtime_availability
+    if not installed:
+        installed, _ = scan_runtimes()
+    return [name for name in order if installed.get(name)]
 
 
 def _ensure_loaded() -> None:
@@ -74,7 +98,8 @@ def choose_runtime(
 ) -> Tuple[str, str]:
     """Return (runtime name, human-readable reason)."""
     _ensure_loaded()
-    installed = {r.name for r in available_runtimes()}
+    installed = ({name for name, present in hardware.runtime_availability.items() if present}
+                 if hardware.runtime_availability else {r.name for r in available_runtimes()})
 
     # 2. Concurrency demands a real batching server, and vLLM is the only one of
     #    these built for it, but only where it can actually run.
@@ -114,8 +139,8 @@ def choose_runtime(
     # 4. Nothing installed: recommend the easiest good option.
     fallback = preference[0]
     return fallback, (
-        f"no inference engine detected; {_label(fallback)} is the simplest to install "
-        f"for {_describe_machine(hardware)}"
+        f"no inference engine detected; {_label(fallback)} suits {_describe_machine(hardware)}. "
+        "Setup will try compatible alternatives and a local CPU fallback if needed"
     )
 
 
@@ -136,7 +161,8 @@ def prefer_mlx_for(spec, hardware: HardwareProfile,
     if spec is None or not getattr(spec, "mlx_repo", None):
         return None
     _ensure_loaded()
-    if "mlx" not in _REGISTRY:
+    if "mlx" not in _REGISTRY or (hardware.runtime_availability and
+                                  not hardware.runtime_availability.get("mlx")):
         return None
     return "mlx", (
         f"{spec.name} has an MLX build, and on Apple Silicon MLX generates "

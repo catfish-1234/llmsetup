@@ -13,6 +13,7 @@ and a specific model, not the general default.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Dict, List
 
 from llmsetup.runtimes.base import Endpoint, Runtime, RuntimeUnavailable
@@ -88,6 +89,7 @@ class TabbyRuntime(Runtime):
             config.port = http.find_free_port(config.host, config.port + 1)
 
         log_path = str(ensure_dir(app_dir() / "logs") / f"tabby-{config.port}.log")
+        Path(log_path).write_text("", encoding="utf-8")
         process = spawn(self.launch_command(spec, config), log_path=log_path)
         endpoint = Endpoint(
             base_url=f"http://{config.host}:{config.port}", model=spec.id,
@@ -99,9 +101,7 @@ class TabbyRuntime(Runtime):
                 raise RuntimeUnavailable(f"TabbyAPI exited; see {log_path}")
             return http.request(endpoint.models_url, timeout=3).ok
 
-        if not http.wait_for(ready, timeout=900, interval=2.0):
-            self.stop(endpoint)
-            raise RuntimeUnavailable("TabbyAPI did not become healthy", f"see {log_path}")
+        self.wait_until_ready(endpoint, ready, timeout=900, interval=2.0)
         return endpoint
 
     def config_files(self, spec: ModelSpec, config: RuntimeConfig) -> Dict[str, str]:

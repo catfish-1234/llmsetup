@@ -44,7 +44,8 @@ a Python project; no npm package is added.
    Generated model aliases now use the `llmsetup-` prefix. Existing registrations
    and model files are left in place; check destinations before replacing them.
 
-The workflow remains interview, planning, runtime tuning, capability checks,
-bounded repair, and app registration. Memory and speed figures are estimates
+Setup now scans hardware and installed runtimes before asking about goals. It
+never asks for hardware specs. Planning, tuning, verification, bounded automatic
+repair, runtime fallback, and verified app registration follow the scan. Memory and speed figures are estimates
 until tested with an actual engine. Report measured results and the checks that
 ran, without implying that a smoke test establishes general model quality.

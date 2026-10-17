@@ -87,11 +87,13 @@ class TestPlanCommand:
         payload = json.loads(capsys.readouterr().out)
         assert payload["runtime_reason"]
 
-    def test_impossible_requirements_exit_nonzero_with_a_hint(self, capsys):
-        code = main(["plan", "--vram", "24", "--gpu-vendor", "nvidia",
-                     "--task", "chat", "--vision", "--context", "1000000", "--yes"])
-        assert code == 1
-        assert "hint" in capsys.readouterr().err
+    def test_oversized_context_is_shortened_with_an_explanation(self, capsys, monkeypatch):
+        from conftest import make_hardware
+
+        monkeypatch.setattr("llmsetup.cli.detect_hardware", lambda **kw: make_hardware())
+        code = main(["plan", "--task", "chat", "--vision", "--context", "1000000", "--yes"])
+        assert code == 0
+        assert "automatically using" in capsys.readouterr().err
 
 
 class TestCatalogCommand:

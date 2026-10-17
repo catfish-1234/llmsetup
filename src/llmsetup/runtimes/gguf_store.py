@@ -8,6 +8,7 @@ app.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -47,8 +48,18 @@ def find_local(spec: ModelSpec, quant: str) -> Optional[Path]:
     ggufs = sorted(p for p in directory.glob("*.gguf") if not is_projector(p.name))
     if not ggufs:
         return None
-    # For a split model, the first shard is the one runtimes are pointed at.
-    return ggufs[0]
+    # A cached first shard is not a complete model. Missing shards are fetched
+    # before launch rather than repeatedly crashing the server.
+    first = ggufs[0]
+    split = re.fullmatch(r"(.+)-(\d{5})-of-(\d{5})\.gguf", first.name)
+    if split:
+        prefix, index, count = split.groups()
+        if int(index) != 1 or not all(
+            (directory / f"{prefix}-{i:05d}-of-{int(count):05d}.gguf").is_file()
+            for i in range(1, int(count) + 1)
+        ):
+            return None
+    return first
 
 
 def find_local_projector(spec: ModelSpec, quant: str) -> Optional[Path]:
@@ -82,7 +93,7 @@ def fetch_projector(spec: ModelSpec, quant: str, console: Console) -> Optional[P
     try:
         files = list_repo_files(spec.gguf_repo, revision=spec.gguf_revision)
     except Exception as exc:  # the projector is never worth aborting the run for
-        console.warn(f"could not list {spec.gguf_repo} for a vision projector: {exc}")
+        console.warn(f"could not list {spec.gguf_repo} for a vision projector: {getattr(exc, 'message', str(exc))}")
         return None
 
     chosen = pick_mmproj(files)

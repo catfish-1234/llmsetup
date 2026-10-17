@@ -110,3 +110,47 @@ def test_corrupt_oversized_partial_restarts(tmp_path, monkeypatch):
     download_file(RemoteFile("a/b", "model.gguf", 3, revision="a" * 40), dest)
     assert dest.read_bytes() == b"abc"
     assert requests[0].get_header("Range") is None
+
+
+def test_invalid_resume_range_discards_partial_and_retries_cleanly(tmp_path, monkeypatch):
+    requests = serve(monkeypatch,
+                     Response(b"def", 206, {"Content-Range": "bytes 0-2/6"}),
+                     Response(b"abcdef", headers={"Content-Length": "6"}))
+    dest = tmp_path / "model.gguf"
+    dest.with_suffix(".gguf.part").write_bytes(b"abc")
+    download_file(RemoteFile("a/b", "model.gguf", 6, revision="a" * 40), dest, retries=1)
+    assert dest.read_bytes() == b"abcdef"
+    assert requests[0].get_header("Range") == "bytes=3-"
+    assert requests[1].get_header("Range") is None
+
+
+def test_cached_first_shard_fetches_missing_sibling(catalog, monkeypatch):
+    from llmsetup.runtimes.gguf_store import fetch_gguf, find_local, store_path
+    from llmsetup.util.log import Console
+
+    spec = catalog.require("qwen3-8b")
+    spec.gguf_revision = "a" * 40
+    directory = store_path(spec, "Q4_K_M")
+    directory.mkdir(parents=True)
+    first = directory / "model-Q4_K_M-00001-of-00002.gguf"
+    first.write_bytes(b"abc")
+    assert find_local(spec, "Q4_K_M") is None
+    files = [RemoteFile(spec.gguf_repo, name, 3, revision=spec.gguf_revision) for name in
+             [first.name, "model-Q4_K_M-00002-of-00002.gguf"]]
+    monkeypatch.setattr("llmsetup.runtimes.gguf_store.list_repo_files", lambda *a, **kw: files)
+    requests = serve(monkeypatch, Response(b"def", headers={"Content-Length": "3"}))
+    assert fetch_gguf(spec, "Q4_K_M", Console(quiet=True)) == first
+    assert len(requests) == 1
+    assert first.with_name(files[1].filename).read_bytes() == b"def"
+    assert find_local(spec, "Q4_K_M") == first
+
+
+def test_rejected_stale_partial_is_discarded_before_retry(tmp_path, monkeypatch):
+    requests = serve(monkeypatch, urllib.error.HTTPError(
+        "https://example.invalid", 416, "range", {"Content-Range": "bytes */6"}, None),
+        Response(b"abcdef", headers={"Content-Length": "6"}))
+    dest = tmp_path / "model.gguf"
+    dest.with_suffix(".gguf.part").write_bytes(b"stale-too-long-partial")
+    download_file(RemoteFile("a/b", "model.gguf", revision="a" * 40), dest, retries=1)
+    assert dest.read_bytes() == b"abcdef"
+    assert requests[1].get_header("Range") is None
