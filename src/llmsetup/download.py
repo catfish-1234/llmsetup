@@ -355,7 +355,7 @@ def download_file(
             os.replace(part, dest)
             return dest
 
-        except (urllib.error.URLError, OSError, http.client.IncompleteRead) as exc:
+        except (urllib.error.URLError, OSError, http.client.IncompleteRead, ProvisionError) as exc:
             # The final byte may have arrived before a previous process stopped.
             # A 416 confirms the remote length; only promote an exact match.
             if isinstance(exc, urllib.error.HTTPError) and exc.code == 416:
@@ -374,6 +374,10 @@ def download_file(
                     hint=(f"the partial file is kept at {part}; rerun to resume, "
                           "or download it manually into the model store"),
                 ) from None
+            invalid_partial = (isinstance(exc, ProvisionError) or
+                               (isinstance(exc, urllib.error.HTTPError) and exc.code == 416))
+            if invalid_partial and part.exists():
+                part.unlink()
             time.sleep(min(30, 2 ** attempt))
 
 

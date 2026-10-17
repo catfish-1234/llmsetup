@@ -276,14 +276,16 @@ def cmd_detect(args, console: Console) -> int:
 
 
 def cmd_plan(args, console: Console) -> int:
-    from llmsetup.planner.plan import build_plan
+    from llmsetup.planner.plan import build_adaptive_plan
     from llmsetup.planner.score import explain
 
     hardware = _hardware(args)
+    _show_detection(hardware, console)
     profile = _profile(args, console)
     _auto_update(console, profile)
     catalog = load_catalog(extra_paths=getattr(args, "catalog", None))
-    plan = build_plan(profile, hardware, catalog, runtime=args.runtime)
+    plan = build_adaptive_plan(profile, hardware, catalog, runtime=args.runtime)
+    profile = plan.profile or profile
 
     if args.json:
         print(json.dumps({
@@ -339,6 +341,7 @@ def cmd_plan(args, console: Console) -> int:
 
 def cmd_setup(args, console: Console) -> int:
     hardware = _hardware(args)
+    _show_detection(hardware, console)
     profile = _profile(args, console)
     _auto_update(console, profile)
     catalog = load_catalog(extra_paths=getattr(args, "catalog", None))
@@ -664,6 +667,14 @@ def _hardware(args):
     if any(v for v in overrides.values()):
         hardware = apply_overrides(hardware, overrides)
     return hardware
+
+
+def _show_detection(hardware, console: Console) -> None:
+    console.info(f"Detected: {summarize_hardware(hardware)}")
+    installed = [name for name, present in hardware.runtime_availability.items() if present]
+    console.info("Installed runtimes: " + (", ".join(installed) or "none detected"))
+    for warning in hardware.detection_warnings:
+        console.warn(warning)
 
 
 def _profile(args, console: Console) -> UseCaseProfile:

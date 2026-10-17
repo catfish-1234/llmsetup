@@ -15,7 +15,7 @@ from __future__ import annotations
 import abc
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from llmsetup.types import ModelSpec, RuntimeConfig
 from llmsetup.util.log import Console
@@ -79,6 +79,28 @@ class Runtime(abc.ABC):
     def install_hint(self) -> str:
         """What the user should run to get it. Shown when unavailable."""
         return ""
+
+    def wait_until_ready(self, endpoint: Endpoint, predicate: Callable[[], bool],
+                         *, timeout: float, interval: float) -> None:
+        """Fail fast on a dead child, stop it, and expose the log to diagnosis."""
+        from llmsetup.util import http
+
+        try:
+            if not http.wait_for(predicate, timeout=timeout, interval=interval, raise_errors=True):
+                raise RuntimeUnavailable(f"{self.label} did not become healthy within {timeout:.0f}s")
+        except (RuntimeUnavailable, OSError) as exc:
+            self.stop(endpoint)
+            tail = ""
+            if endpoint.log_path:
+                try:
+                    with Path(endpoint.log_path).open("rb") as stream:
+                        stream.seek(0, 2)
+                        stream.seek(max(0, stream.tell() - 8000))
+                        tail = stream.read().decode("utf-8", errors="replace")
+                except OSError:
+                    pass
+            raise RuntimeUnavailable(f"{exc}\n{tail}".strip(),
+                                     f"server log: {endpoint.log_path}") from exc
 
     def version(self) -> Optional[str]:
         return None

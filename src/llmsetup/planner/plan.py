@@ -281,7 +281,8 @@ def _too_big_hint(
         )
     return (
         f"even {smallest.name} needs more than the {budget / GIB:.1f} GB available. "
-        "Add a smaller model to the catalog, or run with --allow-cpu."
+        "Close memory-heavy apps and rerun `llmsetup setup`. If no model fits, add a smaller "
+        "compatible model to the catalog or use a machine with more available RAM."
     )
 
 
@@ -361,3 +362,35 @@ def plan_embedding_model(
         return (multilingual_fit, spec.quality_tier, -spec.params_b)
 
     return sorted(embedders, key=rank, reverse=True)[0]
+
+
+def build_adaptive_plan(profile: UseCaseProfile, hardware: HardwareProfile,
+                        catalog: Catalog, runtime: Optional[str] = None) -> Plan:
+    """Keep the goal, shorten context automatically when the requested window cannot fit."""
+    from dataclasses import replace
+
+    requested = profile.context_tokens
+    context = requested
+    while True:
+        try:
+            plan = build_plan(replace(profile, context_tokens=context), hardware,
+                              catalog, runtime=runtime)
+            if plan.runtime == "llamacpp" and hardware.gpus:
+                from llmsetup.runtimes.install import managed_binary
+                from llmsetup.util.proc import which
+
+                if not which("llama-server") and managed_binary(hardware):
+                    hardware = replace(hardware, gpus=[], unified_memory=False)
+                    plan = build_plan(replace(profile, context_tokens=context), hardware,
+                                      catalog, runtime="llamacpp")
+                    plan.notes.append("the managed portable runtime uses CPU; planning against available RAM")
+            if context != requested:
+                plan.notes.append(
+                    f"requested {requested} tokens; automatically using {context} to fit "
+                    "available memory and the model's context limit"
+                )
+            return plan
+        except PlanningError:
+            if context <= 512:
+                raise
+            context = max(512, context // 2)
