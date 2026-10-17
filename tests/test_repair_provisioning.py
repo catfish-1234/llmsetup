@@ -2,9 +2,9 @@
 
 from conftest import make_hardware
 
-from llmfit.pipeline import Pipeline
-from llmfit.types import UseCaseProfile
-from llmfit.util.log import Console
+from llmsetup.pipeline import Pipeline
+from llmsetup.types import UseCaseProfile
+from llmsetup.util.log import Console
 
 
 class RecordingRuntime:
@@ -25,7 +25,7 @@ class RecordingRuntime:
 def pipeline(catalog, monkeypatch):
     runtime = RecordingRuntime()
     launched = []
-    monkeypatch.setattr("llmfit.pipeline.get_runtime", lambda name: runtime)
+    monkeypatch.setattr("llmsetup.pipeline.get_runtime", lambda name: runtime)
     instance = Pipeline(UseCaseProfile(), make_hardware(),
                         catalog.restrict_to("qwen3-8b"), Console(quiet=True),
                         runtime_name="fake", register=False)

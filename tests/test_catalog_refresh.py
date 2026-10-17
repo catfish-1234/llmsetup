@@ -12,10 +12,10 @@ import struct
 import pytest
 import yaml
 
-from llmfit.catalog.catalog import load_catalog
-from llmfit.catalog.refresh import add_model, refresh, user_catalog_path
-from llmfit.util.errors import CatalogError
-from llmfit.util.log import Console
+from llmsetup.catalog.catalog import load_catalog
+from llmsetup.catalog.refresh import add_model, refresh, user_catalog_path
+from llmsetup.util.errors import CatalogError
+from llmsetup.util.log import Console
 
 
 @pytest.fixture
@@ -123,8 +123,8 @@ class TestAdd:
         """Writing the file is not the deliverable; a plannable model is."""
         from conftest import make_hardware
 
-        from llmfit.planner.plan import build_plan
-        from llmfit.types import Task, UseCaseProfile
+        from llmsetup.planner.plan import build_plan
+        from llmsetup.types import Task, UseCaseProfile
 
         gguf = write_gguf(tmp_path / "m.gguf", layers=32, kv_heads=8, hidden=4096)
         add_model(console, "planner-visible", gguf_path=gguf, params_b=8.0,
@@ -164,7 +164,7 @@ class TestRefresh:
         store.mkdir(parents=True)
         # Same model id, but a file claiming a different architecture.
         write_gguf(store / "w.gguf", layers=99, kv_heads=2, hidden=4096)
-        monkeypatch.setenv("LLMFIT_MODEL_STORE", str(tmp_path / "store"))
+        monkeypatch.setenv("LLMSETUP_MODEL_STORE", str(tmp_path / "store"))
 
         report = refresh(console, catalog, check_remote=False)
         drift = [f for f in report["findings"] if f["model"] == "qwen3-8b"]
@@ -180,7 +180,7 @@ class TestRefresh:
         store = tmp_path / "store" / spec.publisher / spec.id / "Q4_K_M"
         store.mkdir(parents=True)
         write_gguf(store / "w.gguf", layers=99)
-        monkeypatch.setenv("LLMFIT_MODEL_STORE", str(tmp_path / "store"))
+        monkeypatch.setenv("LLMSETUP_MODEL_STORE", str(tmp_path / "store"))
 
         refresh(console, catalog, check_remote=False)
         # The bundled catalog is untouched; the proposal sits beside it.
@@ -191,7 +191,7 @@ class TestRefresh:
         store = tmp_path / "store" / spec.publisher / spec.id / "Q4_K_M"
         store.mkdir(parents=True)
         write_gguf(store / "w.gguf", layers=99)
-        monkeypatch.setenv("LLMFIT_MODEL_STORE", str(tmp_path / "store"))
+        monkeypatch.setenv("LLMSETUP_MODEL_STORE", str(tmp_path / "store"))
 
         report = refresh(console, catalog, check_remote=False, write_overlay=False)
         assert report["corrections"]
@@ -201,7 +201,7 @@ class TestRefresh:
         def explode(*args, **kwargs):
             raise AssertionError("refresh --offline must not touch the network")
 
-        monkeypatch.setattr("llmfit.download.list_repo_files", explode)
+        monkeypatch.setattr("llmsetup.download.list_repo_files", explode)
         refresh(console, catalog, check_remote=False)
 
     def test_an_unreachable_repo_is_reported_not_raised(self, catalog, console,
@@ -210,6 +210,6 @@ class TestRefresh:
         def explode(repo, timeout=15):
             raise RuntimeError("network is down")
 
-        monkeypatch.setattr("llmfit.download.list_repo_files", explode)
+        monkeypatch.setattr("llmsetup.download.list_repo_files", explode)
         report = refresh(console, catalog, check_remote=True)
         assert any(f["kind"] == "unreachable" for f in report["findings"])

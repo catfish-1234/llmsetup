@@ -5,8 +5,8 @@ import urllib.error
 
 import pytest
 
-from llmfit.download import RemoteFile, download_file
-from llmfit.util.errors import ProvisionError
+from llmsetup.download import RemoteFile, download_file
+from llmsetup.util.errors import ProvisionError
 
 
 class Response(io.BytesIO):
@@ -27,8 +27,8 @@ def serve(monkeypatch, *responses):
             raise response
         return response
 
-    monkeypatch.setattr("llmfit.download.urllib.request.urlopen", urlopen)
-    monkeypatch.setattr("llmfit.download.time.sleep", lambda seconds: None)
+    monkeypatch.setattr("llmsetup.download.urllib.request.urlopen", urlopen)
+    monkeypatch.setattr("llmsetup.download.time.sleep", lambda seconds: None)
     return requests
 
 

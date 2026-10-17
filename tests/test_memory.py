@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from llmfit.planner.memory import (
+from llmsetup.planner.memory import (
     KV_ELEMENT_BYTES,
     KV_QUALITY_ORDER,
     KV_SAFE_FLOOR,
@@ -15,7 +15,7 @@ from llmfit.planner.memory import (
     max_context_for_budget,
     weight_bytes,
 )
-from llmfit.types import GIB, ModelSpec
+from llmsetup.types import GIB, ModelSpec
 
 
 def spec(**kwargs) -> ModelSpec:

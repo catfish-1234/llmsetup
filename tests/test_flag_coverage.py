@@ -1,11 +1,11 @@
-"""Every option the engine has, and llmfit's decision about it.
+"""Every option the engine has, and llmsetup's decision about it.
 
-llmfit emits a fraction of what llama-server accepts. Which of the rest are
+llmsetup emits a fraction of what llama-server accepts. Which of the rest are
 deliberate and which are oversights was, for several rounds of this project,
 knowable only by someone reading the upstream documentation and noticing. That
 method only finds what somebody happens to read, and it kept finding things.
 
-So the decisions are written down and checked. A flag llmfit emits that has no
+So the decisions are written down and checked. A flag llmsetup emits that has no
 recorded decision, or a decision that disagrees with what the code actually
 does, fails here. When llama.cpp adds options, and it adds them constantly, the
 snapshot goes stale and the refresh script says which ones are new.
@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from llmfit.runtimes.data.llamacpp_flags import (
+from llmsetup.runtimes.data.llamacpp_flags import (
     ALIAS,
     DECISIONS,
     MANUAL,
@@ -27,7 +27,7 @@ from llmfit.runtimes.data.llamacpp_flags import (
     USED,
 )
 
-RUNTIME_SOURCE = Path("src/llmfit/runtimes/llamacpp.py").read_text(encoding="utf-8")
+RUNTIME_SOURCE = Path("src/llmsetup/runtimes/llamacpp.py").read_text(encoding="utf-8")
 
 
 def emitted_flags() -> set:
@@ -36,7 +36,7 @@ def emitted_flags() -> set:
 
 
 class TestTheRecordIsHonest:
-    def test_everything_llmfit_emits_is_recorded_as_used(self):
+    def test_everything_llmsetup_emits_is_recorded_as_used(self):
         """The dangerous direction. A flag emitted but recorded as skipped means
         the record is fiction, and the record is what the next round of this
         work will be read against."""
@@ -49,7 +49,7 @@ class TestTheRecordIsHonest:
 
     def test_everything_recorded_as_used_is_actually_emitted(self):
         """The other direction, which is how a decision quietly becomes a
-        claim: the record says llmfit passes it, and it does not."""
+        claim: the record says llmsetup passes it, and it does not."""
         claimed = {flag for flag, (decision, _) in DECISIONS.items()
                    if decision == USED}
         missing = sorted(claimed - emitted_flags())
@@ -104,8 +104,8 @@ class TestCoverageIsWorthHaving:
         "--api-key", "--ssl-cert-file", "--ssl-key-file", "--cors-origins",
     ])
     def test_security_relevant_flags_are_a_deliberate_choice(self, flag):
-        """Not defaults llmfit picked by omission. Someone exposing a server to
-        other people has requirements llmfit cannot guess, and quietly choosing
+        """Not defaults llmsetup picked by omission. Someone exposing a server to
+        other people has requirements llmsetup cannot guess, and quietly choosing
         for them is worse than leaving it to them."""
         assert DECISIONS[flag][0] in (USED, RUNTIME)
 

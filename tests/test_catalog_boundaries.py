@@ -7,15 +7,15 @@ import sys
 
 import pytest
 
-from llmfit.interop.llama_swap import build_config
-from llmfit.interop.openai_clients import snippets
-from llmfit.runtimes.base import Endpoint
-from llmfit.runtimes.llamacpp import LlamaCppRuntime
-from llmfit.runtimes.mlx import MlxRuntime
-from llmfit.runtimes.vllm import VllmRuntime
-from llmfit.types import RuntimeConfig, UseCaseProfile
-from llmfit.ui.server import _setup_command
-from llmfit.util.fs import safe_subpath
+from llmsetup.interop.llama_swap import build_config
+from llmsetup.interop.openai_clients import snippets
+from llmsetup.runtimes.base import Endpoint
+from llmsetup.runtimes.llamacpp import LlamaCppRuntime
+from llmsetup.runtimes.mlx import MlxRuntime
+from llmsetup.runtimes.vllm import VllmRuntime
+from llmsetup.types import RuntimeConfig, UseCaseProfile
+from llmsetup.ui.server import _setup_command
+from llmsetup.util.fs import safe_subpath
 
 
 def test_missing_leaf_cannot_escape_through_symlink(tmp_path):
@@ -62,7 +62,7 @@ def test_swap_command_round_trips_catalog_values(catalog):
 
 
 def test_ui_handoff_quotes_catalog_model_id(catalog):
-    from llmfit.types import Candidate, MemoryEstimate
+    from llmsetup.types import Candidate, MemoryEstimate
 
     spec = catalog.require("qwen3-8b")
     spec.id = "model $(id); echo injected"
