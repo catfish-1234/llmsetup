@@ -220,10 +220,10 @@ def _reduce_context(state: RepairState) -> Optional[Outcome]:
         runtime=config.runtime, ubatch=config.ubatch_size, parallel=config.parallel,
         swa_full=config.swa_full,
     )
-    floor = _context_floor(state.profile)
+    floor = 512
     # Always make real progress: if the computed fit is not smaller, step down.
-    target = min(fitted, int(config.context_tokens * 0.75))
-    target = (target // 1024) * 1024
+    target = min(fitted, config.context_tokens // 2)
+    target = (target // 512) * 512
     if target < floor or target >= config.context_tokens:
         return None
 
@@ -237,6 +237,7 @@ def _reduce_context(state: RepairState) -> Optional[Outcome]:
 
 
 def _context_floor(profile: UseCaseProfile) -> int:
+    """Quality-preserving floor for optional cache-precision repairs."""
     if profile.primary_task in (Task.RAG, Task.SUMMARIZE, Task.CODING, Task.AGENT):
         return 8192
     return 2048
@@ -248,6 +249,9 @@ def _reduce_gpu_layers(state: RepairState) -> Optional[Outcome]:
         return None
     step = max(1, config.total_layers // 8)
     target = max(0, config.gpu_layers - step)
+    cpu_fraction = (config.total_layers - target) / max(1, config.total_layers)
+    if state.candidate.estimate.total * cpu_fraction > state.hardware.usable_cpu_bytes:
+        return None
     before = {"gpu_layers": config.gpu_layers}
     config.gpu_layers = target
     return Outcome(
@@ -617,6 +621,81 @@ def _fetch_vision_projector(state: RepairState) -> Optional[Outcome]:
     )
 
 
+def _use_cached_model(state: RepairState) -> Optional[Outcome]:
+    """A blocked Hub can still leave a compatible GGUF available locally."""
+    from dataclasses import replace
+
+    from llmsetup.planner.plan import build_adaptive_plan
+    from llmsetup.runtimes.gguf_store import find_local
+    from llmsetup.runtimes.registry import get_runtime
+    from llmsetup.util.errors import PlanningError
+
+    if not get_runtime(state.config.runtime).uses_gguf:
+        return None
+    cached = []
+    for spec in state.catalog.models:
+        quants = [quant for quant in spec.recommended_quants
+                  if (spec.id, quant) != (state.config.model_id, state.config.quant)
+                  and find_local(spec, quant)]
+        if quants:
+            cached.append(replace(spec, recommended_quants=quants))
+    if not cached:
+        return None
+    try:
+        plan = build_adaptive_plan(
+            replace(state.profile, context_tokens=state.config.context_tokens), state.hardware,
+            Catalog(cached, state.catalog.quant_bpw), runtime=state.config.runtime,
+        )
+    except PlanningError:
+        return None
+    return Outcome("using compatible cached weights while downloads are unavailable", cost="high",
+                   switch_to=plan.best, before={"model": state.candidate.label},
+                   after={"model": plan.best.label if plan.best else ""})
+
+
+def _refetch_weights(state: RepairState) -> Optional[Outcome]:
+    """Quarantine only managed GGUFs; never move a user-supplied model path."""
+    import time
+    from pathlib import Path
+
+    from llmsetup.util.fs import model_store
+
+    config = state.config
+    if not config.model_path:
+        return None
+    path = Path(config.model_path)
+    try:
+        root = model_store().resolve()
+        path.resolve().relative_to(root)
+        path.parent.resolve().relative_to(root)
+    except ValueError:
+        return None
+    if path.is_symlink() or not path.is_file() or path.suffix.lower() != ".gguf":
+        return None
+    # Shards and the projector must be fetched together at the same revision.
+    quarantine_id = time.time_ns()
+    for weights in path.parent.glob("*.gguf"):
+        if weights.is_symlink():
+            continue
+        weights.rename(weights.with_name(f"{weights.name}.{quarantine_id}.corrupt"))
+    config.model_path = None
+    config.mmproj_path = None
+    return Outcome(
+        "quarantined corrupt weights in the managed store and fetching a fresh copy",
+        cost="medium", before={"model_path": str(path)}, after={"model_path": None},
+    )
+
+
+def _cpu_fallback(state: RepairState) -> Optional[Outcome]:
+    if (state.config.runtime != "llamacpp" or not state.config.gpu_layers or
+            state.candidate.estimate.total > state.hardware.usable_cpu_bytes):
+        return None
+    before = {"gpu_layers": state.config.gpu_layers}
+    state.config.gpu_layers = 0
+    return Outcome("disabled GPU offload to retry on CPU", cost="high", before=before,
+                   after={"gpu_layers": 0})
+
+
 # --------------------------------------------------------------------------- #
 # the table
 # --------------------------------------------------------------------------- #
@@ -624,6 +703,8 @@ def _fetch_vision_projector(state: RepairState) -> Optional[Outcome]:
 _MEMORY_SIGNATURES = (sig.OUT_OF_MEMORY, sig.CRASH_DURING_LOAD, sig.KV_CACHE_FULL)
 
 STRATEGIES: List[RepairStrategy] = [
+    RepairStrategy("use_cached_model", (sig.DOWNLOAD_UNAVAILABLE,), "high", _use_cached_model),
+    RepairStrategy("refetch_weights", (sig.CORRUPT_WEIGHTS,), "medium", _refetch_weights),
     # Cheap wins first.
     RepairStrategy("enable_flash_attention", _MEMORY_SIGNATURES, "low",
                    _enable_flash_attention),
@@ -663,7 +744,7 @@ STRATEGIES: List[RepairStrategy] = [
     RepairStrategy("reduce_parallel", _MEMORY_SIGNATURES, "medium", _reduce_parallel),
     RepairStrategy("reduce_context",
                    (*_MEMORY_SIGNATURES, sig.CONTEXT_EXCEEDED, sig.REQUEST_TIMEOUT),
-                   "medium", _reduce_context),
+                   "medium", _reduce_context, exhausts_itself=True),
     RepairStrategy("full_swa_cache", (sig.NEEDLE_NOT_FOUND,), "medium",
                    _full_swa_cache),
     RepairStrategy("restore_kv_precision", (sig.NEEDLE_NOT_FOUND,), "medium",
@@ -674,14 +755,16 @@ STRATEGIES: List[RepairStrategy] = [
                    (*_MEMORY_SIGNATURES, sig.CONTEXT_EXCEEDED), "high",
                    _quantize_kv_lossy),
     RepairStrategy("reduce_gpu_layers", _MEMORY_SIGNATURES, "high", _reduce_gpu_layers),
+    RepairStrategy("cpu_fallback", _MEMORY_SIGNATURES, "high", _cpu_fallback),
     RepairStrategy("drop_quant_tier", _MEMORY_SIGNATURES, "high", _drop_quant_tier),
     RepairStrategy("switch_model",
-                   (*_MEMORY_SIGNATURES,
+                   (*_MEMORY_SIGNATURES, sig.PROVISION_FAILED, sig.CORRUPT_WEIGHTS,
+                    sig.CONTEXT_EXCEEDED, sig.MODEL_NOT_LOADED,
                     sig.INCOHERENT_OUTPUT, sig.TOOLS_UNSUPPORTED,
                     sig.VISION_UNSUPPORTED, sig.EMBEDDINGS_UNSUPPORTED,
                     sig.THROUGHPUT_TOO_LOW, sig.PREFILL_TOO_SLOW,
                     sig.NEEDLE_NOT_FOUND),
-                   "high", _switch_model),
+                   "high", _switch_model, exhausts_itself=True),
 ]
 
 

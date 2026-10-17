@@ -15,6 +15,9 @@ from typing import Optional
 SERVER_UNREACHABLE = "server_unreachable"
 MODEL_NOT_LOADED = "model_not_loaded"
 CRASH_DURING_LOAD = "crash_during_load"
+PROVISION_FAILED = "provision_failed"
+DOWNLOAD_UNAVAILABLE = "download_unavailable"
+CORRUPT_WEIGHTS = "corrupt_weights"
 
 # --- memory ---------------------------------------------------------------- #
 OUT_OF_MEMORY = "out_of_memory"
@@ -52,6 +55,14 @@ UNKNOWN_ERROR = "unknown_error"
 # Ordered most-specific first: an OOM message often also contains the word
 # "error", so generic patterns must never win.
 _PATTERNS = [
+    (CORRUPT_WEIGHTS, re.compile(
+        r"invalid (?:gguf|magic)|gguf.*(?:corrupt|invalid|truncated)|"
+        r"unexpected end of file|checksum mismatch|tensor.*(?:out of bounds|data size)|"
+        r"failed to read.*(?:gguf|tensor)|file too short", re.I)),
+    (DOWNLOAD_UNAVAILABLE, re.compile(
+        r"network (?:is )?(?:blocked|unreachable)|could not reach https?://|"
+        r"temporary failure in name resolution|name or service not known|"
+        r"certificate verify failed|proxy(?:error| error)|HTTP (?:407|451)", re.I)),
     (DRAFT_INCOMPATIBLE, re.compile(
         r"draft model.*(?:vocab|tokenizer|incompatible)|"
         r"vocab.*(?:mismatch|differ).*draft|"
