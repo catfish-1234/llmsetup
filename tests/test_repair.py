@@ -132,14 +132,19 @@ class TestEscalation:
         assert any(r.blocking for r in results)
         assert calls["n"] <= 20
 
-    def test_never_repeats_a_strategy_for_the_same_signature(self, catalog):
+    def test_only_finite_progress_strategies_can_repeat(self, catalog):
         state = build_state(catalog, make_hardware(vram_gb=12, ram_gb=32),
                             UseCaseProfile(tasks=[Task.CHAT], context_tokens=32768))
         loop = RepairLoop(state=state, relaunch=lambda c, n: fail(sig.OUT_OF_MEMORY),
                           console=Console(quiet=True), max_repairs=20)
         _, journal = loop.run(fail(sig.OUT_OF_MEMORY))
         names = [a.strategy for a in journal]
-        assert len(names) == len(set(names))
+        single_use = [name for name in names if name not in {"reduce_context", "switch_model"}]
+        assert len(single_use) == len(set(single_use))
+        contexts = [action.after["context_tokens"] for action in journal
+                    if action.strategy == "reduce_context"]
+        assert contexts == sorted(set(contexts), reverse=True)
+        assert names.count("switch_model") <= len(catalog.models)
 
     def test_a_passing_setup_is_left_alone(self, catalog):
         state = build_state(catalog, make_hardware(), UseCaseProfile(tasks=[Task.CHAT]))
@@ -191,6 +196,7 @@ class TestSpecificRemediations:
         state = build_state(catalog, make_hardware(vram_gb=24),
                             UseCaseProfile(tasks=[Task.CHAT]))
         original = state.candidate.model.id
+        state.config.context_tokens = 512
         loop = RepairLoop(state=state, relaunch=lambda c, n: ok(),
                           console=Console(quiet=True))
         # Exhaust the cheaper strategies so the swap is reached.
@@ -201,6 +207,7 @@ class TestSpecificRemediations:
         assert state.candidate.model.id != original
         assert state.config.model_id == state.candidate.model.id
         assert state.config.total_layers == state.candidate.model.layers
+        assert state.config.context_tokens == 512
 
 
 class TestJournal:
@@ -226,3 +233,68 @@ class TestJournal:
         results, journal = loop.run(fail(sig.OUT_OF_MEMORY))
         mark_resolved(journal, results)
         assert all(a.resolved is True for a in journal)
+
+
+def test_unclassified_failure_still_blocks_repair_success(catalog):
+    state = build_state(catalog, make_hardware(), UseCaseProfile())
+    loop = RepairLoop(state, lambda config, names: ok(), Console(quiet=True))
+    results, journal = loop.run(fail(None))
+    assert results[0].blocking
+    assert journal == []
+
+
+def test_corruption_repair_does_not_move_external_weights(catalog, tmp_path):
+    from llmsetup.repair.strategies import _refetch_weights
+
+    state = build_state(catalog, make_hardware(), UseCaseProfile())
+    external = tmp_path / "user-model.gguf"
+    external.write_bytes(b"invalid GGUF magic")
+    state.config.model_path = str(external)
+    assert _refetch_weights(state) is None
+    assert external.read_bytes() == b"invalid GGUF magic"
+    assert not external.with_suffix(".gguf.corrupt").exists()
+
+
+def test_external_symlink_into_store_cannot_move_external_siblings(catalog, tmp_path):
+    from llmsetup.repair.strategies import _refetch_weights
+    from llmsetup.util.fs import model_store
+
+    state = build_state(catalog, make_hardware(), UseCaseProfile())
+    managed = model_store() / "weights.gguf"
+    managed.parent.mkdir(parents=True)
+    managed.write_bytes(b"managed")
+    alias = tmp_path / "alias.gguf"
+    alias.symlink_to(managed)
+    external = tmp_path / "other.gguf"
+    external.write_bytes(b"external")
+    state.config.model_path = str(alias)
+    assert _refetch_weights(state) is None
+    assert external.read_bytes() == b"external"
+    assert managed.read_bytes() == b"managed"
+
+
+def test_repeated_corruption_keeps_each_quarantine_copy(catalog):
+    from llmsetup.repair.strategies import _refetch_weights
+    from llmsetup.util.fs import model_store
+
+    state = build_state(catalog, make_hardware(), UseCaseProfile())
+    weights = model_store() / "weights.gguf"
+    weights.parent.mkdir(parents=True)
+    for body in (b"corrupt one", b"corrupt two"):
+        weights.write_bytes(body)
+        state.config.model_path = str(weights)
+        assert _refetch_weights(state) is not None
+    assert {path.read_bytes() for path in model_store().glob("*.corrupt")} == {
+        b"corrupt one", b"corrupt two",
+    }
+
+
+def test_gpu_offload_repairs_do_not_overcommit_available_ram(catalog):
+    from llmsetup.repair.strategies import _cpu_fallback, _reduce_gpu_layers
+
+    state = build_state(catalog, make_hardware(), UseCaseProfile())
+    state.hardware.ram_available_bytes = 0
+    layers = state.config.gpu_layers
+    assert _reduce_gpu_layers(state) is None
+    assert _cpu_fallback(state) is None
+    assert state.config.gpu_layers == layers

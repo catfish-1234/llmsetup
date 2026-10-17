@@ -155,17 +155,12 @@ def _render_advanced(result: SetupResult, console: Console) -> None:
 
 
 def _render_platform(result: SetupResult, console: Console) -> None:
-    """Machine-level steps llmsetup will not take on the user's behalf.
-
-    These change the machine outside the scope of setting up a model, an OS
-    limit, a shell environment, so they are surfaced with the exact command
-    rather than applied silently.
-    """
+    """Surface privileged OS suggestions only after verification still fails."""
     actions = result.platform_actions
-    if not actions:
+    if not actions or result.succeeded or not result.checks_ran:
         return
     console.print()
-    console.print(console.bold("Your machine needs these too"))
+    console.print(console.bold("OS settings to review after failed recovery"))
     for action in actions:
         marker = console.warn if not action["optional"] else console.info
         marker(f"{action['title']}"
@@ -398,7 +393,7 @@ def render_markdown(result: SetupResult) -> str:
                 lines.append(f"  ```\n  {check.detail.strip()[:500]}\n  ```")
         lines.append("")
 
-    if result.platform_actions:
+    if result.platform_actions and result.checks_ran and not result.succeeded:
         lines.append("## Machine-level steps")
         lines.append("")
         lines.append("llmsetup does not apply these, because they change the machine "

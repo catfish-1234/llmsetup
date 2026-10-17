@@ -10,6 +10,7 @@ quietly ignored.
 from __future__ import annotations
 
 import shlex
+from pathlib import Path
 from typing import Dict, List, Optional
 
 from llmsetup.download import pin_revision
@@ -164,6 +165,7 @@ class VllmRuntime(Runtime):
         cmd = self.launch_command(spec, config)
         console.debug(" ".join(cmd))
         console.info("starting vLLM (first launch downloads weights and can take a while) …")
+        Path(log_path).write_text("", encoding="utf-8")
         process = spawn(cmd, log_path=log_path)
 
         endpoint = Endpoint(
@@ -183,9 +185,7 @@ class VllmRuntime(Runtime):
                 )
             return http.request(f"{endpoint.base_url}/health", timeout=3).ok
 
-        if not http.wait_for(ready, timeout=1800, interval=3.0):
-            self.stop(endpoint)
-            raise RuntimeUnavailable("vLLM did not become healthy", f"check {log_path}")
+        self.wait_until_ready(endpoint, ready, timeout=1800, interval=3.0)
         return endpoint
 
     def config_files(self, spec: ModelSpec, config: RuntimeConfig) -> Dict[str, str]:

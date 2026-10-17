@@ -150,12 +150,6 @@ QUESTIONS: List[Question] = [
         why="Filters out models whose licence does not permit it, so you do not "
             "find out later.",
     ),
-    Question(
-        key="max_disk_gb", prompt="Disk budget for weights, in GB (blank for no limit)?",
-        kind="text", default="",
-        why="Caps download size; the largest models are tens of gigabytes.",
-        parse=lambda s: float(s) if s.strip() else None,
-    ),
 ]
 
 

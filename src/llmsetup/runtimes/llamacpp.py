@@ -33,10 +33,21 @@ class LlamaCppRuntime(Runtime):
     label = "llama.cpp"
     uses_gguf = True
 
-    binary = "llama-server"
+    @property
+    def binary(self) -> str:
+        from llmsetup.runtimes.install import managed_binary
+
+        return which("llama-server") or str(managed_binary() or "llama-server")
+
+    def _binary_for(self, config: RuntimeConfig) -> str:
+        if config.extra.get("portable_runtime"):
+            from llmsetup.runtimes.install import managed_binary
+
+            return str(managed_binary() or self.binary)
+        return self.binary
 
     def is_available(self) -> bool:
-        return which(self.binary) is not None
+        return which(self.binary) is not None or Path(self.binary).is_file()
 
     def install_hint(self) -> str:
         return (
@@ -67,7 +78,7 @@ class LlamaCppRuntime(Runtime):
 
     def launch_command(self, spec: ModelSpec, config: RuntimeConfig) -> List[str]:
         cmd = [
-            self.binary,
+            self._binary_for(config),
             "--model", config.model_path or f"<{spec.id}.gguf>",
             "--host", config.host,
             "--port", str(config.port),
@@ -122,7 +133,7 @@ class LlamaCppRuntime(Runtime):
         mlock, part of a model that only just fits can be paged out mid
         generation and the speed collapses.
         """
-        if "--load-mode" in self._flags():
+        if "--load-mode" in self._flags(self._binary_for(config)):
             if config.mlock:
                 return ["--load-mode", "mmap+mlock" if config.mmap else "mlock"]
             return [] if config.mmap else ["--load-mode", "none"]
@@ -133,11 +144,11 @@ class LlamaCppRuntime(Runtime):
             flags.append("--no-mmap")
         return flags
 
-    def _flags(self):
+    def _flags(self, binary: Optional[str] = None):
         """Long flags the installed binary accepts; empty when it cannot be asked."""
         from llmsetup.runtimes.capabilities import supported_flags
 
-        return supported_flags(self.binary)
+        return supported_flags(binary or self.binary)
 
     def _drop_unsupported(self, cmd: List[str]) -> List[str]:
         """Strip anything this build does not know about.
@@ -149,7 +160,7 @@ class LlamaCppRuntime(Runtime):
         """
         from llmsetup.runtimes.capabilities import filter_flags
 
-        return filter_flags(cmd, self._flags(), drop_value=_VALUELESS_FLAGS)
+        return filter_flags(cmd, self._flags(cmd[0]), drop_value=_VALUELESS_FLAGS)
 
     def _speculative_flags(self, plan) -> List[str]:
         """Flags for whichever kind of drafting was planned.
@@ -313,6 +324,7 @@ class LlamaCppRuntime(Runtime):
         log_path = str(ensure_dir(app_dir() / "logs") / f"llamacpp-{config.port}.log")
         cmd = self.launch_command(spec, config)
         console.debug(" ".join(cmd))
+        Path(log_path).write_text("", encoding="utf-8")
         process = spawn(cmd, log_path=log_path)
 
         endpoint = Endpoint(
@@ -335,12 +347,7 @@ class LlamaCppRuntime(Runtime):
         # Large models take a while to load from disk; the wait scales with size.
         timeout = 90 + (Path(config.model_path).stat().st_size / (1024 ** 3) * 12
                         if config.model_path and Path(config.model_path).exists() else 0)
-        if not http.wait_for(ready, timeout=timeout, interval=1.5):
-            self.stop(endpoint)
-            raise RuntimeUnavailable(
-                f"llama-server did not become healthy within {timeout:.0f}s",
-                f"check the log at {log_path}",
-            )
+        self.wait_until_ready(endpoint, ready, timeout=timeout, interval=1.5)
         return endpoint
 
     def config_files(self, spec: ModelSpec, config: RuntimeConfig) -> Dict[str, str]:

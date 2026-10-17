@@ -174,13 +174,15 @@ class TestApi:
             assert memory["kv_gb"] > 0
             assert memory["total_gb"] >= memory["weights_gb"]
 
-    def test_plan_reports_impossible_requirements_instead_of_crashing(self):
+    def test_plan_shortens_oversized_context_and_reports_the_change(self):
         with running_server() as base:
             data = post(base + "/api/plan",
                         {"tasks": ["chat"], "needs_vision": True,
                          "context_tokens": 900_000})
-            assert data.get("error")
-            assert data.get("hint")
+            assert data.get("candidates")
+            assert data["profile"]["context_tokens"] < 900_000
+            assert data["profile"]["needs_vision"]
+            assert any("automatically using" in note for note in data["notes"])
 
     def test_plan_rejects_invalid_answers_with_an_explanation(self):
         with running_server() as base:

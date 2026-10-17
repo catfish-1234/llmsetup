@@ -18,6 +18,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- Setup scans hardware and installed runtimes before asking about goals, with no
+  hardware or disk-size questions. Uncertain probes use conservative defaults
+  and record their assumptions.
+- Planning shortens an oversized context automatically. Setup retries provisioning
+  and server failures, tries compatible installed engines and cached weights,
+  and can install a
+  pinned, checksum-verified user-local llama.cpp CPU fallback. Manual instructions
+  appear after automatic recovery is exhausted.
+
 - Renamed the project from `llmfit` to `llmsetup`, including the distribution,
   Python module, CLI, environment variables, and generated names. The version
   remains 0.1.0 and the GitHub repository URL is unchanged. See the
@@ -38,6 +47,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   ([#7], [#10], [#11], [#12], [#14], [#15])
 
 ### Fixed
+
+- Corrupt managed GGUF weights are quarantined and fetched again; invalid resume
+  responses restart cleanly, and incomplete split models fetch missing shards.
+- Dead server processes fail promptly with log details and cleanup. Model swaps
+  keep reduced context, unclassified blocking failures remain failures, and app
+  registration waits for successful verification.
 
 - Quantization repairs fetch matching weights on the first relaunch; repairs
   that only change settings reuse existing weights. ([#8])

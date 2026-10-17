@@ -213,7 +213,7 @@ def _tensor_split(hardware: HardwareProfile, model_bytes: int = 0) -> List[float
     gpus = hardware.gpus
     if not gpus:
         return []
-    capacities = [float(g.vram_bytes) for g in gpus]
+    capacities = [float(g.available_vram_bytes) for g in gpus]
     total_capacity = sum(capacities)
     if total_capacity <= 0:
         return []
