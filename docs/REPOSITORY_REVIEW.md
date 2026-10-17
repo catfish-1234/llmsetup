@@ -1,9 +1,13 @@
-# Repository review — 2026-10-15
+# Repository review - 2026-10-15
 
 Baseline: `main` at `72efd27707d8b2aeefb9152d981e9e022e5b5d7a`, package
-`llmfit` 0.1.0. Scope: all tracked areas, execution and trust boundaries,
+`llmfit` 0.1.0 (now named `llmsetup`). Scope: all tracked areas, execution and trust boundaries,
 planning/tuning/repair design, CLI and UI, catalog data and automation, tests,
 packaging, workflows, documentation, license, and project identity.
+
+This is a historical review. Code paths below use the current `llmsetup` name;
+findings and test results describe the recorded baseline. See the
+[current naming and migration notes](POSITIONING.md).
 
 ## Baseline evidence
 
@@ -28,7 +32,7 @@ packaging, workflows, documentation, license, and project identity.
 | P1 | Repair | The first quantization repair can keep the old weights because the initially provisioned quant was not recorded. | Record the initial quant and test the first repair's provisioning and unchanged-quant reuse. |
 | P2 | CLI UX | Malformed answer values raise low-level exceptions; string `false` becomes true; JSON output and partial answers can still prompt. Counts accept negative values. | Validate profiles and positive CLI counts; make automation predictable; add catalog-refresh opt-out flag. |
 | P2 | CI and security | Actions use mutable tags; default token permissions are implicit; dispatch strings enter shell source; lint omits scripts; tools float; coverage and built-wheel contents are not gated. | SHA pins, scoped permissions, safe input transport, timeouts, pinned direct tools, coverage, source-security and artifact checks, dependency-update PRs. |
-| P2 | Packaging | Dev extra omits documented Ruff. License metadata uses the deprecated table/classifier form. No NOTICE or module entry point is shipped. | Add Ruff, SPDX metadata and explicit license files, NOTICE, source/issue URLs, and `python -m llmfit`. Keep name and version. |
+| P2 | Packaging | Dev extra omits documented Ruff. License metadata uses the deprecated table/classifier form. No NOTICE or module entry point is shipped. | Add Ruff, SPDX metadata and explicit license files, NOTICE, source/issue URLs, and `python -m llmsetup`. Keep name and version. |
 | P2 | Documentation | README starts with an editable install without cloning and buries practical limits. Contributor examples contain unsupported `--add` and `report --markdown` flags. No security policy or naming guidance exists. | Shorten onboarding, preserve design notes, add runnable examples, security policy, contributor checks, and a naming proposal. |
 
 The core architecture is useful: data classes separate much of the sizing,
@@ -49,10 +53,9 @@ engines retain their own licenses; this review is not a complete provenance or
 legal clearance of every historical contribution.
 
 The [unrelated Rust llmfit project](https://github.com/AlexsJones/llmfit) already
-occupies the same user-facing name and overlaps in functionality. See the
-[positioning proposal](POSITIONING.md): distinguish this repository immediately
-and evaluate a distinct name before public distribution. No rename or registry
-publication is part of this review.
+occupied the former user-facing name and overlaps in functionality. See the
+[naming and migration notes](POSITIONING.md) for the subsequent decision to use
+`llmsetup`. No registry publication was part of this review.
 
 ## Recommended next work, in order
 

@@ -26,10 +26,10 @@ details, endpoint URLs, custom configuration, and server output.
   not trusted code. Use trusted publishers and review custom catalog overlays.
   `safe_load` prevents YAML object construction; it does not prove data is safe.
 - Automatic catalog updates contact the configured source. Disable with
-  `llmfit catalog auto-update --disable` or `LLMFIT_AUTO_UPDATE=0`; an
+  `llmsetup catalog auto-update --disable` or `LLMSETUP_AUTO_UPDATE=0`; an
   `offline_only` profile skips that refresh. Real setup can still download
   weights through an inference engine.
-- An `LLMFIT_CATALOG_URL` or `HF_ENDPOINT` override is a trust decision. Never
+- An `LLMSETUP_CATALOG_URL` or `HF_ENDPOINT` override is a trust decision. Never
   embed credentials in URLs. Set `HF_TOKEN` only for a publisher or mirror you
   trust, and grant the minimum read access needed.
 - Engines run as your user. Keep them updated, bind endpoints to loopback,

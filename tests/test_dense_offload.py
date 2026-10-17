@@ -5,7 +5,7 @@ accelerator, which costs an order of magnitude because a dropped layer takes
 its attention to the CPU along with its weights. Attention is the half that
 wants to be near the cache. Moving only the feed-forward weights frees
 comparable memory for a fraction of the cost, which is the same argument that
-makes expert offload worth doing on a mixture of experts, and llmfit was making
+makes expert offload worth doing on a mixture of experts, and llmsetup was making
 it in only one of the two places.
 """
 
@@ -16,12 +16,12 @@ import dataclasses
 import pytest
 from conftest import make_hardware
 
-from llmfit.planner.memory import estimate_memory
-from llmfit.planner.moe import DENSE_FFN_FRACTION, dense_ffn_layers_to_offload
-from llmfit.planner.plan import build_plan
-from llmfit.runtimes.llamacpp import LlamaCppRuntime
-from llmfit.tuning.tuner import tune
-from llmfit.types import GIB, ModelSpec, Task, UseCaseProfile
+from llmsetup.planner.memory import estimate_memory
+from llmsetup.planner.moe import DENSE_FFN_FRACTION, dense_ffn_layers_to_offload
+from llmsetup.planner.plan import build_plan
+from llmsetup.runtimes.llamacpp import LlamaCppRuntime
+from llmsetup.tuning.tuner import tune
+from llmsetup.types import GIB, ModelSpec, Task, UseCaseProfile
 
 
 def dense(**kwargs) -> ModelSpec:
@@ -149,7 +149,7 @@ class TestThreadsAndNuma:
         assert self._config(catalog, cores=8, vram_gb=0).numa is None
 
     def test_numa_is_never_set_on_apple(self, catalog):
-        from llmfit.types import Accelerator
+        from llmsetup.types import Accelerator
 
         hardware = make_hardware(vram_gb=64, ram_gb=64, cores=16,
                                  vendor=Accelerator.APPLE, unified=True)

@@ -8,9 +8,9 @@ import json
 import pytest
 from conftest import make_hardware
 
-from llmfit.types import CheckStatus, Severity, Task, UseCaseProfile
-from llmfit.verify import signatures as sig
-from llmfit.verify.checks import (
+from llmsetup.types import CheckStatus, Severity, Task, UseCaseProfile
+from llmsetup.verify import signatures as sig
+from llmsetup.verify.checks import (
     CheckContext,
     _extract_json,
     _repetition_ratio,
@@ -22,8 +22,8 @@ from llmfit.verify.checks import (
     check_json,
     check_tools,
 )
-from llmfit.verify.client import ChatResult
-from llmfit.verify.harness import select_checks
+from llmsetup.verify.client import ChatResult
+from llmsetup.verify.harness import select_checks
 
 
 class TestSignatures:
@@ -117,7 +117,7 @@ class FakeClient:
 
 
 def context(client, catalog, profile=None, model="qwen3-8b"):
-    from llmfit.types import RuntimeConfig
+    from llmsetup.types import RuntimeConfig
 
     spec = catalog.require(model)
     return CheckContext(

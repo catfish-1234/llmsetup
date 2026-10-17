@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from conftest import make_hardware
 
-from llmfit.planner.plan import build_plan
-from llmfit.tuning.sampling import sampling_for
-from llmfit.tuning.tuner import tune
-from llmfit.types import Task, UseCaseProfile
+from llmsetup.planner.plan import build_plan
+from llmsetup.tuning.sampling import sampling_for
+from llmsetup.tuning.tuner import tune
+from llmsetup.types import Task, UseCaseProfile
 
 
 def plan_and_tune(catalog, hardware, profile, runtime="llamacpp"):

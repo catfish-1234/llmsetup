@@ -13,7 +13,7 @@ from __future__ import annotations
 import pytest
 from conftest import make_hardware
 
-from llmfit.planner.memory import (
+from llmsetup.planner.memory import (
     KV_LOSSY_CONTEXT_LIMIT,
     KV_QUALITY_ORDER,
     KV_SAFE_FLOOR,
@@ -21,10 +21,10 @@ from llmfit.planner.memory import (
     kv_is_lossy,
     kv_lossy_allowed,
 )
-from llmfit.planner.plan import build_plan
-from llmfit.repair.strategies import RepairState, _quantize_kv, _quantize_kv_lossy
-from llmfit.tuning.tuner import tune
-from llmfit.types import GIB, Priority, Task, UseCaseProfile
+from llmsetup.planner.plan import build_plan
+from llmsetup.repair.strategies import RepairState, _quantize_kv, _quantize_kv_lossy
+from llmsetup.tuning.tuner import tune
+from llmsetup.types import GIB, Priority, Task, UseCaseProfile
 
 
 def state(catalog, hardware, **overrides):
@@ -132,7 +132,7 @@ class TestRepair:
         assert _quantize_kv_lossy(st) is None
 
     def test_the_two_strategies_are_ordered_by_what_they_cost(self):
-        from llmfit.repair.strategies import COST_ORDER, STRATEGIES
+        from llmsetup.repair.strategies import COST_ORDER, STRATEGIES
 
         named = {s.name: s for s in STRATEGIES}
         assert (COST_ORDER[named["quantize_kv_cache"].cost]
@@ -140,8 +140,8 @@ class TestRepair:
 
     def test_the_loop_exhausts_the_cheap_cache_before_the_lossy_one(self, catalog):
         """Ordering is the whole point: a free saving must be spent first."""
-        from llmfit.repair.strategies import COST_ORDER, strategies_for
-        from llmfit.verify import signatures as sig
+        from llmsetup.repair.strategies import COST_ORDER, strategies_for
+        from llmsetup.verify import signatures as sig
 
         names = [s.name for s in sorted(strategies_for(sig.OUT_OF_MEMORY),
                                         key=lambda s: COST_ORDER[s.cost])]
@@ -152,8 +152,8 @@ class TestRepair:
 class TestBudgetArithmeticStillHolds:
     def test_a_lossy_cache_really_is_smaller(self):
         """The floor exists because the saving is real -- not because it isn't."""
-        from llmfit.planner.memory import kv_bytes_per_token
-        from llmfit.types import ModelSpec
+        from llmsetup.planner.memory import kv_bytes_per_token
+        from llmsetup.types import ModelSpec
 
         model = ModelSpec(id="t", name="T", publisher="p", params_b=8.0, layers=32,
                           hidden_size=4096, kv_heads=8, head_dim=128,
