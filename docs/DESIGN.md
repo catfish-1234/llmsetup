@@ -58,11 +58,15 @@ Let's work out what you need.
 
 ## Design
 
+Detection runs before any goal questions. Hardware specs are never interview
+questions. See [automatic setup and recovery](AUTOMATIC_SETUP.md) for current
+recovery behavior and limits.
+
 Seven stages, each a transformation between plain dataclasses:
 
 ```
-interview → detect → plan → tune → provision → verify ⇄ repair → interop
-(what for?) (what on?) (what?) (how?)  (install)   (does it?)      (everywhere)
+detect → interview → plan → tune → provision → verify ⇄ repair → interop
+(automatic) (goals only) (what?) (how?)  (install)   (does it?)      (everywhere)
 ```
 
 The parts that make decisions (fit maths, tuning, failure diagnosis) are pure

@@ -31,7 +31,11 @@ def detect_gpus() -> Tuple[List[GPU], List[str]]:
         return gpus, warnings
 
     for probe in (detect_nvidia, detect_amd, detect_intel):
-        found, warn = probe()
+        try:
+            found, warn = probe()
+        except Exception as exc:
+            warnings.append(f"{probe.__name__} failed ({exc}); continuing other GPU probes")
+            continue
         gpus.extend(found)
         warnings.extend(warn)
 

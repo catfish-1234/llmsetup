@@ -1,20 +1,20 @@
-"""End-to-end orchestration: interview → detect → plan → tune → provision →
-verify → repair → register.
+"""Orchestrate detected hardware and goals through planning, setup, and recovery.
 
-This module owns the wiring only. Every decision belongs to the stage that makes
-it; if you find logic here that decides something, it is in the wrong place.
+Pure model decisions stay in the planner and tuner. This module bounds retries,
+tries runtime alternatives, and registers only verified configurations.
 """
 
 from __future__ import annotations
 
 import datetime
+from dataclasses import replace
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from llmsetup.catalog.catalog import Catalog
 from llmsetup.gguf import apply_to_spec, read_gguf_info
 from llmsetup.interop.export import register_everywhere
-from llmsetup.planner.plan import build_plan, plan_embedding_model
+from llmsetup.planner.plan import build_adaptive_plan, plan_embedding_model
 from llmsetup.repair.loop import RepairLoop, mark_resolved
 from llmsetup.repair.strategies import RepairState
 from llmsetup.runtimes.base import Endpoint, Runtime, RuntimeUnavailable
@@ -26,13 +26,14 @@ from llmsetup.types import (
     CheckStatus,
     HardwareProfile,
     ModelSpec,
+    RepairAction,
     RuntimeConfig,
     SetupResult,
     Severity,
     Task,
     UseCaseProfile,
 )
-from llmsetup.util.errors import LlmsetupError
+from llmsetup.util.errors import LlmsetupError, PlanningError
 from llmsetup.util.log import Console
 from llmsetup.verify import signatures as sig
 from llmsetup.verify.client import OpenAIClient
@@ -61,11 +62,107 @@ class Pipeline:
     # ------------------------------------------------------------------ run
 
     def run(self) -> SetupResult:
+        """Try the selected engine, compatible installed alternatives, then a CPU fallback."""
+        if self.dry_run or self.max_repairs == 0:
+            return self._run_once()
+        from llmsetup.runtimes.install import managed_binary
+        from llmsetup.runtimes.registry import recovery_order
+
+        original_hardware, original_profile = self.hardware, self.profile
+        requested_runtime = self.runtime_name
+        self._remaining_repairs = self.max_repairs
+        queue = [(requested_runtime, "auto")]
+        tried: Set[Tuple[Optional[str], str]] = set()
+        journal: List[RepairAction] = []
+        errors: List[str] = []
+        last_result = None
+        while queue:
+            name, mode = queue.pop(0)
+            cpu_only = mode != "auto"
+            self.shutdown()
+            self._runtime = None
+            self.hardware = (replace(original_hardware, gpus=[], unified_memory=False)
+                             if cpu_only else original_hardware)
+            self.profile = original_profile
+            self.runtime_name = name
+            self._portable_cpu = mode == "portable"
+            try:
+                if cpu_only:
+                    build_adaptive_plan(self.profile, self.hardware, self.catalog, runtime="llamacpp")
+                    # The portable Linux/Windows build is CPU-only. Replan for
+                    # RAM rather than claiming to use the detected GPU.
+                    if self._portable_cpu and managed_binary(self.hardware) is None:
+                        self._install_cpu_runtime()
+                    journal.append(RepairAction(
+                        strategy="portable_cpu_runtime" if self._portable_cpu else "cpu_runtime",
+                        trigger="health: runtime_unavailable",
+                        description=("using verified user-local llama.cpp on CPU" if self._portable_cpu
+                                     else "replanning for CPU with installed llama.cpp"), cost="high",
+                    ))
+                result = self._run_once()
+                last_result = result
+                tried.add((result.plan.runtime, mode))
+                if not any(check.blocking for check in result.checks):
+                    result.hardware = original_hardware
+                    result.repairs = journal + result.repairs
+                    mark_resolved(result.repairs, result.checks)
+                    if journal:
+                        result.plan.notes.append("automatic recovery tried other runtime or CPU paths; see repairs")
+                    return result
+                journal.extend(result.repairs)
+                errors.extend(f"{result.plan.runtime}: {check.message}"
+                              for check in result.checks if check.blocking)
+            except PlanningError as exc:
+                if last_result is None:
+                    raise
+                errors.append(exc.message)
+            except (LlmsetupError, RuntimeUnavailable, OSError) as exc:
+                actual = self._runtime.name if self._runtime else name
+                tried.add((actual, mode))
+                message = exc.message if isinstance(exc, LlmsetupError) else str(exc)
+                errors.append(f"{actual or 'planning'}: {message}")
+                self.console.info(f"automatic recovery: {message}")
+            if not queue and mode == "auto":
+                installed = recovery_order(original_hardware, original_profile)
+                alternatives = [(engine, "auto") for engine in installed]
+                if "llamacpp" in installed and original_hardware.gpus:
+                    alternatives.append(("llamacpp", "cpu"))
+                # Try an existing CPU engine before fetching another executable.
+                alternatives.append(("llamacpp", "portable"))
+                queue = [item for item in dict.fromkeys(alternatives) if item not in tried]
+            if queue:
+                journal.append(RepairAction(
+                    strategy="runtime_fallback", trigger="health: runtime_unavailable",
+                    description=f"trying {queue[0][0]}{' on CPU' if queue[0][1] != 'auto' else ''} after the previous attempt failed",
+                    cost="high",
+                ))
+        detail = "; ".join(dict.fromkeys(errors))
+        hint = "Automatic recovery exhausted. " + detail + ". " + _recovery_instructions(detail)
+        self.console.warn(hint)
+        if last_result is None:
+            raise LlmsetupError("setup could not provision a supported runtime and model", hint=hint)
+        last_result.hardware = original_hardware
+        last_result.repairs = journal
+        last_result.plan.notes.append(hint)
+        for check in last_result.checks:
+            if check.blocking:
+                check.detail = hint
+        return last_result
+
+    def _install_cpu_runtime(self) -> None:
+        from llmsetup.runtimes.install import install_llamacpp
+
+        install_llamacpp(self.hardware, self.console)
+
+    def _run_once(self) -> SetupResult:
         started = _now()
 
         self.console.step("Planning")
-        plan = build_plan(self.profile, self.hardware, self.catalog,
+        plan = build_adaptive_plan(self.profile, self.hardware, self.catalog,
                           runtime=self.runtime_name)
+        assert plan.profile is not None
+        self.profile = plan.profile
+        self.hardware = plan.hardware or self.hardware
         candidate = plan.best
         assert candidate is not None
         self.console.ok(
@@ -81,6 +178,8 @@ class Pipeline:
         tuned = tune(candidate, self.hardware, self.profile, plan.runtime,
                      catalog=self.catalog)
         config = tuned.config
+        if getattr(self, "_portable_cpu", False):
+            config.extra["portable_runtime"] = True
         for line in tuned.explain():
             self.console.info(self.console.dim(line))
 
@@ -100,7 +199,7 @@ class Pipeline:
         ]
         for action in result.platform_actions:
             if not action["optional"]:
-                self.console.warn(f"{action['title']}: {action['command']}")
+                self.console.info(f"{action['title']}: trying runtime settings with current OS limits")
         if self.dry_run:
             self.console.info("--dry-run: stopping before download and launch")
             result.finished_at = _now()
@@ -114,21 +213,18 @@ class Pipeline:
                 f"{runtime.label} is not installed",
                 hint=runtime.install_hint(),
             )
-        config = runtime.ensure_model(candidate.model, config, self.console)
-        # Repairs compare against the weights actually provisioned, including
-        # the very first repair. Defaulting to the repaired quant skips its fetch.
-        self._provisioned_quant = config.quant
-        self._ensure_draft_model(runtime, config)
+        checks = self._provision(candidate.model, config)
+        if not checks:
+            self._ensure_draft_model(runtime, config)
+            self._correct_from_gguf(candidate, config, plan)
 
-        # Ground truth beats the catalog: correct the plan from the real file.
-        self._correct_from_gguf(candidate, config, plan)
-
-        if self.sweep and runtime.uses_gguf:
+        if not checks and self.sweep and runtime.uses_gguf:
             self.console.step("Measuring settings on this machine")
             result.sweep = self._sweep_settings(candidate, config)
 
-        self.console.step("Starting the server")
-        checks = self._launch_and_check(candidate.model, config, None)
+        if not checks:
+            self.console.step("Starting the server")
+            checks = self._launch_and_check(candidate.model, config, None)
 
         if any(c.blocking for c in checks):
             self.console.step("Repairing")
@@ -138,20 +234,22 @@ class Pipeline:
                 fallbacks=list(plan.fallbacks), console=self.console,
             )
             loop = RepairLoop(state=state, relaunch=self._relaunch,
-                              console=self.console, max_repairs=self.max_repairs)
+                              console=self.console, max_repairs=getattr(self, "_remaining_repairs", self.max_repairs))
             checks, journal = loop.run(checks)
             mark_resolved(journal, checks)
             result.repairs = journal
+            self._remaining_repairs = max(0, getattr(self, "_remaining_repairs", self.max_repairs) - len(journal))
             # The loop may have swapped model or settings.
             config = state.config
             candidate = state.candidate
             plan.candidates = [candidate] + [c for c in plan.candidates
                                              if c.label != candidate.label]
 
+        self._recompute_estimate(candidate, config)
         result.config = config
         result.checks = checks
 
-        if self.register:
+        if self.register and result.succeeded:
             self.console.step("Registering with your other apps")
             gguf_path = runtime.local_model_path(candidate.model, config)
             result.registrations = register_everywhere(
@@ -161,7 +259,7 @@ class Pipeline:
 
         # A RAG setup is only half-built without a retriever, so this runs after
         # the chat model is verified rather than being left as advice.
-        if self.profile.needs_embeddings or Task.RAG in self.profile.tasks:
+        if result.succeeded and (self.profile.needs_embeddings or Task.RAG in self.profile.tasks):
             self.console.step("Setting up the embedding model for retrieval")
             result.embedding = self._setup_embedding(runtime)
 
@@ -210,6 +308,18 @@ class Pipeline:
     # ------------------------------------------------------------- embedding
 
     def _setup_embedding(self, runtime: Runtime) -> Dict[str, Any]:
+        attempts = 2 if self.max_repairs else 1
+        for attempt in range(attempts):
+            record = self._setup_embedding_once(runtime, conservative=bool(attempt))
+            if record.get("ok"):
+                return record
+            if attempt + 1 < attempts:
+                self.console.info("retriever setup failed; retrying with shorter context on CPU")
+        record["reason"] = record.get("reason") or "embedding verification failed"
+        record["hint"] = "See the retriever checks and server log in `llmsetup report`; chat verification is separate."
+        return record
+
+    def _setup_embedding_once(self, runtime: Runtime, *, conservative: bool = False) -> Dict[str, Any]:
         """Provision and verify the companion retriever.
 
         Deliberately non-fatal: a working chat model with a broken retriever is
@@ -231,22 +341,24 @@ class Pipeline:
             quant=quant,
             # Embedding models are small and the window is the document chunk
             # size; there is nothing to gain from a larger one.
-            context_tokens=min(spec.max_context, 8192),
+            context_tokens=min(spec.max_context, 2048 if conservative else 8192),
             total_layers=spec.layers,
-            gpu_layers=spec.layers if self.hardware.gpus else 0,
+            gpu_layers=spec.layers if self.hardware.gpus and not conservative else 0,
             batch_size=512,
             ubatch_size=512,
             port=self._free_port(),
             served_name=spec.id,
-            extra={"llamacpp_flags": ["--embeddings", "--pooling", "mean"]},
+            extra={"llamacpp_flags": ["--embeddings", "--pooling", "mean"],
+                   "portable_runtime": getattr(self, "_portable_cpu", False)},
         )
 
         try:
             config = runtime.ensure_model(spec, config, self.console)
             endpoint = runtime.start(spec, config, self.console)
-        except (RuntimeUnavailable, LlmsetupError) as exc:
-            self.console.warn(f"could not start the embedding model: {exc}")
-            return {**record, "ok": False, "reason": str(exc)}
+        except (RuntimeUnavailable, LlmsetupError, OSError) as exc:
+            message = exc.message if isinstance(exc, LlmsetupError) else str(exc)
+            self.console.info(f"could not start the embedding model: {message}")
+            return {**record, "ok": False, "reason": message}
 
         try:
             harness = Harness(
@@ -371,13 +483,13 @@ class Pipeline:
 
         try:
             endpoint = self._runtime.start(spec, config, self.console)
-        except RuntimeUnavailable as exc:
+        except (RuntimeUnavailable, OSError) as exc:
             # A failed launch is a check failure, so repair can act on it rather
             # than the whole run aborting.
             return [CheckResult(
                 name="health", status=CheckStatus.FAIL, severity=Severity.CRITICAL,
                 message=str(exc),
-                failure_signature=sig.classify(str(exc)) or sig.CRASH_DURING_LOAD,
+                failure_signature=sig.classify(str(exc)) or sig.SERVER_UNREACHABLE,
                 detail=getattr(exc, "install_hint", "") or "",
             )]
         self._endpoint = endpoint
@@ -387,7 +499,10 @@ class Pipeline:
             profile=self.profile, hardware=self.hardware, console=self.console,
             server_log=endpoint.log_path,
         )
-        chosen = list(names) if names else select_checks(self.profile, spec, self.quick)
+        # RAG's embedding capability is proved on the separate retriever, not
+        # on the chat model, which generally has no embedding endpoint.
+        check_profile = replace(self.profile, needs_embeddings=False) if not spec.is_embedding else self.profile
+        chosen = list(names) if names else select_checks(check_profile, spec, self.quick)
         return harness.run(chosen)
 
     def _relaunch(self, config: RuntimeConfig,
@@ -395,11 +510,36 @@ class Pipeline:
         """Callback handed to the repair loop."""
         assert self._runtime is not None
         spec = self._current_spec(config)
-        if not config.model_path or config.quant != getattr(
-                self, "_provisioned_quant", config.quant):
-            config = self._runtime.ensure_model(spec, config, self.console)
-        self._provisioned_quant = config.quant
+        if (not config.model_path or
+                (self._runtime.uses_gguf and not Path(config.model_path).exists()) or
+                (config.model_id, config.quant) != getattr(self, "_provisioned", None)):
+            failures = self._provision(spec, config)
+            if failures:
+                return failures
         return self._launch_and_check(spec, config, names)
+
+    def _provision(self, spec: ModelSpec, config: RuntimeConfig) -> List[CheckResult]:
+        assert self._runtime is not None
+        attempts = 2 if self.max_repairs else 1
+        for attempt in range(attempts):
+            try:
+                updated = self._runtime.ensure_model(spec, config, self.console)
+                if updated is not config:
+                    config.__dict__.update(updated.__dict__)
+                self._provisioned = (config.model_id, config.quant)
+                return []
+            except (LlmsetupError, RuntimeUnavailable, OSError) as exc:
+                message = exc.message if isinstance(exc, LlmsetupError) else str(exc)
+                if attempt + 1 < attempts:
+                    self.console.info(f"provisioning failed ({message}); retrying once")
+                    continue
+                return [CheckResult(
+                    name="health", status=CheckStatus.FAIL, severity=Severity.CRITICAL,
+                    message=message, failure_signature=(sig.DOWNLOAD_UNAVAILABLE
+                        if sig.classify(message) == sig.DOWNLOAD_UNAVAILABLE else sig.PROVISION_FAILED),
+                    detail=getattr(exc, "hint", "") or getattr(exc, "install_hint", "") or "",
+                )]
+        return []
 
     def _current_spec(self, config: RuntimeConfig) -> ModelSpec:
         return self.catalog.require(config.model_id)
@@ -425,3 +565,21 @@ def companion_embedding_plan(profile: UseCaseProfile, hardware: HardwareProfile,
 
 def _now() -> str:
     return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
+
+
+def _recovery_instructions(detail: str) -> str:
+    """Give the relevant next step only after automatic alternatives are exhausted."""
+    text = detail.lower()
+    if any(word in text for word in ("network", "blocked", "could not reach", "urlopen", "name resolution", "http 403")):
+        return ("Allow HTTPS to huggingface.co and github.com, including their download hosts, "
+                "then rerun `llmsetup setup`. For a blocked Hub, set HF_ENDPOINT to a reachable trusted mirror.")
+    if "gated" in text or "licence" in text or "http 401" in text:
+        return "Accept the model licence on Hugging Face, set HF_TOKEN with read access, then rerun `llmsetup setup`."
+    if "space" in text or "disk" in text:
+        return "Free space on the model-store volume, or set LLMSETUP_MODEL_STORE to a volume with room, then rerun `llmsetup setup`."
+    if "memory" in text or "allocate" in text:
+        return "Close memory-heavy apps and rerun `llmsetup setup`. If no catalog model fits, use a machine with more available RAM."
+    if "portable" in text or "install" in text or "not found" in text:
+        return ("Install llama-server for this OS and CPU from https://github.com/ggml-org/llama.cpp, "
+                "make it available on PATH, then rerun `llmsetup setup`.")
+    return "Open `llmsetup report`, inspect the named failed check and its server log, then run `llmsetup doctor` after correcting that failure."

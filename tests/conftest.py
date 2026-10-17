@@ -86,3 +86,15 @@ def coding_profile():
     return UseCaseProfile(tasks=[Task.CODING, Task.AGENT], needs_tools=True,
                           context_tokens=32768, priority=Priority.BALANCED,
                           commercial_use=True)
+
+
+@pytest.fixture(autouse=True)
+def no_runtime_downloads(monkeypatch):
+    """Recovery tests opt into a fake installer; the suite never fetches executables."""
+    from llmsetup.pipeline import Pipeline
+    from llmsetup.util.errors import ProvisionError
+
+    def blocked(self):
+        raise ProvisionError("runtime downloads disabled in offline tests")
+
+    monkeypatch.setattr(Pipeline, "_install_cpu_runtime", blocked)

@@ -182,9 +182,10 @@ class Handler(BaseHTTPRequestHandler):
     def _runtimes(self) -> Dict[str, Any]:
         from llmsetup.runtimes.registry import all_runtimes
 
+        inventory = self._hardware()["runtime_availability"]
         rows = []
         for runtime in all_runtimes():
-            available = runtime.is_available()
+            available = inventory.get(runtime.name, False)
             rows.append({
                 "name": runtime.name, "label": runtime.label,
                 "available": available,
@@ -214,7 +215,7 @@ class Handler(BaseHTTPRequestHandler):
         from llmsetup.catalog.catalog import load_catalog
         from llmsetup.interview.questions import infer_flags
         from llmsetup.interview.wizard import profile_from_answers
-        from llmsetup.planner.plan import build_plan, plan_embedding_model
+        from llmsetup.planner.plan import build_adaptive_plan, plan_embedding_model
         from llmsetup.planner.score import explain
         from llmsetup.util.errors import LlmsetupError
 
@@ -228,10 +229,11 @@ class Handler(BaseHTTPRequestHandler):
 
         try:
             catalog = load_catalog()
-            plan = build_plan(profile, hardware, catalog)
+            plan = build_adaptive_plan(profile, hardware, catalog)
         except LlmsetupError as exc:
             return {"error": exc.message, "hint": exc.hint}
 
+        profile = plan.profile or profile
         embedder = plan_embedding_model(profile, hardware, catalog)
         return {
             "runtime": plan.runtime,

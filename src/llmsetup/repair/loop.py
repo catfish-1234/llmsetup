@@ -5,11 +5,10 @@ everything the user needs passes or every applicable strategy is exhausted.
 
 Three rules keep it from thrashing:
 
-1. **Monotonic de-escalation.** Each (signature, strategy) pair is tried at most
-   once, and strategies are ordered by cost, so the loop always moves toward
-   more drastic measures and never returns to a setting that already failed.
-   This alone guarantees termination: the number of moves is bounded by the size
-   of the strategy table.
+1. **Finite progress.** Each (signature, strategy) pair is tried at most once,
+   except strategies that consume a finite list or strictly reduce a setting.
+   Context does not grow again during a model switch. Strategies are ordered
+   by cost so cheaper fixes run first.
 2. **Bounded.** ``max_repairs`` caps total work on top of that, so a pathological
    machine produces a reported outcome rather than a long hang. There is
    deliberately no per-signature cap, a hard memory limit legitimately needs to
@@ -21,11 +20,13 @@ Three rules keep it from thrashing:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Callable, List, Optional, Sequence, Set, Tuple
 
 from llmsetup.repair.strategies import Outcome, RepairState, strategies_for
-from llmsetup.types import CheckResult, CheckStatus, RepairAction, RuntimeConfig
+from llmsetup.runtimes.base import RuntimeUnavailable
+from llmsetup.types import CheckResult, CheckStatus, RepairAction, RuntimeConfig, Severity
+from llmsetup.util.errors import LlmsetupError
 from llmsetup.util.log import Console
 from llmsetup.verify import signatures as sig
 
@@ -65,7 +66,7 @@ class RepairLoop:
                 # Every rung of the ladder for this signature has been tried.
                 self.console.warn(
                     f"every available fix for {signature} has been tried; "
-                    f"leaving the setup at its last working state"
+                    f"required checks still fail"
                 )
                 return results, self.journal
 
@@ -78,7 +79,7 @@ class RepairLoop:
 
     def _blocking(self, results: List[CheckResult]) -> List[CheckResult]:
         """Failures worth repairing, most severe first."""
-        blocking = [r for r in results if r.blocking and r.failure_signature]
+        blocking = [r for r in results if r.blocking]
         # A WARN carrying a signature is repairable too, but only after real
         # failures are gone.
         warnings = [r for r in results
@@ -93,7 +94,12 @@ class RepairLoop:
                 continue
             self._tried.add(key)
 
-            outcome = strategy.apply(self.state)
+            try:
+                outcome = strategy.apply(self.state)
+            except (LlmsetupError, RuntimeUnavailable, OSError) as exc:
+                message = exc.message if isinstance(exc, LlmsetupError) else str(exc)
+                self.console.info(f"{strategy.name} failed: {message}; trying the next repair")
+                continue
             if outcome is None:
                 self.console.debug(f"strategy {strategy.name} does not apply here")
                 continue
@@ -124,14 +130,16 @@ class RepairLoop:
         new_candidate = outcome.switch_to
         assert new_candidate is not None
         tuned = tune(
-            new_candidate, self.state.hardware, self.state.profile,
+            new_candidate, self.state.hardware,
+            replace(self.state.profile, context_tokens=min(self.state.profile.context_tokens,
+                                                          self.state.config.context_tokens)),
             self.state.config.runtime, port=self.state.config.port,
             catalog=self.state.catalog,
         )
         # Preserve the shrunken budget: whatever forced the switch still applies.
         tuned.config.extra.update({
             k: v for k, v in self.state.config.extra.items()
-            if k in ("ollama_port", "lmstudio_port")
+            if k in ("ollama_port", "lmstudio_port", "portable_runtime")
         })
         self.state.candidate = new_candidate
         self.state.config = tuned.config
@@ -144,7 +152,15 @@ class RepairLoop:
         everything, because those change the whole picture.
         """
         names = list(outcome.recheck) if outcome.recheck else None
-        fresh = self.relaunch(self.state.config, names)
+        try:
+            fresh = self.relaunch(self.state.config, names)
+        except (LlmsetupError, RuntimeUnavailable, OSError) as exc:
+            message = exc.message if isinstance(exc, LlmsetupError) else str(exc)
+            fresh = [CheckResult(
+                name="health", status=CheckStatus.FAIL, severity=Severity.CRITICAL,
+                message=message, failure_signature=sig.classify(message) or sig.PROVISION_FAILED,
+            )]
+            names = None
 
         if names is None:
             return fresh
@@ -173,5 +189,4 @@ def mark_resolved(journal: List[RepairAction], results: List[CheckResult]) -> No
         if current is None:
             action.resolved = None
         else:
-            action.resolved = current in (CheckStatus.PASS, CheckStatus.SKIP,
-                                          CheckStatus.WARN)
+            action.resolved = current in (CheckStatus.PASS, CheckStatus.WARN)
