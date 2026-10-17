@@ -1,6 +1,6 @@
 """Measuring settings on the machine instead of predicting them.
 
-The rest of llmfit computes. This part runs the thing and looks, which is what
+The rest of llmsetup computes. This part runs the thing and looks, which is what
 an experienced person does and what a formula cannot: no amount of arithmetic
 recovers the fact that a particular card, on a particular driver, processes
 prompts fastest at four times the default micro-batch.
@@ -17,7 +17,7 @@ import json
 
 import pytest
 
-from llmfit.bench import (
+from llmsetup.bench import (
     BenchRow,
     SweepCandidate,
     apply_sweep,
@@ -27,8 +27,8 @@ from llmfit.bench import (
     prefill_weight,
     score_rows,
 )
-from llmfit.bench.sweep import bench_command, estimate_duration_s, run_sweep
-from llmfit.types import GIB, ModelSpec, RuntimeConfig, Task, UseCaseProfile
+from llmsetup.bench.sweep import bench_command, estimate_duration_s, run_sweep
+from llmsetup.types import GIB, ModelSpec, RuntimeConfig, Task, UseCaseProfile
 
 
 def spec(**kwargs) -> ModelSpec:
@@ -77,7 +77,7 @@ class TestWhatGetsMeasured:
         """A larger micro-batch buys throughput with compute-buffer memory, and
         finding that out by running out of memory mid-sweep is a poor way to
         learn it."""
-        from llmfit.planner.memory import estimate_memory
+        from llmsetup.planner.memory import estimate_memory
 
         cfg = config(context_tokens=32768)
         budget = int(10 * GIB)
@@ -264,7 +264,7 @@ class TestRunning:
         ok = warn = debug = info
 
     def test_a_missing_benchmark_binary_is_reported_not_crashed(self, monkeypatch):
-        from llmfit.util import proc
+        from llmsetup.util import proc
 
         monkeypatch.setattr(proc, "which", lambda _b: None)
         result = run_sweep(spec(), config(model_path="/m.gguf"),
@@ -274,7 +274,7 @@ class TestRunning:
         assert "not installed" in result.rationale
 
     def test_weights_not_on_disk_means_nothing_to_measure(self, monkeypatch):
-        from llmfit.util import proc
+        from llmsetup.util import proc
 
         monkeypatch.setattr(proc, "which", lambda _b: "/usr/bin/llama-bench")
         result = run_sweep(spec(), config(), UseCaseProfile(tasks=[Task.CHAT]),
@@ -283,7 +283,7 @@ class TestRunning:
         assert "not on disk" in result.rationale
 
     def test_a_failed_benchmark_leaves_the_plan_alone(self, monkeypatch):
-        from llmfit.util import proc
+        from llmsetup.util import proc
 
         class Failed:
             ok = False

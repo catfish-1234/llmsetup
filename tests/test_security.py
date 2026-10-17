@@ -12,13 +12,13 @@ from pathlib import Path
 
 import pytest
 
-from llmfit.download import RemoteFile, validate_repo
-from llmfit.gguf import read_gguf_info
-from llmfit.interop import jan, lmstudio
-from llmfit.runtimes.gguf_store import store_path
-from llmfit.types import ModelSpec, RuntimeConfig
-from llmfit.util.errors import ProvisionError
-from llmfit.util.fs import app_dir, link_or_copy, model_store, safe_component, safe_subpath
+from llmsetup.download import RemoteFile, validate_repo
+from llmsetup.gguf import read_gguf_info
+from llmsetup.interop import jan, lmstudio
+from llmsetup.runtimes.gguf_store import store_path
+from llmsetup.types import ModelSpec, RuntimeConfig
+from llmsetup.util.errors import ProvisionError
+from llmsetup.util.fs import app_dir, link_or_copy, model_store, safe_component, safe_subpath
 
 TRAVERSALS = [
     "../../../../tmp/pwned",

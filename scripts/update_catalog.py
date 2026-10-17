@@ -26,9 +26,9 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 
 import yaml  # noqa: E402
 
-from llmfit.catalog.catalog import BUNDLED, load_catalog  # noqa: E402
-from llmfit.catalog.discover import discover  # noqa: E402
-from llmfit.util.log import Console  # noqa: E402
+from llmsetup.catalog.catalog import BUNDLED, load_catalog  # noqa: E402
+from llmsetup.catalog.discover import discover  # noqa: E402
+from llmsetup.util.log import Console  # noqa: E402
 
 
 def main() -> int:
@@ -106,8 +106,8 @@ def validate(text: str, console: Console, new_ids: List[str]) -> bool:
     """
     import tempfile
 
-    from llmfit.planner.plan import build_plan
-    from llmfit.types import GIB, GPU, Accelerator, HardwareProfile, Task, UseCaseProfile
+    from llmsetup.planner.plan import build_plan
+    from llmsetup.types import GIB, GPU, Accelerator, HardwareProfile, Task, UseCaseProfile
 
     with tempfile.TemporaryDirectory() as directory:
         path = Path(directory) / "candidate.yaml"
@@ -176,7 +176,7 @@ def _append_entries(original: str, entries: List[Dict[str, Any]]) -> str:
     separator = "" if updated.endswith("\n") else "\n"
     return (updated + separator
             + "\n  # ---------------------------------------- added "
-            + f"{datetime.date.today().isoformat()} by `llmfit catalog refresh`\n"
+            + f"{datetime.date.today().isoformat()} by `llmsetup catalog refresh`\n"
             + block + "\n")
 
 

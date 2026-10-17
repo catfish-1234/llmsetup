@@ -1,6 +1,6 @@
 """Companion embedding model provisioning.
 
-A RAG setup is half-built without a retriever. Before this, `llmfit plan` told
+A RAG setup is half-built without a retriever. Before this, `llmsetup plan` told
 users "a separate embedding model is needed" and `setup` never provided one,
 these tests hold that gap shut.
 """
@@ -12,9 +12,9 @@ from typing import List
 import pytest
 from conftest import make_hardware
 
-from llmfit.pipeline import Pipeline
-from llmfit.runtimes.base import Endpoint, Runtime, RuntimeUnavailable
-from llmfit.types import (
+from llmsetup.pipeline import Pipeline
+from llmsetup.runtimes.base import Endpoint, Runtime, RuntimeUnavailable
+from llmsetup.types import (
     CheckResult,
     CheckStatus,
     RuntimeConfig,
@@ -22,7 +22,7 @@ from llmfit.types import (
     Task,
     UseCaseProfile,
 )
-from llmfit.util.log import Console
+from llmsetup.util.log import Console
 
 
 class FakeRuntime(Runtime):
@@ -78,10 +78,10 @@ def rag_profile():
 
 def build(catalog, profile, runtime, monkeypatch, checks=None):
     """A pipeline wired to a fake runtime and scripted check results."""
-    monkeypatch.setattr("llmfit.runtimes.registry.get_runtime", lambda name: runtime)
-    monkeypatch.setattr("llmfit.pipeline.get_runtime", lambda name: runtime)
+    monkeypatch.setattr("llmsetup.runtimes.registry.get_runtime", lambda name: runtime)
+    monkeypatch.setattr("llmsetup.pipeline.get_runtime", lambda name: runtime)
     monkeypatch.setattr(
-        "llmfit.verify.harness.Harness.run",
+        "llmsetup.verify.harness.Harness.run",
         lambda self, names, stop_on_critical=True: (checks or passing)(list(names)),
     )
     return Pipeline(profile, make_hardware(), catalog, Console(quiet=True),
@@ -140,7 +140,7 @@ class TestFailureIsNotFatal:
                                                             rag_profile, monkeypatch):
         """A working chat model with a broken retriever is still useful, so this
         reports rather than aborts."""
-        from llmfit.planner.plan import plan_embedding_model
+        from llmsetup.planner.plan import plan_embedding_model
 
         embedder = plan_embedding_model(rag_profile, make_hardware(), catalog)
         runtime = FakeRuntime(fail_on=embedder.id)
@@ -169,7 +169,7 @@ class TestFailureIsNotFatal:
 class TestReporting:
     def test_the_report_states_the_embedding_outcome(self, catalog, rag_profile,
                                                      monkeypatch):
-        from llmfit.report.render import render_markdown
+        from llmsetup.report.render import render_markdown
 
         runtime = FakeRuntime()
         result = build(catalog, rag_profile, runtime, monkeypatch).run()
@@ -179,8 +179,8 @@ class TestReporting:
 
     def test_the_report_warns_when_retrieval_is_broken(self, catalog, rag_profile,
                                                        monkeypatch):
-        from llmfit.planner.plan import plan_embedding_model
-        from llmfit.report.render import render_markdown
+        from llmsetup.planner.plan import plan_embedding_model
+        from llmsetup.report.render import render_markdown
 
         embedder = plan_embedding_model(rag_profile, make_hardware(), catalog)
         runtime = FakeRuntime(fail_on=embedder.id)

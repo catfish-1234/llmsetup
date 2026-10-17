@@ -11,13 +11,13 @@ from __future__ import annotations
 
 import pytest
 
-from llmfit.gguf import GgufInfo, apply_to_spec
-from llmfit.planner.memory import (
+from llmsetup.gguf import GgufInfo, apply_to_spec
+from llmsetup.planner.memory import (
     estimate_memory,
     kv_cache_bytes,
     max_context_for_budget,
 )
-from llmfit.types import GIB, MIB, ModelSpec
+from llmsetup.types import GIB, MIB, ModelSpec
 
 
 def spec(**kwargs) -> ModelSpec:

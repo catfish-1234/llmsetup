@@ -7,11 +7,11 @@ from pathlib import Path
 
 import pytest
 
-from llmfit.interop import jan, lmstudio
-from llmfit.interop.openai_clients import client_ids, snippets
-from llmfit.runtimes.base import Endpoint
-from llmfit.types import RuntimeConfig
-from llmfit.util.fs import link_or_copy
+from llmsetup.interop import jan, lmstudio
+from llmsetup.interop.openai_clients import client_ids, snippets
+from llmsetup.runtimes.base import Endpoint
+from llmsetup.types import RuntimeConfig
+from llmsetup.util.fs import link_or_copy
 
 
 @pytest.fixture

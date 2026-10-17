@@ -16,8 +16,8 @@ import json
 import pytest
 import yaml
 
-from llmfit.catalog import autoupdate
-from llmfit.catalog.autoupdate import (
+from llmsetup.catalog import autoupdate
+from llmsetup.catalog.autoupdate import (
     apply_update,
     disable_persistently,
     enable_persistently,
@@ -27,15 +27,15 @@ from llmfit.catalog.autoupdate import (
     status,
     validate_catalog_text,
 )
-from llmfit.catalog.catalog import load_catalog
-from llmfit.catalog.discover import (
+from llmsetup.catalog.catalog import load_catalog
+from llmsetup.catalog.discover import (
     Candidate,
     architecture_from_config,
     discover,
     params_from_metadata,
     slug_for,
 )
-from llmfit.util.log import Console
+from llmsetup.util.log import Console
 
 
 @pytest.fixture
@@ -138,11 +138,11 @@ class TestSlugs:
 
 class TestDiscovery:
     def _listing(self, monkeypatch, items, configs):
-        monkeypatch.setattr("llmfit.catalog.discover.list_trending",
+        monkeypatch.setattr("llmsetup.catalog.discover.list_trending",
                             lambda limit=60, timeout=20.0: items)
-        monkeypatch.setattr("llmfit.catalog.discover.fetch_config",
+        monkeypatch.setattr("llmsetup.catalog.discover.fetch_config",
                             lambda repo, timeout=20.0: configs.get(repo))
-        monkeypatch.setattr("llmfit.catalog.discover.find_gguf_repo",
+        monkeypatch.setattr("llmsetup.catalog.discover.find_gguf_repo",
                             lambda repo, timeout=20.0: f"{repo}-GGUF")
 
     def test_discovers_a_new_model(self, console, monkeypatch):
@@ -189,7 +189,7 @@ class TestDiscovery:
 
     def test_an_unreachable_hub_yields_nothing_rather_than_raising(self, console,
                                                                    monkeypatch):
-        monkeypatch.setattr("llmfit.catalog.discover.list_trending",
+        monkeypatch.setattr("llmsetup.catalog.discover.list_trending",
                             lambda limit=60, timeout=20.0: [])
         assert discover(console, known_ids=[]) == []
 
@@ -262,7 +262,7 @@ class TestApplyUpdate:
     def test_user_entries_are_never_clobbered(self, console, monkeypatch):
         """The auto-update cache is one file; the user's own overlays sit beside
         it and are layered on top."""
-        from llmfit.catalog.refresh import add_model
+        from llmsetup.catalog.refresh import add_model
 
         add_model(console, "my-own-model", params_b=7.0, gguf_repo="me/mine-GGUF")
         self._serve(monkeypatch, valid_catalog_text("fetched-model"))
@@ -299,11 +299,11 @@ class TestScheduling:
 
 class TestOptOut:
     def test_env_var_disables_it(self, monkeypatch):
-        monkeypatch.setenv("LLMFIT_AUTO_UPDATE", "0")
+        monkeypatch.setenv("LLMSETUP_AUTO_UPDATE", "0")
         assert enabled() is False
 
     def test_marker_file_disables_it_persistently(self, monkeypatch):
-        monkeypatch.delenv("LLMFIT_AUTO_UPDATE", raising=False)
+        monkeypatch.delenv("LLMSETUP_AUTO_UPDATE", raising=False)
         assert enabled() is True
         disable_persistently()
         assert enabled() is False
@@ -311,7 +311,7 @@ class TestOptOut:
         assert enabled() is True
 
     def test_disabled_means_no_network_call(self, console, monkeypatch):
-        monkeypatch.setenv("LLMFIT_AUTO_UPDATE", "0")
+        monkeypatch.setenv("LLMSETUP_AUTO_UPDATE", "0")
 
         def explode(*args, **kwargs):
             raise AssertionError("must not fetch when disabled")
@@ -342,7 +342,7 @@ class TestNeverBreaksTheRun:
 
 
 class TestNonHttpSources:
-    """An air-gapped install can point LLMFIT_CATALOG_URL at an internal file
+    """An air-gapped install can point LLMSETUP_CATALOG_URL at an internal file
     or server; those responses carry no HTTP status code."""
 
     def test_a_file_url_is_a_valid_source(self, tmp_path, console, monkeypatch):
@@ -381,7 +381,7 @@ class TestUnattendedCommitGate:
         }
 
     def _catalog_with(self, entry):
-        from llmfit.catalog.catalog import BUNDLED
+        from llmsetup.catalog.catalog import BUNDLED
 
         document = yaml.safe_load(BUNDLED.read_text(encoding="utf-8"))
         document["models"].append(entry)

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Report llama-server options llmfit has no recorded decision about.
+"""Report llama-server options llmsetup has no recorded decision about.
 
-llmfit emits a fraction of what the engine accepts, and the difference between
+llmsetup emits a fraction of what the engine accepts, and the difference between
 a deliberate omission and an oversight is only visible if somebody wrote the
-decision down. `src/llmfit/runtimes/data/llamacpp_flags.py` is that record, and
+decision down. `src/llmsetup/runtimes/data/llamacpp_flags.py` is that record, and
 this is how it stays current: llama.cpp adds options constantly, and each one
 arrives as a gap nobody has looked at.
 
@@ -25,7 +25,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from llmfit.runtimes.data.llamacpp_flags import DECISIONS, TODO, USED
+from llmsetup.runtimes.data.llamacpp_flags import DECISIONS, TODO, USED
 
 FLAG = re.compile(r"(?<![\w-])(--[a-z0-9][a-z0-9.-]*)")
 
@@ -53,7 +53,7 @@ def main() -> int:
     todo = sorted(f for f, (d, _) in DECISIONS.items() if d == TODO)
 
     print(f"{len(found)} options in this build")
-    print(f"{len(used)} used by llmfit, {len(todo)} recorded as worth having")
+    print(f"{len(used)} used by llmsetup, {len(todo)} recorded as worth having")
     print()
 
     if unreviewed:
