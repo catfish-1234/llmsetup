@@ -35,15 +35,15 @@ jobs:
         run: python -m pip install -c requirements-ci.txt -e ".[dev]"
       - name: Full tests and coverage floor
         # Baseline is 74.9% on main; ratchet this floor as boundary coverage grows.
-        run: python -m pytest --cov=llmfit --cov-report=term-missing --cov-fail-under=74
+        run: python -m pytest --cov=llmsetup --cov-report=term-missing --cov-fail-under=74
       - name: Smoke-test the CLI
         env:
-          LLMFIT_AUTO_UPDATE: "0"
+          LLMSETUP_AUTO_UPDATE: "0"
         run: |
-          llmfit --version
-          llmfit catalog list
-          llmfit runtimes
-          llmfit plan --vram 24 --gpu-vendor nvidia --task coding --yes
+          llmsetup --version
+          llmsetup catalog list
+          llmsetup runtimes
+          llmsetup plan --vram 24 --gpu-vendor nvidia --task coding --yes
 
   lint:
     name: lint and source security
@@ -59,7 +59,7 @@ jobs:
       - run: python -m pip install -c requirements-ci.txt ruff bandit mypy types-PyYAML
       - run: ruff check src/ tests/ scripts/
       - name: Type-check the library
-        run: mypy src/llmfit
+        run: mypy src/llmsetup
       - name: Check source security
         # B310 flags every urllib call. User-selected file:// catalogs and HF
         # mirrors are supported; URL trust boundaries need separate review.
@@ -82,7 +82,7 @@ jobs:
           python - <<'PY' > requirements-audit.txt
           import importlib.metadata as md
           from packaging.requirements import Requirement
-          for raw in md.requires("llmfit") or []:
+          for raw in md.requires("llmsetup") or []:
               requirement = Requirement(raw)
               if requirement.marker is None or requirement.marker.evaluate({"extra": ""}):
                   print(f"{requirement.name}=={md.version(requirement.name)}")
@@ -107,12 +107,12 @@ jobs:
           python -m twine check dist/*
       - name: Check the installed artifact outside the checkout
         env:
-          LLMFIT_HOME: ${{ runner.temp }}/llmfit-home
-          LLMFIT_AUTO_UPDATE: "0"
+          LLMSETUP_HOME: ${{ runner.temp }}/llmsetup-home
+          LLMSETUP_AUTO_UPDATE: "0"
         run: |
           python -m venv "$RUNNER_TEMP/wheel-env"
           "$RUNNER_TEMP/wheel-env/bin/python" -m pip install -c requirements-ci.txt dist/*.whl
           cd "$RUNNER_TEMP"
           "$RUNNER_TEMP/wheel-env/bin/python" "$GITHUB_WORKSPACE/scripts/check_wheel.py"
-          "$RUNNER_TEMP/wheel-env/bin/llmfit" --version
-          "$RUNNER_TEMP/wheel-env/bin/llmfit" plan --cpu-only --ram 16 --task chat --yes
+          "$RUNNER_TEMP/wheel-env/bin/llmsetup" --version
+          "$RUNNER_TEMP/wheel-env/bin/llmsetup" plan --cpu-only --ram 16 --task chat --yes

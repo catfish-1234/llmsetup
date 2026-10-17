@@ -11,17 +11,17 @@ from __future__ import annotations
 import pytest
 from conftest import make_hardware
 
-from llmfit.gguf import GgufInfo, apply_to_spec
-from llmfit.planner.memory import (
+from llmsetup.gguf import GgufInfo, apply_to_spec
+from llmsetup.planner.memory import (
     estimate_memory,
     kv_bytes_per_token,
     kv_cache_bytes,
     max_context_for_budget,
 )
-from llmfit.planner.plan import build_plan
-from llmfit.tuning.profiles import SpecType
-from llmfit.tuning.tuner import tune
-from llmfit.types import GIB, ModelSpec, Priority, Task, UseCaseProfile
+from llmsetup.planner.plan import build_plan
+from llmsetup.tuning.profiles import SpecType
+from llmsetup.tuning.tuner import tune
+from llmsetup.types import GIB, ModelSpec, Priority, Task, UseCaseProfile
 
 
 def spec(**kwargs) -> ModelSpec:
@@ -48,8 +48,8 @@ def _as_candidate(plan, catalog, model_id, context_tokens=8192):
         if candidate.model.id == model_id:
             return candidate
 
-    from llmfit.planner.memory import estimate_memory
-    from llmfit.types import Candidate
+    from llmsetup.planner.memory import estimate_memory
+    from llmsetup.types import Candidate
 
     model = catalog.require(model_id)
     quant = model.recommended_quants[0] if model.recommended_quants else "Q4_K_M"
@@ -245,7 +245,7 @@ class TestDraftingChoice:
 
 class TestEmittedFlags:
     def _command(self, catalog, model_id, hardware, profile, **config_overrides):
-        from llmfit.runtimes.llamacpp import LlamaCppRuntime
+        from llmsetup.runtimes.llamacpp import LlamaCppRuntime
 
         plan = build_plan(profile, hardware, catalog)
         candidate = _as_candidate(plan, catalog, model_id,
@@ -292,7 +292,7 @@ class TestEmittedFlags:
 
 class TestSwaRepair:
     def _state(self, catalog, model_id, hardware, **overrides):
-        from llmfit.repair.strategies import RepairState
+        from llmsetup.repair.strategies import RepairState
 
         profile = UseCaseProfile(tasks=[Task.RAG], priority=Priority.QUALITY,
                                  context_tokens=8192)
@@ -305,7 +305,7 @@ class TestSwaRepair:
                            hardware=hardware, profile=profile, catalog=catalog)
 
     def test_recall_failure_on_a_windowed_model_widens_the_cache(self, catalog):
-        from llmfit.repair.strategies import _full_swa_cache
+        from llmsetup.repair.strategies import _full_swa_cache
 
         state = self._state(catalog, "gemma-3-4b", make_hardware(vram_gb=48))
         outcome = _full_swa_cache(state)
@@ -314,7 +314,7 @@ class TestSwaRepair:
         assert "whole prompt" in outcome.description
 
     def test_does_nothing_for_a_model_without_a_window(self, catalog):
-        from llmfit.repair.strategies import _full_swa_cache
+        from llmsetup.repair.strategies import _full_swa_cache
 
         state = self._state(catalog, "qwen3-8b", make_hardware(vram_gb=48))
         assert _full_swa_cache(state) is None
@@ -322,7 +322,7 @@ class TestSwaRepair:
     def test_refuses_rather_than_causing_the_next_failure(self, catalog):
         """Turning it on costs the memory the window was saving. Doing that
         without checking would trade a recall failure for an out-of-memory one."""
-        from llmfit.repair.strategies import _full_swa_cache
+        from llmsetup.repair.strategies import _full_swa_cache
 
         state = self._state(catalog, "gemma-3-27b", make_hardware(vram_gb=24),
                             context_tokens=131072)
@@ -330,8 +330,8 @@ class TestSwaRepair:
         assert state.config.swa_full is False
 
     def test_it_is_registered_for_the_recall_signature(self):
-        from llmfit.repair.strategies import STRATEGIES
-        from llmfit.verify import signatures as sig
+        from llmsetup.repair.strategies import STRATEGIES
+        from llmsetup.verify import signatures as sig
 
         named = {s.name: s for s in STRATEGIES}
         assert named["full_swa_cache"].handles(sig.NEEDLE_NOT_FOUND)
@@ -342,15 +342,15 @@ class TestProvisioningTheDraft:
     one has to know that or it fails on a plan that needs nothing."""
 
     def _pipeline(self, catalog, tmp_path):
-        from llmfit.pipeline import Pipeline
-        from llmfit.util.log import Console
+        from llmsetup.pipeline import Pipeline
+        from llmsetup.util.log import Console
 
         return Pipeline(UseCaseProfile(tasks=[Task.CODING]), make_hardware(),
                         catalog, Console(quiet=True))
 
     def _plan_with(self, spec_type, **kwargs):
-        from llmfit.tuning.profiles import AdvancedProfile, SpeculativePlan
-        from llmfit.types import RuntimeConfig
+        from llmsetup.tuning.profiles import AdvancedProfile, SpeculativePlan
+        from llmsetup.types import RuntimeConfig
 
         config = RuntimeConfig(runtime="llamacpp", model_id="m", quant="Q4_K_M",
                                context_tokens=8192, gpu_layers=1, total_layers=1)
@@ -361,7 +361,7 @@ class TestProvisioningTheDraft:
     @pytest.mark.parametrize("spec_type", [SpecType.MTP, SpecType.NGRAM])
     def test_nothing_is_fetched_for_drafting_that_has_no_model(
             self, catalog, tmp_path, spec_type):
-        from llmfit.runtimes.llamacpp import LlamaCppRuntime
+        from llmsetup.runtimes.llamacpp import LlamaCppRuntime
 
         pipeline = self._pipeline(catalog, tmp_path)
         config = self._plan_with(spec_type)
@@ -374,7 +374,7 @@ class TestProvisioningTheDraft:
             self, catalog, tmp_path):
         """Leaving the type set while clearing the model would report drafting
         as on while emitting nothing for it."""
-        from llmfit.runtimes.llamacpp import LlamaCppRuntime
+        from llmsetup.runtimes.llamacpp import LlamaCppRuntime
 
         pipeline = self._pipeline(catalog, tmp_path)
         config = self._plan_with(SpecType.DRAFT, draft_model_id="no-such-model")

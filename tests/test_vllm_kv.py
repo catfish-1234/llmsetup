@@ -4,10 +4,10 @@ from __future__ import annotations
 import pytest
 from conftest import make_hardware
 
-from llmfit.planner.plan import build_plan
-from llmfit.runtimes.vllm import VllmRuntime, kv_cache_dtype
-from llmfit.tuning.tuner import tune
-from llmfit.types import Accelerator, RuntimeConfig, Task, UseCaseProfile
+from llmsetup.planner.plan import build_plan
+from llmsetup.runtimes.vllm import VllmRuntime, kv_cache_dtype
+from llmsetup.tuning.tuner import tune
+from llmsetup.types import Accelerator, RuntimeConfig, Task, UseCaseProfile
 
 
 def config(kv="f16", **kwargs):
@@ -38,7 +38,7 @@ class TestRepairReachesTheEngine:
     cache as restored."""
 
     def _command(self, cfg):
-        from llmfit.types import ModelSpec
+        from llmsetup.types import ModelSpec
 
         spec = ModelSpec(id="m", name="M", publisher="p", params_b=8.0, layers=32,
                          hidden_size=4096, kv_heads=8, head_dim=128,
@@ -59,7 +59,7 @@ class TestRepairReachesTheEngine:
         assert "--kv-cache-dtype" not in self._command(cfg)
 
     def test_the_restore_repair_actually_restores_it(self, catalog):
-        from llmfit.repair.strategies import RepairState, _restore_kv_precision
+        from llmsetup.repair.strategies import RepairState, _restore_kv_precision
 
         hardware = make_hardware(vram_gb=24, vendor=Accelerator.NVIDIA)
         profile = UseCaseProfile(tasks=[Task.RAG], context_tokens=32768,

@@ -5,12 +5,12 @@ from __future__ import annotations
 import pytest
 from conftest import make_hardware
 
-from llmfit.planner.memory import estimate_memory
-from llmfit.planner.plan import build_plan
-from llmfit.repair.loop import RepairLoop, mark_resolved
-from llmfit.repair.strategies import COST_ORDER, STRATEGIES, RepairState, strategies_for
-from llmfit.tuning.tuner import tune
-from llmfit.types import (
+from llmsetup.planner.memory import estimate_memory
+from llmsetup.planner.plan import build_plan
+from llmsetup.repair.loop import RepairLoop, mark_resolved
+from llmsetup.repair.strategies import COST_ORDER, STRATEGIES, RepairState, strategies_for
+from llmsetup.tuning.tuner import tune
+from llmsetup.types import (
     GIB,
     CheckResult,
     CheckStatus,
@@ -18,8 +18,8 @@ from llmfit.types import (
     Task,
     UseCaseProfile,
 )
-from llmfit.util.log import Console
-from llmfit.verify import signatures as sig
+from llmsetup.util.log import Console
+from llmsetup.verify import signatures as sig
 
 
 def build_state(catalog, hardware, profile, runtime="llamacpp"):

@@ -13,12 +13,12 @@ from __future__ import annotations
 import pytest
 from conftest import make_hardware
 
-from llmfit.planner.plan import build_plan
-from llmfit.runtimes.llamacpp import LlamaCppRuntime
-from llmfit.runtimes.vllm import VllmRuntime
-from llmfit.tuning.platform_tuning import plan_platform
-from llmfit.tuning.tuner import tune
-from llmfit.types import ModelSpec, RuntimeConfig, Task, UseCaseProfile
+from llmsetup.planner.plan import build_plan
+from llmsetup.runtimes.llamacpp import LlamaCppRuntime
+from llmsetup.runtimes.vllm import VllmRuntime
+from llmsetup.tuning.platform_tuning import plan_platform
+from llmsetup.tuning.tuner import tune
+from llmsetup.types import ModelSpec, RuntimeConfig, Task, UseCaseProfile
 
 
 def config(**kwargs):

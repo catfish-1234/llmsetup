@@ -13,11 +13,11 @@ import pytest
 from conftest import make_hardware
 from test_verify import FakeClient
 
-from llmfit.types import CheckStatus, Priority, RuntimeConfig, Task, UseCaseProfile
-from llmfit.verify import signatures as sig
-from llmfit.verify.checks import CheckContext, check_prefill
-from llmfit.verify.client import ChatResult
-from llmfit.verify.harness import select_checks
+from llmsetup.types import CheckStatus, Priority, RuntimeConfig, Task, UseCaseProfile
+from llmsetup.verify import signatures as sig
+from llmsetup.verify.checks import CheckContext, check_prefill
+from llmsetup.verify.client import ChatResult
+from llmsetup.verify.harness import select_checks
 
 
 def answered(prompt_tokens=2048, latency_s=1.0):
@@ -153,9 +153,9 @@ class TestWiring:
 
 class TestRepair:
     def _state(self, catalog, **overrides):
-        from llmfit.planner.plan import build_plan
-        from llmfit.repair.strategies import RepairState
-        from llmfit.tuning.tuner import tune
+        from llmsetup.planner.plan import build_plan
+        from llmsetup.repair.strategies import RepairState
+        from llmsetup.tuning.tuner import tune
 
         hardware = make_hardware()
         profile = UseCaseProfile(tasks=[Task.RAG], priority=Priority.SPEED)
@@ -169,7 +169,7 @@ class TestRepair:
     def test_raising_the_micro_batch_is_the_first_answer(self, catalog):
         """It is the flag that moves prompt throughput most, and it costs only
         compute-buffer memory."""
-        from llmfit.repair.strategies import _increase_batch
+        from llmsetup.repair.strategies import _increase_batch
 
         state = self._state(catalog, ubatch_size=128, batch_size=256)
         outcome = _increase_batch(state)
@@ -178,13 +178,13 @@ class TestRepair:
         assert state.config.batch_size >= state.config.ubatch_size
 
     def test_stops_before_the_micro_batch_becomes_its_own_problem(self, catalog):
-        from llmfit.repair.strategies import _MAX_UBATCH, _increase_batch
+        from llmsetup.repair.strategies import _MAX_UBATCH, _increase_batch
 
         state = self._state(catalog, ubatch_size=_MAX_UBATCH)
         assert _increase_batch(state) is None
 
     def test_slow_prefill_has_somewhere_to_go(self, catalog):
-        from llmfit.repair.strategies import strategies_for
+        from llmsetup.repair.strategies import strategies_for
 
         names = {s.name for s in strategies_for(sig.PREFILL_TOO_SLOW)}
         assert "increase_batch" in names
@@ -194,7 +194,7 @@ class TestRepair:
         """`reduce_batch` answers OOM and `increase_batch` answers slow prefill.
         They must never both be offered for the same signature, or the loop
         would undo its own work."""
-        from llmfit.repair.strategies import strategies_for
+        from llmsetup.repair.strategies import strategies_for
 
         for signature in (sig.OUT_OF_MEMORY, sig.PREFILL_TOO_SLOW):
             names = {s.name for s in strategies_for(signature)}

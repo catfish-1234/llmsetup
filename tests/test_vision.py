@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import pytest
 
-from llmfit.download import RemoteFile, is_projector, pick_gguf, pick_mmproj
-from llmfit.planner.memory import estimate_memory
-from llmfit.types import MIB, ModelSpec
+from llmsetup.download import RemoteFile, is_projector, pick_gguf, pick_mmproj
+from llmsetup.planner.memory import estimate_memory
+from llmsetup.types import MIB, ModelSpec
 
 
 def files(*names) -> list:
@@ -86,7 +86,7 @@ class TestLocalStore:
     def test_find_local_skips_the_projector(self, tmp_path, monkeypatch):
         """Alphabetical order is not a safe way to pick the model: a projector
         sorts before a model whose name starts late in the alphabet."""
-        from llmfit.runtimes import gguf_store
+        from llmsetup.runtimes import gguf_store
 
         model = spec(id="zephyr-vision", publisher="pub", supports_vision=True)
         directory = gguf_store.store_path(model, "Q4_K_M")
@@ -112,10 +112,10 @@ class TestMemoryBudget:
 
 class TestRepair:
     def _state(self, catalog, gpu_24gb, **config_overrides):
-        from llmfit.planner.plan import build_plan
-        from llmfit.repair.strategies import RepairState
-        from llmfit.tuning.tuner import tune
-        from llmfit.types import Priority, Task, UseCaseProfile
+        from llmsetup.planner.plan import build_plan
+        from llmsetup.repair.strategies import RepairState
+        from llmsetup.tuning.tuner import tune
+        from llmsetup.types import Priority, Task, UseCaseProfile
 
         profile = UseCaseProfile(tasks=[Task.CHAT], priority=Priority.QUALITY)
         plan = build_plan(profile, gpu_24gb, catalog)
@@ -126,14 +126,14 @@ class TestRepair:
                            hardware=gpu_24gb, profile=profile, catalog=catalog)
 
     def test_does_nothing_for_a_text_only_model(self, catalog, gpu_24gb):
-        from llmfit.repair.strategies import _fetch_vision_projector
+        from llmsetup.repair.strategies import _fetch_vision_projector
 
         state = self._state(catalog, gpu_24gb)
         state.candidate.model.supports_vision = False
         assert _fetch_vision_projector(state) is None
 
     def test_does_nothing_when_the_projector_is_already_loaded(self, catalog, gpu_24gb):
-        from llmfit.repair.strategies import _fetch_vision_projector
+        from llmsetup.repair.strategies import _fetch_vision_projector
 
         state = self._state(catalog, gpu_24gb, mmproj_path="/tmp/mmproj.gguf")
         state.candidate.model.supports_vision = True
@@ -143,8 +143,8 @@ class TestRepair:
             self, catalog, gpu_24gb, monkeypatch):
         """No network: the store already has the file, which is also the path a
         second run takes."""
-        from llmfit.repair import strategies
-        from llmfit.runtimes import gguf_store
+        from llmsetup.repair import strategies
+        from llmsetup.runtimes import gguf_store
 
         state = self._state(catalog, gpu_24gb)
         model = state.candidate.model
@@ -159,8 +159,8 @@ class TestRepair:
         assert state.config.mmproj_path.endswith("mmproj-BF16.gguf")
 
     def test_is_registered_for_the_vision_failure_signature(self):
-        from llmfit.repair.strategies import STRATEGIES
-        from llmfit.verify import signatures as sig
+        from llmsetup.repair.strategies import STRATEGIES
+        from llmsetup.verify import signatures as sig
 
         named = {s.name: s for s in STRATEGIES}
         assert named["fetch_vision_projector"].handles(sig.VISION_UNSUPPORTED)
@@ -168,10 +168,10 @@ class TestRepair:
 
 class TestLaunchCommand:
     def test_mmproj_is_passed_to_the_server(self, catalog, gpu_24gb):
-        from llmfit.planner.plan import build_plan
-        from llmfit.runtimes.llamacpp import LlamaCppRuntime
-        from llmfit.tuning.tuner import tune
-        from llmfit.types import Priority, Task, UseCaseProfile
+        from llmsetup.planner.plan import build_plan
+        from llmsetup.runtimes.llamacpp import LlamaCppRuntime
+        from llmsetup.tuning.tuner import tune
+        from llmsetup.types import Priority, Task, UseCaseProfile
 
         profile = UseCaseProfile(tasks=[Task.CHAT], priority=Priority.QUALITY)
         plan = build_plan(profile, gpu_24gb, catalog)
@@ -183,10 +183,10 @@ class TestLaunchCommand:
         assert cmd[cmd.index("--mmproj") + 1] == "/models/mmproj-BF16.gguf"
 
     def test_no_flag_when_there_is_no_projector(self, catalog, gpu_24gb):
-        from llmfit.planner.plan import build_plan
-        from llmfit.runtimes.llamacpp import LlamaCppRuntime
-        from llmfit.tuning.tuner import tune
-        from llmfit.types import Priority, Task, UseCaseProfile
+        from llmsetup.planner.plan import build_plan
+        from llmsetup.runtimes.llamacpp import LlamaCppRuntime
+        from llmsetup.tuning.tuner import tune
+        from llmsetup.types import Priority, Task, UseCaseProfile
 
         profile = UseCaseProfile(tasks=[Task.CHAT], priority=Priority.QUALITY)
         plan = build_plan(profile, gpu_24gb, catalog)

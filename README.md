@@ -1,22 +1,23 @@
-# llmfit — local model setup assistant
+# llmsetup
 
-Interview, plan, tune, verify, and repair local open-weight LLM setups. This
-Python project is **catfish-1234/Open-source-llm**, licensed under Apache-2.0.
-It is independent of the unrelated [AlexsJones/llmfit](https://github.com/AlexsJones/llmfit)
-Rust project. See the [positioning and naming proposal](docs/POSITIONING.md).
+llmsetup helps you choose and run an open-weight LLM on your own hardware. It
+asks what you need, estimates which models will fit, and recommends a model and
+runtime settings. It can then download weights, start a server, check the
+capabilities you asked for, try bounded repairs, and register the model with
+other local apps.
 
-llmfit turns your tasks, context window, and hardware into explained model and
-runtime recommendations. It can then provision a runtime, test the result, try
-bounded repairs, and generate registrations or configuration snippets for local
-apps. Predictions are estimates; verification establishes what worked on your
-machine for the checks that actually ran.
+This is the Python project at
+[catfish-1234/Open-source-llm](https://github.com/catfish-1234/Open-source-llm),
+licensed under Apache-2.0. It was renamed from llmfit to avoid confusion with the
+unrelated [AlexsJones/llmfit](https://github.com/AlexsJones/llmfit) Rust project.
+See [the name change and migration notes](docs/POSITIONING.md).
 
-## Install from this repository
+## Install
 
-Use Python 3.9 or newer; a currently maintained Python version is recommended.
-PyYAML is the only runtime Python dependency. Repository access is required to
-clone; a bare `pip install llmfit` is not an installation instruction for this
-checkout and may select a different distribution.
+Use Python 3.9 or newer, preferably a version that still receives security
+updates. PyYAML is the only runtime Python dependency. Install from this
+repository; the renamed package has not been published to PyPI. You need
+repository access to clone it.
 
 ```bash
 git clone https://github.com/catfish-1234/Open-source-llm.git
@@ -24,155 +25,171 @@ cd Open-source-llm
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install .
-llmfit --version
-llmfit --help
+llmsetup --version
+llmsetup --help
 ```
 
-On Windows, activate with `.venv\Scripts\Activate.ps1` in PowerShell. Use
-`python -m pip install -e .` if you want source edits to take effect immediately.
+On Windows, activate with `.venv\Scripts\Activate.ps1` in PowerShell. For
+source development, use `python -m pip install -e .`.
 
-Planning and detection need no inference engine or GPU. For a real setup,
-install a supported engine separately and check `llmfit runtimes` for detection
-and install hints. Adapters exist for Ollama, llama.cpp, LM Studio, vLLM, MLX,
-and TabbyAPI; their hardware support and model formats differ.
+You can detect hardware and make plans without a GPU or inference engine.
+To run a model, install an engine separately. `llmsetup runtimes` lists detected
+engines and installation hints. Adapters are available for Ollama, llama.cpp,
+LM Studio, vLLM, MLX, and TabbyAPI. Their model formats and hardware support differ.
 
-## Quickstart: inspect a plan first
+## Make a plan
 
 ```bash
-llmfit detect
-llmfit runtimes
+llmsetup detect
+llmsetup runtimes
 
-# Disable automatic catalog network refreshes; use the bundled snapshot.
-llmfit catalog auto-update --disable
+# Use the bundled catalog without automatic network refreshes.
+llmsetup catalog auto-update --disable
 
-# No model downloads or server launches.
-llmfit plan --vram 24 --ram 64 --gpu-vendor nvidia \
+# Plan for a machine with 24 GB VRAM and 64 GB RAM.
+llmsetup plan --vram 24 --ram 64 --gpu-vendor nvidia \
   --task coding --task agent --context 32768 --commercial --yes
 
-# Include concrete tuning decisions, still without provisioning.
-llmfit setup --dry-run --vram 24 --ram 64 --gpu-vendor nvidia \
+# Show tuning decisions without downloading weights or starting a server.
+llmsetup setup --dry-run --vram 24 --ram 64 --gpu-vendor nvidia \
   --task coding --context 32768 --yes
 ```
 
-Memory overrides describe the machine you want to plan for. They do not reserve
-memory or change your hardware. `--yes` skips interview questions; it does not
-turn a real setup into a dry run. A dry run writes a local report but runs no
-verification and makes no claim that the setup works.
+Memory overrides describe the machine to plan for. They do not reserve memory
+or change the machine. `--yes` skips interview questions. A dry run writes a
+local report but runs no verification, so it cannot tell you whether a model
+works on your hardware.
 
-Once the plan looks suitable and your engine is installed:
+After reviewing the plan and installing an engine, run a setup:
 
 ```bash
-llmfit setup --runtime ollama --task coding --context 8192 --yes
+llmsetup setup --runtime ollama --task coding --context 8192 --yes
 ```
 
-This step can download many gigabytes, start a server, create a tuned model,
-write reports, and register models with detected apps. Use `--no-register` to
-skip registrations and `--no-repair` to report failures without attempting
-repairs. llmfit stops servers it owns after verification; shared Ollama and LM
-Studio daemons remain running. The report includes a command to run the model
-again. Generated client snippets require a running endpoint.
+Setup can download many gigabytes, start a server, create a tuned model, write
+reports, and register models with detected apps. `--no-register` skips app
+registration. `--no-repair` reports failures without trying repairs.
 
-## Examples
+After verification, llmsetup stops servers it started. Shared Ollama and
+LM Studio daemons keep running. The report includes a command to start the model
+again; generated client snippets need a running endpoint.
+
+## Other commands
 
 ```bash
-# A reproducible profile, with catalog network updates disabled in the profile.
-llmfit plan --answers examples/coding.yaml --json
-llmfit setup --answers examples/coding.yaml --dry-run --report setup.md
+# Reuse a profile with automatic catalog updates disabled.
+llmsetup plan --answers examples/coding.yaml --json
+llmsetup setup --answers examples/coding.yaml --dry-run --report setup.md
 
-# CPU planning, without an accelerator.
-llmfit plan --cpu-only --ram 16 --task chat --context 8192 --yes
+# Plan for CPU inference.
+llmsetup plan --cpu-only --ram 16 --task chat --context 8192 --yes
 
-# Test an existing OpenAI-compatible server. Use its root URL, without /v1.
-llmfit verify --base-url http://127.0.0.1:11434 --model qwen3:8b \
+# Check an existing OpenAI-compatible server. Give its root URL, without /v1.
+llmsetup verify --base-url http://127.0.0.1:11434 --model qwen3:8b \
   --tools --checks health,completion,tool_calling --yes
 
-# Reprint the last report; review it before sharing.
-llmfit report
+# Print the last report. Review it before sharing.
+llmsetup report
 
-# Inspect and extend the catalog with architecture from a local GGUF.
-llmfit catalog list
-llmfit catalog show qwen3-8b
-llmfit catalog add my-finetune --gguf ./my-finetune-Q4_K_M.gguf --publisher me
+# Inspect the catalog or add architecture details from a local GGUF.
+llmsetup catalog list
+llmsetup catalog show qwen3-8b
+llmsetup catalog add my-finetune --gguf ./my-finetune-Q4_K_M.gguf --publisher me
 
-# A local browser interface for planning; downloads are handed off to the CLI.
-llmfit ui --no-browser
+# Open the local planning UI. Downloads are handed off to the CLI.
+llmsetup ui --no-browser
 ```
 
-Profiles use `tasks`, `clients`, `context_tokens`, `priority`, `concurrent_users`,
-capability flags such as `needs_tools`, and `offline_only`. Save interview
-answers with `llmfit setup --save-profile profile.yaml`. CLI options override
-corresponding answers. Run `llmfit <command> --help` for the authoritative flags.
+Profiles contain `tasks`, `clients`, `context_tokens`, `priority`,
+`concurrent_users`, capability flags such as `needs_tools`, and `offline_only`.
+Save interview answers with `llmsetup setup --save-profile profile.yaml`.
+Command-line options override matching profile values. Use
+`llmsetup <command> --help` for the available flags.
+
 JSON results go to stdout; progress and diagnostics go to stderr. Setup and
-verification return a nonzero exit code for blocking failures; a dry run can
-exit successfully without verifying a model.
+verification return a nonzero exit code when a blocking check fails. A dry run
+can exit successfully without verifying a model.
 
-## Catalogs and local files
+## Catalogs and downloads
 
-The bundled YAML catalog is layered with files in `$LLMFIT_HOME/catalog.d/`,
-then `LLMFIT_CATALOG` and explicit `--catalog` files. Entries with the same ID
-patch individual fields. Architecture provenance is recorded as `measured` or
-`estimated`; local GGUF metadata can correct estimates after download.
+The bundled YAML catalog is extended by files in `$LLMSETUP_HOME/catalog.d/`,
+then `LLMSETUP_CATALOG` and explicit `--catalog` files, in that order. Later
+entries with the same ID patch individual fields. Architecture values are
+marked `measured` or `estimated`; metadata in a downloaded GGUF can correct
+estimates.
 
-Automatic catalog refreshes are enabled by default, checked at most daily,
-and use this repository's raw catalog URL. An unreachable source leaves the
-bundled catalog available. Private repositories require an accessible mirror
-or local catalog source; do not embed access tokens in URLs or catalog files.
+Automatic catalog refreshes are enabled by default and checked at most daily.
+They use this repository's raw catalog URL. If the source is unreachable, the
+bundled catalog stays available. A private repository needs an accessible
+mirror or local catalog source. Do not put access tokens in URLs or catalog files.
 
 ```bash
-llmfit catalog auto-update             # show source, cadence, and status
-llmfit catalog auto-update --disable   # persistent opt-out
-llmfit catalog auto-update --enable    # allow automatic checks again
-llmfit catalog update                 # explicitly fetch now
-llmfit catalog refresh --offline      # compare only local GGUFs
+llmsetup catalog auto-update             # show source, cadence, and status
+llmsetup catalog auto-update --disable   # persistent opt-out
+llmsetup catalog auto-update --enable    # allow automatic checks again
+llmsetup catalog update                 # explicitly fetch now
+llmsetup catalog refresh --offline      # compare only local GGUFs
 ```
 
-For one process, `LLMFIT_AUTO_UPDATE=0` also disables automatic refreshes.
-`LLMFIT_CATALOG_URL` selects a trusted HTTP(S) or `file://` source. Neither
-disabling catalog refresh nor setting `offline_only` prevents a real `setup`
-from provisioning weights through an engine; use `plan` or `setup --dry-run`
-to inspect without provisioning.
+`LLMSETUP_AUTO_UPDATE=0` disables automatic catalog refreshes for one process.
+`LLMSETUP_CATALOG_URL` selects a trusted HTTP(S) or `file://` source. Disabling
+catalog refreshes, including through `offline_only`, does not stop a real
+`setup` from downloading weights. Use `plan` or `setup --dry-run` to inspect a
+configuration without provisioning.
 
-Default data lives in `$XDG_DATA_HOME/llmfit` or `~/.local/share/llmfit` on Unix,
-and `%LOCALAPPDATA%\llmfit` on Windows. `LLMFIT_HOME` overrides profiles,
-catalog overlays, reports, and generated configs; `LLMFIT_MODEL_STORE` overrides
-the shared model store. Weights can be large; Ollama may also keep its own copy.
-Registration can replace colliding model links or generated files, so inspect
-destinations and keep backups of app configuration you maintain yourself.
+Model downloads resolve and save a Hugging Face commit revision. You can also
+pin revisions in a catalog overlay. Ollama imports the pinned GGUF and keeps
+its own copy. See [reproducibility notes](docs/REPRODUCIBILITY.md) for details.
 
-## Limitations
+## Local files
 
-- Memory and speed estimates depend on catalog accuracy, engine versions,
-  driver behavior, free memory, and concurrent work. They are not OOM guarantees.
-- Verification uses targeted smoke tests, not a general model-quality benchmark.
-  A passing tool or JSON check does not establish reliability on every workload.
+Default data lives in `$XDG_DATA_HOME/llmsetup` or `~/.local/share/llmsetup` on
+Unix, and `%LOCALAPPDATA%\llmsetup` on Windows. `LLMSETUP_HOME` overrides the
+location of profiles, catalog overlays, reports, and generated configs.
+`LLMSETUP_MODEL_STORE` overrides the shared model store.
+
+If you used the old name, you can point these variables at your existing
+directories. The rename does not move or delete data. Follow the
+[migration notes](docs/POSITIONING.md#migrating-an-existing-installation) before
+changing an existing installation.
+
+Weights can be large. App registration can replace colliding model links or
+generated files, so check the destinations and back up app configuration you
+maintain yourself.
+
+## Limits
+
+- Memory and speed estimates depend on the catalog, engine and driver versions,
+  free memory, and other running work. A predicted fit can still run out of memory.
+- Verification runs targeted smoke tests, not a general model-quality benchmark.
+  Passing a tool or JSON check does not prove reliability on every workload.
 - Runtime adapters depend on external command-line interfaces that can change.
-  Unit tests use fakes; real hardware compatibility needs runtime-specific runs.
-- Automatic repairs may shorten context, offload work to CPU, or change a model.
-  Read the repair journal and final settings before relying on the result.
-- `doctor` re-detects and replans for the saved model and profile; it does not
-  replay every previous low-level setting verbatim.
-- Download byte counts and trusted transport do not establish model provenance.
-  Review publisher licenses and sources separately; software and model licenses
-  are independent.
-- The UI is a loopback development server, without authentication. Keep it local.
-  Generated shell examples target POSIX shells unless stated otherwise.
+  Unit tests use fakes; hardware compatibility needs tests with the actual engine.
+- Repairs may shorten context, offload work to CPU, or change the model. Read the
+  repair journal and final settings before using the result.
+- `doctor` detects hardware again and replans for the saved model and profile.
+  It does not replay every previous low-level setting.
+- Byte counts and trusted transport do not prove model provenance. Review
+  publishers' licenses and sources. Model and software licenses are separate.
+- The UI is a local loopback development server without authentication. Keep it
+  local. Generated shell examples use POSIX syntax unless stated otherwise.
 
-## Development and project docs
+## Development
 
 ```bash
-python -m pip install -e ".[dev]" "ruff==0.17.1"
+python -m pip install -c requirements-ci.txt -e ".[dev]"
 python -m pytest
-python -m pytest --cov=llmfit --cov-report=term-missing
+python -m pytest --cov=llmsetup --cov-report=term-missing
 ruff check src/ tests/ scripts/
 ```
 
-Tests use temporary app directories and faked runtimes. UI tests need local
-loopback sockets; no GPU or downloaded model is required.
+Tests use temporary app directories and fake runtimes. UI tests need local
+loopback sockets. No GPU or downloaded model is required.
 
-- [Architecture](docs/ARCHITECTURE.md) and [detailed design notes](docs/DESIGN.md)
+- [Architecture](docs/ARCHITECTURE.md) and [design notes](docs/DESIGN.md)
 - [Contributing](CONTRIBUTING.md) and [security reporting](SECURITY.md)
 - [Repository review and priorities](docs/REPOSITORY_REVIEW.md)
-- [Positioning and proposed naming direction](docs/POSITIONING.md)
+- [Project name and migration](docs/POSITIONING.md)
 
 ## License
 
