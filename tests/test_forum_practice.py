@@ -1,7 +1,7 @@
 """Two things practitioners do by hand that arithmetic does better.
 
 Both come from people posting working configurations and the numbers they got.
-The first is an ordering mistake llmfit was making that they were not: giving up
+The first is an ordering mistake llmsetup was making that they were not: giving up
 context, which the user asked for, before giving up prompt-batch size, which
 they did not. The second is a trick they do by writing regexes and arriving at
 by trial, where the boundary is simply computable.
@@ -14,11 +14,11 @@ import re
 import pytest
 from conftest import make_hardware
 
-from llmfit.planner.memory import estimate_memory
-from llmfit.planner.moe import EXPERT_TENSORS, expert_bytes, plan_expert_offload
-from llmfit.planner.plan import build_plan
-from llmfit.tuning.tuner import tune
-from llmfit.types import GIB, ModelSpec, Task, UseCaseProfile
+from llmsetup.planner.memory import estimate_memory
+from llmsetup.planner.moe import EXPERT_TENSORS, expert_bytes, plan_expert_offload
+from llmsetup.planner.plan import build_plan
+from llmsetup.tuning.tuner import tune
+from llmsetup.types import GIB, ModelSpec, Task, UseCaseProfile
 
 
 def moe_spec(**kwargs) -> ModelSpec:
@@ -31,7 +31,7 @@ def moe_spec(**kwargs) -> ModelSpec:
 
 class TestContextIsNotTheFirstThingGivenUp:
     """A practitioner reported a third more usable context by dropping the batch
-    from 4096/1024 to 128/512 with no throughput they could measure. llmfit was
+    from 4096/1024 to 128/512 with no throughput they could measure. llmsetup was
     fixing the batch before it fitted the context, so it cut the context
     instead."""
 
@@ -177,9 +177,9 @@ class TestExpertsMoveByTheTensor:
 
 class TestItReachesTheCommandLine:
     def test_a_partial_offload_emits_its_pattern(self, catalog):
-        from llmfit.runtimes.llamacpp import LlamaCppRuntime
-        from llmfit.tuning.profiles import AdvancedProfile, OffloadPlan
-        from llmfit.types import RuntimeConfig
+        from llmsetup.runtimes.llamacpp import LlamaCppRuntime
+        from llmsetup.tuning.profiles import AdvancedProfile, OffloadPlan
+        from llmsetup.types import RuntimeConfig
 
         config = RuntimeConfig(runtime="llamacpp", model_id="m", quant="Q4_K_M",
                                context_tokens=8192, gpu_layers=48, total_layers=48)
@@ -196,7 +196,7 @@ class TestItReachesTheCommandLine:
 class TestBatchGrowsIntoHeadroom:
     """The case that exposed this: someone ran a 35B mixture of experts on a
     6 GB laptop card at `-ub 2048` and measured 350-400 prompt tokens per
-    second. llmfit sized the batch from the card alone and gave that machine
+    second. llmsetup sized the batch from the card alone and gave that machine
     256, because a table indexed on VRAM cannot see that most of the model's
     weight is not on the card."""
 
@@ -237,7 +237,7 @@ class TestBatchGrowsIntoHeadroom:
     def test_what_it_grows_to_still_fits(self, catalog):
         """A batch grown past the budget is an out-of-memory error dressed up as
         a tuning decision."""
-        from llmfit.planner.memory import overhead_bytes
+        from llmsetup.planner.memory import overhead_bytes
 
         hardware = make_hardware(vram_gb=6, ram_gb=64)
         tuned = self._tuned(catalog, "qwen3.6-35b-a3b", vram_gb=6, context=102400)

@@ -6,8 +6,8 @@ import struct
 
 import pytest
 
-from llmfit.gguf import apply_to_spec, read_gguf_info
-from llmfit.types import ModelSpec
+from llmsetup.gguf import apply_to_spec, read_gguf_info
+from llmsetup.types import ModelSpec
 
 
 def _string(value: str) -> bytes:
@@ -140,7 +140,7 @@ class TestCorrection:
     def test_correction_changes_the_memory_estimate(self, tmp_path):
         """The point of the whole mechanism: a wrong KV head count is a wrong
         memory plan, and this is what catches it before an OOM does."""
-        from llmfit.planner.memory import estimate_memory
+        from llmsetup.planner.memory import estimate_memory
 
         # Match every other field so only the KV head count differs.
         spec = self.base_spec(layers=36, kv_heads=8, hidden_size=4096, head_dim=128)

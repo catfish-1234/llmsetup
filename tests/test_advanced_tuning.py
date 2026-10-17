@@ -9,18 +9,18 @@ from __future__ import annotations
 import pytest
 from conftest import make_hardware
 
-from llmfit.planner import moe
-from llmfit.planner.plan import build_plan
-from llmfit.runtimes.registry import get_runtime
-from llmfit.tuning.advanced import (
+from llmsetup.planner import moe
+from llmsetup.planner.plan import build_plan
+from llmsetup.runtimes.registry import get_runtime
+from llmsetup.tuning.advanced import (
     plan_reasoning,
     plan_rope,
     plan_sampler,
     plan_serving,
 )
-from llmfit.tuning.profiles import ReasoningEffort, SamplerChain
-from llmfit.tuning.tuner import tune
-from llmfit.types import GIB, Task, UseCaseProfile
+from llmsetup.tuning.profiles import ReasoningEffort, SamplerChain
+from llmsetup.tuning.tuner import tune
+from llmsetup.types import GIB, Task, UseCaseProfile
 
 
 def tuned(catalog, model_id, hardware, profile, runtime="llamacpp"):
@@ -111,7 +111,7 @@ class TestOffloadPlanning:
 
     def test_multiple_gpus_get_a_proportional_split(self, catalog):
         hardware = make_hardware(vram_gb=24, ram_gb=128)
-        from llmfit.types import GPU, Accelerator
+        from llmsetup.types import GPU, Accelerator
 
         hardware.gpus.append(
             GPU(1, "NVIDIA RTX 4090", Accelerator.NVIDIA, 24 * GIB, compute_capability="8.9")
@@ -148,7 +148,7 @@ class TestSpeculativeDecoding:
         so a cross-family pairing is worse than none. Tested against the pairing
         function directly, since the surrounding plan may decline for unrelated
         reasons (task, memory) and hide a bad pairing."""
-        from llmfit.tuning.advanced import _pick_draft
+        from llmsetup.tuning.advanced import _pick_draft
 
         target = catalog.require(model_id)
         draft, ratio = _pick_draft(target, catalog)
@@ -160,7 +160,7 @@ class TestSpeculativeDecoding:
     def test_a_model_with_no_small_sibling_gets_no_draft(self, catalog):
         """Mistral has no draft-capable model in its family, so the honest
         answer is none rather than a mismatched one."""
-        from llmfit.tuning.advanced import _pick_draft
+        from llmsetup.tuning.advanced import _pick_draft
 
         draft, _ = _pick_draft(catalog.require("mistral-small-3.2-24b"), catalog)
         assert draft is None
@@ -178,7 +178,7 @@ class TestSpeculativeDecoding:
         """Every byte the draft holds is a byte not available for context, so a
         draft that does not fit is not loaded. Drafting from the prompt itself
         costs nothing, so that is offered instead."""
-        from llmfit.tuning.profiles import SpecType
+        from llmsetup.tuning.profiles import SpecType
 
         hardware = make_hardware(vram_gb=24, ram_gb=64)
         result = tuned(catalog, "qwen3-32b", hardware,
@@ -403,7 +403,7 @@ class TestLlamaSwap:
     VRAM fits one model at a time but the user wants a choice."""
 
     def _entries(self, catalog):
-        from llmfit.runtimes.registry import get_runtime
+        from llmsetup.runtimes.registry import get_runtime
 
         entries = []
         hardware = make_hardware(vram_gb=24, ram_gb=64)
@@ -417,7 +417,7 @@ class TestLlamaSwap:
         return entries
 
     def test_builds_a_config_with_every_model(self, catalog):
-        from llmfit.interop.llama_swap import build_config
+        from llmsetup.interop.llama_swap import build_config
 
         document = build_config(self._entries(catalog))
         assert set(document["models"]) == {"qwen3-8b", "qwen3-14b"}
@@ -427,7 +427,7 @@ class TestLlamaSwap:
 
     def test_models_are_exclusive_so_they_swap(self, catalog):
         """They do not all fit at once; that is the reason to run llama-swap."""
-        from llmfit.interop.llama_swap import build_config
+        from llmsetup.interop.llama_swap import build_config
 
         document = build_config(self._entries(catalog))
         assert document["groups"]["default"]["exclusive"] is True
@@ -436,7 +436,7 @@ class TestLlamaSwap:
     def test_the_config_is_valid_yaml_on_disk(self, catalog, tmp_path):
         import yaml
 
-        from llmfit.interop.llama_swap import write_config
+        from llmsetup.interop.llama_swap import write_config
 
         record = write_config(self._entries(catalog), path=tmp_path / "swap.yaml")
         assert record["ok"]
@@ -444,9 +444,9 @@ class TestLlamaSwap:
         assert len(parsed["models"]) == 2
 
     def test_each_command_carries_the_tuning(self, catalog):
-        """The point of generating this is that llmfit already knows the tuned
+        """The point of generating this is that llmsetup already knows the tuned
         command; a config with untuned commands would be worthless."""
-        from llmfit.interop.llama_swap import build_config
+        from llmsetup.interop.llama_swap import build_config
 
         document = build_config(self._entries(catalog))
         for entry in document["models"].values():
@@ -456,8 +456,8 @@ class TestLlamaSwap:
 
 class TestReportSurfacesDeepSettings:
     def test_the_markdown_report_explains_each_non_default(self, catalog):
-        from llmfit.report.render import render_markdown
-        from llmfit.types import SetupResult
+        from llmsetup.report.render import render_markdown
+        from llmsetup.types import SetupResult
 
         hardware = make_hardware(vram_gb=12, ram_gb=64)
         profile = UseCaseProfile(tasks=[Task.CHAT], context_tokens=8192)

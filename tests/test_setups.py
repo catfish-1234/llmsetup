@@ -11,13 +11,13 @@ from __future__ import annotations
 import pytest
 from conftest import make_hardware
 
-from llmfit.planner.plan import build_plan, plan_completion_model
-from llmfit.runtimes.registry import choose_runtime
-from llmfit.tuning.profiles import ReasoningEffort
-from llmfit.tuning.sampling import sampling_for
-from llmfit.tuning.tuner import tune
-from llmfit.types import Task, UseCaseProfile
-from llmfit.verify.harness import select_checks
+from llmsetup.planner.plan import build_plan, plan_completion_model
+from llmsetup.runtimes.registry import choose_runtime
+from llmsetup.tuning.profiles import ReasoningEffort
+from llmsetup.tuning.sampling import sampling_for
+from llmsetup.tuning.tuner import tune
+from llmsetup.types import Task, UseCaseProfile
+from llmsetup.verify.harness import select_checks
 
 
 class TestCompletionModelChoice:

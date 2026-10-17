@@ -4,10 +4,10 @@ import json
 
 import pytest
 
-from llmfit.cli import build_parser, main
-from llmfit.interview.wizard import profile_from_answers
-from llmfit.types import Task
-from llmfit.util.errors import LlmfitError
+from llmsetup.cli import build_parser, main
+from llmsetup.interview.wizard import profile_from_answers
+from llmsetup.types import Task
+from llmsetup.util.errors import LlmsetupError
 
 
 @pytest.mark.parametrize("flag", ["--top", "--threads", "--users", "--context"])
@@ -38,7 +38,7 @@ def test_string_booleans_have_their_stated_meaning(value, expected):
 
 
 def test_scalar_task_keeps_task_inference():
-    from llmfit.interview.questions import infer_flags
+    from llmsetup.interview.questions import infer_flags
 
     profile = profile_from_answers(infer_flags({"tasks": "agent"}))
     assert profile.tasks == [Task.AGENT]
@@ -49,7 +49,7 @@ def test_offline_flag_prevents_catalog_fetch(monkeypatch, capsys):
     def unexpected(*args, **kwargs):
         pytest.fail("offline planning must not fetch a catalog")
 
-    monkeypatch.setattr("llmfit.catalog.autoupdate.fetch_catalog", unexpected)
+    monkeypatch.setattr("llmsetup.catalog.autoupdate.fetch_catalog", unexpected)
     assert main(["plan", "--offline", "--json", "--cpu-only", "--ram", "64",
                  "--task", "chat", "--yes"]) == 0
     assert json.loads(capsys.readouterr().out)["candidates"]
@@ -60,7 +60,7 @@ def test_json_mode_never_starts_the_interview(monkeypatch, capsys):
         pytest.fail("JSON output must not start an interactive wizard")
 
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
-    monkeypatch.setattr("llmfit.cli.run_interview", unexpected)
+    monkeypatch.setattr("llmsetup.cli.run_interview", unexpected)
     assert main(["plan", "--json", "--offline", "--cpu-only", "--ram", "64"]) == 0
     assert json.loads(capsys.readouterr().out)["candidates"]
 
@@ -73,12 +73,12 @@ def test_answers_file_skips_interview_even_without_tasks(tmp_path, monkeypatch, 
     def unexpected(*args, **kwargs):
         pytest.fail("--answers is documented to skip questions")
 
-    monkeypatch.setattr("llmfit.cli.run_interview", unexpected)
+    monkeypatch.setattr("llmsetup.cli.run_interview", unexpected)
     assert main(["plan", "--answers", str(path), "--offline", "--cpu-only", "--ram", "64"]) == 0
 
 
 def test_profile_numeric_errors_name_the_field():
-    with pytest.raises(LlmfitError, match="concurrent_users"):
+    with pytest.raises(LlmsetupError, match="concurrent_users"):
         profile_from_answers({"concurrent_users": "many"})
 
 

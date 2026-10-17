@@ -6,16 +6,16 @@ import json
 
 import pytest
 
-from llmfit.cli import build_parser, main
-from llmfit.hardware.detect import apply_overrides, detect_hardware
-from llmfit.report.render import render_markdown
-from llmfit.types import GIB, Accelerator, Task, UseCaseProfile
+from llmsetup.cli import build_parser, main
+from llmsetup.hardware.detect import apply_overrides, detect_hardware
+from llmsetup.report.render import render_markdown
+from llmsetup.types import GIB, Accelerator, Task, UseCaseProfile
 
 
 @pytest.fixture(autouse=True)
 def no_catalog_network(monkeypatch):
     # CLI tests exercise the bundled snapshot; updater tests fake their source.
-    monkeypatch.setenv("LLMFIT_AUTO_UPDATE", "0")
+    monkeypatch.setenv("LLMSETUP_AUTO_UPDATE", "0")
 
 
 class TestParser:
@@ -124,8 +124,8 @@ class TestDryRunPipeline:
         needs the network."""
         from conftest import make_hardware
 
-        from llmfit.pipeline import Pipeline
-        from llmfit.util.log import Console
+        from llmsetup.pipeline import Pipeline
+        from llmsetup.util.log import Console
 
         pipeline = Pipeline(
             UseCaseProfile(tasks=[Task.CODING], needs_tools=True, context_tokens=32768),
@@ -142,8 +142,8 @@ class TestDryRunPipeline:
         """A dry run has proved nothing, and the report must reflect that."""
         from conftest import make_hardware
 
-        from llmfit.pipeline import Pipeline
-        from llmfit.util.log import Console
+        from llmsetup.pipeline import Pipeline
+        from llmsetup.util.log import Console
 
         pipeline = Pipeline(UseCaseProfile(tasks=[Task.CHAT]),
                             make_hardware(), catalog, Console(quiet=True),
@@ -154,8 +154,8 @@ class TestDryRunPipeline:
     def test_the_markdown_report_records_the_decision(self, catalog):
         from conftest import make_hardware
 
-        from llmfit.pipeline import Pipeline
-        from llmfit.util.log import Console
+        from llmsetup.pipeline import Pipeline
+        from llmsetup.util.log import Console
 
         pipeline = Pipeline(
             UseCaseProfile(tasks=[Task.CODING], context_tokens=32768),
@@ -170,8 +170,8 @@ class TestSetupResultSerialisation:
     def test_round_trips_through_json(self, catalog):
         from conftest import make_hardware
 
-        from llmfit.pipeline import Pipeline
-        from llmfit.util.log import Console
+        from llmsetup.pipeline import Pipeline
+        from llmsetup.util.log import Console
 
         pipeline = Pipeline(UseCaseProfile(tasks=[Task.CHAT]), make_hardware(),
                             catalog, Console(quiet=True), dry_run=True)
@@ -187,8 +187,8 @@ class TestNeverClaimsUntestedSuccess:
     def _dry_run(self, catalog):
         from conftest import make_hardware
 
-        from llmfit.pipeline import Pipeline
-        from llmfit.util.log import Console
+        from llmsetup.pipeline import Pipeline
+        from llmsetup.util.log import Console
 
         return Pipeline(UseCaseProfile(tasks=[Task.CHAT]), make_hardware(),
                         catalog, Console(quiet=True), dry_run=True).run()
@@ -201,8 +201,8 @@ class TestNeverClaimsUntestedSuccess:
     def test_the_terminal_report_says_nothing_was_tested(self, catalog, capsys):
         import sys
 
-        from llmfit.report.render import render_terminal
-        from llmfit.util.log import Console
+        from llmsetup.report.render import render_terminal
+        from llmsetup.util.log import Console
 
         render_terminal(self._dry_run(catalog), Console(stream=sys.stdout, color=False))
         out = capsys.readouterr().out
@@ -215,7 +215,7 @@ class TestNeverClaimsUntestedSuccess:
         assert "no claim is made that it works" in markdown
 
     def test_skipped_checks_do_not_count_as_having_run(self, catalog):
-        from llmfit.types import CheckResult, CheckStatus, Severity
+        from llmsetup.types import CheckResult, CheckStatus, Severity
 
         result = self._dry_run(catalog)
         result.checks = [CheckResult("context", CheckStatus.SKIP, Severity.ADVISORY,
@@ -259,7 +259,7 @@ class TestReportCommand:
     def test_says_what_to_do_when_there_is_nothing_saved(self, capsys):
         code = main(["report"])
         assert code != 0
-        assert "llmfit setup" in capsys.readouterr().err
+        assert "llmsetup setup" in capsys.readouterr().err
 
     def test_prints_a_report_it_is_handed(self, capsys, tmp_path):
         saved = tmp_path / "old-report.md"
