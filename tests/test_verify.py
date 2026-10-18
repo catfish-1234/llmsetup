@@ -21,6 +21,7 @@ from llmsetup.verify.checks import (
     check_health,
     check_json,
     check_stability,
+    check_streaming,
     check_tools,
 )
 from llmsetup.verify.client import ChatResult
@@ -375,3 +376,48 @@ class TestReasoningTruncation:
         result = check_completion(ctx)
         assert result.status is CheckStatus.FAIL
         assert result.failure_signature == sig.EMPTY_RESPONSE
+
+class TestShapelessTruncation:
+    """Some servers report a thinking-truncated reply with no reasoning field,
+    no usage and a "stop" finish reason. The stability probe must ask once
+    more with room for the thinking budget before calling it empty."""
+
+    def test_stability_retries_shapeless_empty_with_thinking_headroom(self, catalog):
+        budgets = []
+
+        def chat(messages, **kwargs):
+            budgets.append(kwargs["max_tokens"])
+            if kwargs["max_tokens"] <= 96:
+                return ChatResult(ok=True, text="", finish_reason="stop")
+            return ChatResult(ok=True, text="It is a number.", finish_reason="stop")
+
+        ctx = context(FakeClient(chat=chat), catalog)
+        result = check_stability(ctx)
+        assert result.status is CheckStatus.PASS
+        assert result.metrics["thinking_only_responses"] == 4
+        assert budgets[0] == 96 and budgets[1] > 96
+
+    def test_stability_fails_when_the_retry_is_empty_too(self, catalog):
+        ctx = context(FakeClient(chat=ChatResult(ok=True, text="", finish_reason="stop")),
+                      catalog)
+        result = check_stability(ctx)
+        assert result.status is CheckStatus.FAIL
+        assert result.failure_signature == sig.EMPTY_RESPONSE
+        assert "finish_reason" in result.detail
+
+    def test_streaming_counts_thinking_chunks(self, catalog, monkeypatch):
+        from llmsetup.runtimes.base import Endpoint
+        from llmsetup.verify.client import OpenAIClient
+
+        lines = iter([
+            'data: {"choices": [{"delta": {"reasoning_content": "thinking"}}]}',
+            'data: {"choices": [{"delta": {"reasoning_content": " more"}}]}',
+            'data: {"choices": [{"delta": {"content": "1 2 3"}}]}',
+            'data: [DONE]',
+        ])
+        monkeypatch.setattr("llmsetup.util.http.stream_lines", lambda *a, **kw: lines)
+        ctx = context(FakeClient(), catalog)
+        ctx.client = OpenAIClient(Endpoint("http://fixture.invalid", "m", "llamacpp"))
+        result = check_streaming(ctx)
+        assert result.status is CheckStatus.PASS
+        assert result.metrics["chunks"] == 3
