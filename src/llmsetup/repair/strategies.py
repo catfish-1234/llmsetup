@@ -55,6 +55,9 @@ class RepairState:
     #: Shrinking multiplier applied to the memory budget after each OOM. Reality
     #: has beaten our estimate, so the next attempt assumes less room.
     budget_factor: float = 0.92
+    #: Only the pipeline's final, explicitly reported fallback may release a
+    #: requested model after its own repair and runtime paths have been tried.
+    allow_model_switch: bool = False
 
     @property
     def budget(self) -> int:
@@ -138,6 +141,8 @@ def _quantize_kv(state: RepairState) -> Optional[Outcome]:
     after everything cheaper has been tried.
     """
     config = state.config
+    if config.runtime == "mlx":
+        return None
     nxt = cheaper_kv_quant(config.kv_cache_type)
     if nxt is None:
         return None
@@ -163,6 +168,8 @@ def _quantize_kv_lossy(state: RepairState) -> Optional[Outcome]:
     enough context to be a genuine trade -- and it says plainly what it cost.
     """
     config = state.config
+    if config.runtime in ("mlx", "vllm"):
+        return None
     if not kv_lossy_allowed(config.context_tokens):
         return None
     nxt = cheaper_kv_quant(config.kv_cache_type, allow_lossy=True)
@@ -263,6 +270,10 @@ def _reduce_gpu_layers(state: RepairState) -> Optional[Outcome]:
 
 def _drop_quant_tier(state: RepairState) -> Optional[Outcome]:
     """Move to a smaller quantization of the same model."""
+    if state.config.runtime in ("vllm", "mlx"):
+        # Native weights have the precision supplied by their repository. A
+        # different GGUF quant label would not change the downloaded weights.
+        return None
     spec = state.candidate.model
     quants = list(spec.recommended_quants)
     current = state.config.quant
@@ -280,14 +291,16 @@ def _drop_quant_tier(state: RepairState) -> Optional[Outcome]:
     state.config.model_path = None                 # must be re-fetched
     saved = (state.catalog.bpw(current) - state.catalog.bpw(target)) / 8 * spec.params_b
     return Outcome(
-        f"dropped from {current} to {target}, saving about {saved:.1f} GB of weights "
-        f"at a real but modest quality cost",
+        f"dropped from {current} to {target}, saving about {saved:.1f} GB of weights; "
+        f"lower weight precision may reduce output quality",
         cost="high", before=before, after={"quant": target},
     )
 
 
 def _switch_model(state: RepairState) -> Optional[Outcome]:
     """Last resort: the next-best model from the plan."""
+    if state.profile.requested_model and not state.allow_model_switch:
+        return None
     if not state.fallbacks:
         return None
     nxt = state.fallbacks.pop(0)
@@ -634,6 +647,11 @@ def _use_cached_model(state: RepairState) -> Optional[Outcome]:
         return None
     cached = []
     for spec in state.catalog.models:
+        if (state.profile.requested_model and not state.allow_model_switch and
+                spec.id != state.profile.requested_model):
+            continue
+        if state.allow_model_switch and spec.id == state.profile.requested_model:
+            continue
         quants = [quant for quant in spec.recommended_quants
                   if (spec.id, quant) != (state.config.model_id, state.config.quant)
                   and find_local(spec, quant)]
@@ -643,7 +661,9 @@ def _use_cached_model(state: RepairState) -> Optional[Outcome]:
         return None
     try:
         plan = build_adaptive_plan(
-            replace(state.profile, context_tokens=state.config.context_tokens), state.hardware,
+            replace(state.profile, context_tokens=state.config.context_tokens,
+                    requested_model=(None if state.allow_model_switch else
+                                     state.profile.requested_model)), state.hardware,
             Catalog(cached, state.catalog.quant_bpw), runtime=state.config.runtime,
         )
     except PlanningError:
@@ -756,7 +776,8 @@ STRATEGIES: List[RepairStrategy] = [
                    _quantize_kv_lossy),
     RepairStrategy("reduce_gpu_layers", _MEMORY_SIGNATURES, "high", _reduce_gpu_layers),
     RepairStrategy("cpu_fallback", _MEMORY_SIGNATURES, "high", _cpu_fallback),
-    RepairStrategy("drop_quant_tier", _MEMORY_SIGNATURES, "high", _drop_quant_tier),
+    RepairStrategy("drop_quant_tier", _MEMORY_SIGNATURES, "high", _drop_quant_tier,
+                   exhausts_itself=True),
     RepairStrategy("switch_model",
                    (*_MEMORY_SIGNATURES, sig.PROVISION_FAILED, sig.CORRUPT_WEIGHTS,
                     sig.CONTEXT_EXCEEDED, sig.MODEL_NOT_LOADED,
