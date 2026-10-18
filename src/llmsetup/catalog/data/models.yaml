@@ -153,6 +153,7 @@ models:
     supports_json: true
     gguf_repo: unsloth/Qwen3-Coder-Next-GGUF
     hf_repo: Qwen/Qwen3-Coder-Next
+    ollama_name: qwen3-coder-next
     recommended_quants: [Q4_K_M, Q5_K_M]
     arch_source: estimated
     notes: >
@@ -322,6 +323,7 @@ models:
     is_reasoning: true
     gguf_repo: unsloth/Qwen3-235B-A22B-GGUF
     hf_repo: Qwen/Qwen3-235B-A22B
+    ollama_name: qwen3:235b
     recommended_quants: [Q4_K_M, Q3_K_M]
     arch_source: measured
     notes: Workstation and server class, about 140 GB at Q4. Listed so big rigs get an answer.
@@ -719,6 +721,7 @@ models:
     supports_vision: false
     supports_json: true
     hf_repo: Qwen/Qwen2.5-7B-Instruct
+    ollama_name: qwen2.5:7b
     recommended_quants:
     - Q4_K_M
     - Q5_K_M
@@ -747,6 +750,7 @@ models:
     supports_vision: false
     supports_json: true
     hf_repo: Qwen/Qwen2.5-3B-Instruct
+    ollama_name: qwen2.5:3b
     recommended_quants:
     - Q4_K_M
     - Q5_K_M
@@ -775,6 +779,7 @@ models:
     supports_vision: false
     supports_json: true
     hf_repo: Qwen/Qwen2.5-1.5B-Instruct
+    ollama_name: qwen2.5:1.5b
     recommended_quants:
     - Q4_K_M
     - Q5_K_M
@@ -803,6 +808,7 @@ models:
     supports_vision: false
     supports_json: true
     hf_repo: Qwen/Qwen2.5-0.5B-Instruct
+    ollama_name: qwen2.5:0.5b
     recommended_quants:
     - Q4_K_M
     - Q5_K_M
@@ -889,6 +895,7 @@ models:
     supports_vision: false
     supports_json: true
     hf_repo: Qwen/Qwen2.5-14B-Instruct
+    ollama_name: qwen2.5:14b
     recommended_quants:
     - Q4_K_M
     - Q5_K_M
@@ -919,6 +926,7 @@ models:
     supports_vision: false
     supports_json: true
     hf_repo: Qwen/Qwen2.5-Coder-7B-Instruct
+    ollama_name: qwen2.5-coder:7b
     recommended_quants:
     - Q4_K_M
     - Q5_K_M
@@ -949,6 +957,7 @@ models:
     supports_vision: false
     supports_json: true
     hf_repo: Qwen/Qwen2.5-32B-Instruct
+    ollama_name: qwen2.5:32b
     recommended_quants:
     - Q4_K_M
     - Q5_K_M
@@ -975,6 +984,7 @@ models:
     supports_vision: false
     supports_json: true
     hf_repo: Qwen/Qwen3-30B-A3B
+    ollama_name: qwen3:30b
     recommended_quants:
     - Q4_K_M
     - Q5_K_M
@@ -1032,6 +1042,7 @@ models:
     supports_vision: false
     supports_json: true
     hf_repo: Qwen/Qwen2.5-Coder-14B-Instruct
+    ollama_name: qwen2.5-coder:14b
     recommended_quants:
     - Q4_K_M
     - Q5_K_M
@@ -1062,6 +1073,7 @@ models:
     supports_vision: false
     supports_json: true
     hf_repo: Qwen/Qwen2.5-Coder-32B-Instruct
+    ollama_name: qwen2.5-coder:32b
     recommended_quants:
     - Q4_K_M
     - Q5_K_M
@@ -1267,6 +1279,7 @@ models:
     supports_vision: false
     supports_json: true
     hf_repo: deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B
+    ollama_name: deepseek-r1:1.5b
     recommended_quants:
     - Q4_K_M
     - Q5_K_M
