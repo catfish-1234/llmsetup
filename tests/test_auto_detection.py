@@ -15,7 +15,7 @@ from llmsetup.util.errors import PlanningError
 def test_question_bank_collects_goals_only():
     allowed = {"tasks", "clients", "context_tokens", "priority", "concurrent_users",
                "needs_tools", "needs_json", "needs_vision", "needs_embeddings",
-               "languages", "commercial_use"}
+               "languages", "commercial_use", "requested_model"}
     assert {question.key for question in QUESTIONS} <= allowed
 
 

@@ -150,6 +150,12 @@ QUESTIONS: List[Question] = [
         why="Filters out models whose licence does not permit it, so you do not "
             "find out later.",
     ),
+    Question(
+        key="requested_model", prompt="Do you have a specific model in mind?",
+        kind="text", default="",
+        why="Enter a catalog model ID or name to review its hardware fit and task "
+            "tradeoffs. Leave blank for an automatic recommendation.",
+    ),
 ]
 
 
