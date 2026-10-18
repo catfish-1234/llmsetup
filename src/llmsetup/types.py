@@ -86,6 +86,8 @@ class UseCaseProfile:
     offline_only: bool = False
     max_disk_gb: Optional[float] = None
     notes: str = ""
+    #: Canonical catalog ID explicitly retained by the user after assessment.
+    requested_model: Optional[str] = None
 
     @property
     def primary_task(self) -> Task:

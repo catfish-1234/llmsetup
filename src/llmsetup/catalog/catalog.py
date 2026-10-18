@@ -86,7 +86,11 @@ class Catalog:
         for key, value in self.quant_bpw.items():
             if key.upper() == upper:
                 return value
-        return DEFAULT_BPW
+        # Native formats can be selected for a retained model even when the
+        # catalog only lists GGUF quantizations. Keep later tuning/recovery
+        # estimates consistent with the planner's actual weight format.
+        return {"F16": 16.0, "BF16": 16.0, "MLX2": 2.85,
+                "MLX4": 4.85, "MLX8": 8.5}.get(upper, DEFAULT_BPW)
 
     # ----------------------------------------------------------------- queries
 

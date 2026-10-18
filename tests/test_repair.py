@@ -139,11 +139,15 @@ class TestEscalation:
                           console=Console(quiet=True), max_repairs=20)
         _, journal = loop.run(fail(sig.OUT_OF_MEMORY))
         names = [a.strategy for a in journal]
-        single_use = [name for name in names if name not in {"reduce_context", "switch_model"}]
+        single_use = [name for name in names
+                      if name not in {"reduce_context", "drop_quant_tier", "switch_model"}]
         assert len(single_use) == len(set(single_use))
         contexts = [action.after["context_tokens"] for action in journal
                     if action.strategy == "reduce_context"]
         assert contexts == sorted(set(contexts), reverse=True)
+        for action in journal:
+            if action.strategy == "drop_quant_tier":
+                assert catalog.bpw(action.after["quant"]) < catalog.bpw(action.before["quant"])
         assert names.count("switch_model") <= len(catalog.models)
 
     def test_a_passing_setup_is_left_alone(self, catalog):
