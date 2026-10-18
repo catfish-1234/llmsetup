@@ -31,12 +31,44 @@ ASSETS = {
     ("windows", "x86_64"): ("win-cpu-x64.zip", "37b3efcf962847ca869745fd4ccf7f5e7e8dacfeff9fa3523b4ca8cdc66d632b"),
     ("windows", "arm64"): ("win-cpu-arm64.zip", "9cff39ffed17edcd03a7d876073f74d7b48cd43a1e5eafdd59ee094185ad871b"),
 }
+
+#: GPU-capable variants, one self-contained archive (the CUDA builds need a
+#: separate cudart download and a matching driver; Vulkan ships everything and
+#: runs on any recent NVIDIA/AMD/Intel card). Used only when a GPU is present.
+GPU_ASSETS = {
+    ("windows", "x86_64"): ("vulkan", "win-vulkan-x64.zip",
+                            "2c07574e7bde71321cb785282b20cc821e951132149eeceeea32ddebdbf0598e"),
+}
 _MAX_ARCHIVE = 512 * 1024 ** 2
 _MAX_EXTRACTED = 2 * 1024 ** 3
 
 
 def _root(hardware: HardwareProfile) -> Path:
     return app_dir() / "runtimes" / f"llamacpp-{BUILD}" / f"{hardware.os}-{hardware.arch}"
+
+
+def desired_flavor(hardware: HardwareProfile) -> str:
+    """The managed build this machine should have: GPU-capable when there is a
+    GPU and a self-contained GPU build exists for the platform, else CPU."""
+    if hardware.gpus and (hardware.os, hardware.arch) in GPU_ASSETS:
+        return GPU_ASSETS[(hardware.os, hardware.arch)][0]
+    return "cpu"
+
+
+def managed_flavor(hardware: Optional[HardwareProfile] = None) -> Optional[str]:
+    """The flavor of the installed managed build. None when nothing is
+    installed; installs predating flavor markers are the CPU build."""
+    if hardware is None:
+        import platform
+
+        from llmsetup.hardware.cpu import normalized_arch
+
+        hardware = HardwareProfile(os=platform.system().lower(), arch=normalized_arch())
+    marker = _root(hardware) / ".flavor"
+    try:
+        return marker.read_text(encoding="utf-8").strip() or None
+    except OSError:
+        return "cpu" if managed_binary(hardware) is not None else None
 
 
 def managed_binary(hardware: Optional[HardwareProfile] = None) -> Optional[Path]:
@@ -112,16 +144,28 @@ def _unpack(archive: Path, dest: Path) -> None:
                 target.chmod(original.mode & 0o777)
 
 
-def install_llamacpp(hardware: HardwareProfile, console: Console) -> Path:
+def install_llamacpp(hardware: HardwareProfile, console: Console,
+                     flavor: Optional[str] = None) -> Path:
     """Fetch a pinned, checksum-verified portable build and check it can execute."""
-    asset = ASSETS.get((hardware.os, hardware.arch))
-    if asset is None:
-        raise ProvisionError(f"no portable llama.cpp build for {hardware.os}/{hardware.arch}")
+    flavor = flavor or desired_flavor(hardware)
+    gpu_entry = GPU_ASSETS.get((hardware.os, hardware.arch))
+    if gpu_entry is not None and flavor == gpu_entry[0]:
+        _, suffix, digest = gpu_entry
+    else:
+        flavor = "cpu"
+        asset = ASSETS.get((hardware.os, hardware.arch))
+        if asset is None:
+            raise ProvisionError(f"no portable llama.cpp build for {hardware.os}/{hardware.arch}")
+        suffix, digest = asset
     existing = managed_binary(hardware)
-    if existing is not None:
+    if existing is not None and managed_flavor(hardware) == flavor:
         return existing
-    suffix, digest = asset
     root = _root(hardware)
+    if root.exists():
+        # A different flavor than this machine should run (usually the CPU
+        # build on a machine with a GPU). Replace it wholesale; the archives
+        # are self-contained and nothing else writes here.
+        shutil.rmtree(root)
     root.parent.mkdir(parents=True, exist_ok=True)
     url = f"https://github.com/ggml-org/llama.cpp/releases/download/{BUILD}/llama-{BUILD}-bin-{suffix}"
     console.info(f"installing verified llama.cpp {BUILD} in {root}")
@@ -162,5 +206,6 @@ def install_llamacpp(hardware: HardwareProfile, console: Console) -> Path:
             raise ProvisionError(f"portable llama.cpp cannot run on this system: {probe.output[-1000:]}")
         if root.exists():
             raise ProvisionError(f"incomplete runtime installation at {root}")
+        (dest / ".flavor").write_text(flavor, encoding="utf-8")
         dest.rename(root)
         return root / binary.relative_to(dest)

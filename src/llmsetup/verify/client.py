@@ -147,11 +147,15 @@ class OpenAIClient:
                     continue
                 delta = (parsed.get("choices") or [{}])[0].get("delta") or {}
                 content = delta.get("content")
-                if content:
+                # A reasoning model streams its thinking block first; those
+                # chunks are still incremental output the client sees arriving.
+                thinking = delta.get("reasoning_content") or delta.get("thinking")
+                if content or thinking:
                     if first_token_at is None:
                         first_token_at = time.monotonic()
                     chunks += 1
-                    text.append(content)
+                    if content:
+                        text.append(content)
         except Exception as exc:
             error = str(exc)
 

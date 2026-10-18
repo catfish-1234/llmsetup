@@ -368,3 +368,28 @@ def test_cpu_attempt_replans_when_the_fetched_model_cannot_fit_ram(flow, catalog
             model=SimpleNamespace(id="qwen3-235b-a22b"))))
     profile = pipe._cpu_profile(pipe.profile, pipe.hardware, last)
     assert profile.requested_model is None
+
+def test_ensure_gpu_runtime_fetches_vulkan_build_when_cpu_build_present(flow, monkeypatch):
+    from llmsetup.runtimes import install as install_mod
+    pipe = _pipe(make_hardware(vram_gb=8, os_name="windows"), None)
+    calls = []
+    monkeypatch.setattr(install_mod, "managed_flavor", lambda *a: "cpu")
+    monkeypatch.setattr(install_mod, "install_llamacpp",
+                        lambda hardware, console, flavor=None: calls.append(flavor))
+    monkeypatch.setattr("llmsetup.util.proc.which", lambda *a: None)
+    pipe._ensure_gpu_runtime(pipe.hardware)
+    assert calls == ["vulkan"]
+
+
+def test_ensure_gpu_runtime_noops_with_system_server_or_right_flavor(flow, monkeypatch):
+    from llmsetup.runtimes import install as install_mod
+    pipe = _pipe(make_hardware(vram_gb=8, os_name="windows"), None)
+    calls = []
+    monkeypatch.setattr(install_mod, "install_llamacpp",
+                        lambda hardware, console, flavor=None: calls.append(flavor))
+    monkeypatch.setattr("llmsetup.util.proc.which", lambda *a: "/usr/bin/llama-server")
+    pipe._ensure_gpu_runtime(pipe.hardware)
+    monkeypatch.setattr("llmsetup.util.proc.which", lambda *a: None)
+    monkeypatch.setattr(install_mod, "managed_flavor", lambda *a: "vulkan")
+    pipe._ensure_gpu_runtime(pipe.hardware)
+    assert calls == []

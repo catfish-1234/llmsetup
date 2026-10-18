@@ -139,3 +139,60 @@ def test_unusable_verified_binary_is_not_committed(monkeypatch):
     with pytest.raises(ProvisionError, match="unsupported CPU"):
         install.install_llamacpp(hardware, Console(quiet=True))
     assert install.managed_binary(hardware) is None
+
+def gpu_zip(data=b"fixture"):
+    stream = io.BytesIO()
+    with zipfile.ZipFile(stream, "w") as archive:
+        archive.writestr("llama-server.exe", data)
+    return stream.getvalue()
+
+
+def test_desired_flavor_prefers_vulkan_on_windows_with_gpu():
+    hardware = make_hardware(vram_gb=8, os_name="windows")
+    assert install.desired_flavor(hardware) == "vulkan"
+
+
+def test_desired_flavor_stays_cpu_without_gpu_or_gpu_build():
+    assert install.desired_flavor(make_hardware(vram_gb=0, os_name="windows")) == "cpu"
+    assert install.desired_flavor(make_hardware(vram_gb=8, os_name="linux")) == "cpu"
+
+
+def test_gpu_install_marks_flavor_and_replaces_a_cpu_install(monkeypatch):
+    data = gpu_zip()
+    hardware = make_hardware(vram_gb=8, os_name="windows")
+    monkeypatch.setitem(install.GPU_ASSETS, ("windows", "x86_64"),
+                        ("vulkan", "test-gpu.zip", hashlib.sha256(data).hexdigest()))
+    monkeypatch.setitem(install.ASSETS, ("windows", "x86_64"),
+                        ("test-cpu.zip", hashlib.sha256(data).hexdigest()))
+    requested = []
+
+    def urlopen(request, **kw):
+        requested.append(request.full_url)
+        return io.BytesIO(data)
+
+    monkeypatch.setattr(install.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(install, "run",
+                        lambda command, **kw: CommandResult(0, "llama-server fixture", ""))
+
+    binary = install.install_llamacpp(hardware, Console(quiet=True))
+    assert binary.is_file()
+    assert "test-gpu.zip" in requested[0]
+    assert install.managed_flavor(hardware) == "vulkan"
+
+    # Asking for the CPU flavor replaces the GPU install, and vice versa.
+    binary = install.install_llamacpp(hardware, Console(quiet=True), flavor="cpu")
+    assert "test-cpu.zip" in requested[-1]
+    assert install.managed_flavor(hardware) == "cpu"
+    assert binary.is_file()
+
+
+def test_managed_flavor_defaults_to_cpu_for_legacy_installs(monkeypatch, tmp_path):
+    hardware = make_hardware(vram_gb=0)
+    root = install._root(hardware)
+    (root / "bin").mkdir(parents=True)
+    (root / "bin" / ("llama-server.exe" if hardware.os == "windows" else "llama-server")).write_bytes(b"old")
+    assert install.managed_flavor(hardware) == "cpu"
+
+
+def test_managed_flavor_is_none_without_an_install():
+    assert install.managed_flavor(make_hardware(vram_gb=0)) is None
