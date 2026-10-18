@@ -16,7 +16,7 @@ from llmsetup.gguf import apply_to_spec, read_gguf_info
 from llmsetup.interop.export import register_everywhere
 from llmsetup.planner.plan import build_adaptive_plan, plan_embedding_model
 from llmsetup.repair.loop import RepairLoop, mark_resolved
-from llmsetup.repair.strategies import RepairState
+from llmsetup.repair.strategies import RepairState, strategies_for
 from llmsetup.runtimes.base import Endpoint, Runtime, RuntimeUnavailable
 from llmsetup.runtimes.registry import get_runtime
 from llmsetup.tuning import tune
@@ -70,7 +70,10 @@ class Pipeline:
 
         original_hardware, original_profile = self.hardware, self.profile
         requested_runtime = self.runtime_name
-        self._remaining_repairs = self.max_repairs
+        # Keep one action for an explicit model fallback only after recovery
+        # has tried the requested model's settings and runtime paths. It is
+        # part of the existing global budget, not a new repair loop.
+        self._remaining_repairs = self.max_repairs - bool(original_profile.requested_model)
         queue = [(requested_runtime, "auto")]
         tried: Set[Tuple[Optional[str], str]] = set()
         journal: List[RepairAction] = []
@@ -113,9 +116,11 @@ class Pipeline:
                 errors.extend(f"{result.plan.runtime}: {check.message}"
                               for check in result.checks if check.blocking)
             except PlanningError as exc:
-                if last_result is None:
+                if last_result is None and not original_profile.requested_model:
                     raise
-                errors.append(exc.message)
+                tried.add((name, mode))
+                errors.append(f"{name or 'planning'}: {exc.message}" +
+                              (f". {exc.hint}" if exc.hint else ""))
             except (LlmsetupError, RuntimeUnavailable, OSError) as exc:
                 actual = self._runtime.name if self._runtime else name
                 tried.add((actual, mode))
@@ -136,6 +141,15 @@ class Pipeline:
                     description=f"trying {queue[0][0]}{' on CPU' if queue[0][1] != 'auto' else ''} after the previous attempt failed",
                     cost="high",
                 ))
+        if original_profile.requested_model and last_result is not None:
+            fallback = self._requested_model_fallback(last_result, original_profile, journal, errors)
+            if fallback is not None:
+                last_result = fallback
+                if not any(check.blocking for check in fallback.checks):
+                    fallback.hardware = original_hardware
+                    fallback.repairs = journal + fallback.repairs
+                    mark_resolved(fallback.repairs, fallback.checks)
+                    return fallback
         detail = "; ".join(dict.fromkeys(errors))
         hint = "Automatic recovery exhausted. " + detail + ". " + _recovery_instructions(detail)
         self.console.warn(hint)
@@ -148,6 +162,85 @@ class Pipeline:
             if check.blocking:
                 check.detail = hint
         return last_result
+
+    def _requested_model_fallback(self, failed: SetupResult, requested: UseCaseProfile,
+                                  journal: List[RepairAction], errors: List[str]) -> Optional[SetupResult]:
+        """Spend the reserved final action only after requested-model recovery ends."""
+        failure = next((check for check in failed.checks if check.blocking), None)
+        if failure is None or failed.plan.best is None:
+            return None
+        signature = failure.failure_signature or sig.UNKNOWN_ERROR
+        state = RepairState(
+            config=failed.config, candidate=failed.plan.best,
+            hardware=failed.plan.hardware or failed.hardware, profile=failed.profile,
+            catalog=self.catalog, fallbacks=list(failed.plan.fallbacks),
+            console=self.console, allow_model_switch=True,
+        )
+        outcome = None
+        strategy_name = ""
+        for strategy in strategies_for(signature):
+            if strategy.name not in ("switch_model", "use_cached_model"):
+                continue
+            try:
+                outcome = strategy.apply(state)
+            except (LlmsetupError, RuntimeUnavailable, OSError) as exc:
+                message = exc.message if isinstance(exc, LlmsetupError) else str(exc)
+                errors.append(f"{strategy.name}: {message}")
+                continue
+            if outcome is not None and outcome.switch_to is not None:
+                strategy_name = strategy.name
+                break
+        if outcome is None or outcome.switch_to is None:
+            return None
+        candidate = outcome.switch_to
+        if candidate.model.id == requested.requested_model:
+            return None
+        reason = ("the repair action budget for the requested model is exhausted"
+                  if self._remaining_repairs == 0 else
+                  "no applicable repairs or runtime paths remain for the requested model")
+        description = (
+            f"{reason}; switching from {failed.config.model_id} to {candidate.model.id} "
+            f"after {failure.name} failed ({signature}): {failure.message}"
+        )
+        self.console.info(description)
+        action = RepairAction(
+            strategy=strategy_name, trigger=f"{failure.name}: {signature}",
+            description=description, cost="high", before=failed.config.to_dict(),
+            after={"model_id": candidate.model.id, "quant": candidate.quant},
+        )
+        journal.append(action)
+        self.shutdown()
+        self.hardware = state.hardware
+        self.profile = replace(
+            failed.profile, requested_model=candidate.model.id,
+            context_tokens=min(failed.profile.context_tokens, failed.config.context_tokens),
+        )
+        self.runtime_name = failed.config.runtime
+        self._portable_cpu = bool(failed.config.extra.get("portable_runtime"))
+        self._remaining_repairs = 0
+        # Keep the selected cached quantization while retaining companion
+        # models and their metadata for retrieval and speculative decoding.
+        catalog = self.catalog
+        self.catalog = Catalog(
+            [replace(spec, recommended_quants=[candidate.quant])
+             if spec.id == candidate.model.id else spec for spec in catalog.models],
+            catalog.quant_bpw, catalog.updated, catalog.sources, catalog.extras,
+        )
+        try:
+            result = self._run_once()
+        except (LlmsetupError, RuntimeUnavailable, OSError) as exc:
+            message = exc.message if isinstance(exc, LlmsetupError) else str(exc)
+            errors.append(f"{candidate.model.id}: {message}")
+            return None
+        finally:
+            self.catalog = catalog
+        result.profile = replace(result.profile, requested_model=requested.requested_model)
+        result.plan.profile = result.profile
+        result.plan.notes.append(description)
+        action.after = result.config.to_dict()
+        errors.extend(f"{result.plan.runtime}: {check.message}"
+                      for check in result.checks if check.blocking)
+        return result
 
     def _install_cpu_runtime(self) -> None:
         from llmsetup.runtimes.install import install_llamacpp

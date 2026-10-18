@@ -37,6 +37,11 @@ def build_plan(
     allow_partial_offload: bool = True,
 ) -> Plan:
     """Rank every viable (model, quant) pairing for this user and this machine."""
+    if profile.requested_model:
+        from llmsetup.planner.requested import build_requested_plan
+
+        return build_requested_plan(profile, hardware, catalog, runtime,
+                                    allow_partial_offload=allow_partial_offload)
     explicit = runtime is not None
     chosen_runtime, runtime_reason = (
         (runtime, "explicitly requested") if runtime is not None else choose_runtime(hardware, profile)
@@ -117,16 +122,19 @@ def _build_candidate(
     cpu_budget: int,
     parallel: int,
     allow_partial_offload: bool,
+    kv_quant_override: Optional[str] = None,
+    allow_cpu_fallback: bool = False,
+    bpw_override: Optional[float] = None,
 ) -> Optional[Candidate]:
     """One (model, quant) pairing, with KV quantization applied only if needed."""
-    bpw = catalog.bpw(quant)
+    bpw = catalog.bpw(quant) if bpw_override is None else bpw_override
     warnings: List[str] = []
 
     # Try KV cache dtypes from best quality down, stopping at the first that fits.
     # This means a KV quantization only ever appears in a plan because it was
     # *required*, never as a default that silently costs quality.
     estimate: Optional[MemoryEstimate] = None
-    for kv_quant in KV_QUALITY_ORDER:
+    for kv_quant in ([kv_quant_override] if kv_quant_override else KV_QUALITY_ORDER):
         candidate_estimate = estimate_memory(
             spec, bpw, profile.context_tokens, quant=quant, kv_quant=kv_quant,
             runtime=runtime, parallel=parallel,
@@ -161,14 +169,19 @@ def _build_candidate(
                 kv_quant=estimate.kv_quant, runtime=runtime, parallel=parallel,
             )
             gpu_fraction = fitted_layers / spec.layers if spec.layers else 0.0
-            if gpu_fraction < 0.10:
-                return None        # so little on the GPU it isn't worth the complexity
-            if estimate.total > cpu_budget + budget:
-                return None        # doesn't fit even across both tiers
-            warnings.append(
-                f"only {fitted_layers}/{spec.layers} layers fit in VRAM; "
-                "the rest run on CPU and dominate latency"
-            )
+            if gpu_fraction < 0.10 or estimate.total > cpu_budget + budget:
+                if not allow_cpu_fallback or estimate.total > cpu_budget:
+                    return None
+                gpu_fraction = 0.0
+                warnings.append("the model fits in system RAM; all layers run on CPU")
+            else:
+                warnings.append(
+                    f"only {fitted_layers}/{spec.layers} layers fit in VRAM; "
+                    "the rest run on CPU and dominate latency"
+                )
+        elif allow_cpu_fallback and estimate.total <= cpu_budget:
+            gpu_fraction = 0.0
+            warnings.append("the model fits in system RAM; all layers run on CPU")
         else:
             return None
 

@@ -15,13 +15,15 @@ from __future__ import annotations
 
 import math
 import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Dict, List, Optional, TextIO
 
 import yaml
 
+from llmsetup.catalog.catalog import Catalog
 from llmsetup.interview.questions import QUESTIONS, Option, Question, infer_flags
-from llmsetup.types import Client, Priority, Task, UseCaseProfile
+from llmsetup.types import Candidate, Client, HardwareProfile, Priority, Task, UseCaseProfile
 from llmsetup.util.errors import LlmsetupError
 from llmsetup.util.log import Console
 
@@ -52,6 +54,70 @@ def run_interview(console: Console, defaults: Optional[Dict[str, Any]] = None,
 
     emit("")
     return profile_from_answers(infer_flags(answers))
+
+
+def review_model_choice(profile: UseCaseProfile, hardware: HardwareProfile,
+                        catalog: Catalog, console: Console, *,
+                        runtime: Optional[str] = None, interactive: bool = True,
+                        stream: Optional[TextIO] = None, input_fn=None) -> UseCaseProfile:
+    """Explain a named model before the user keeps it or chooses an alternative.
+
+    Non-interactive callers keep their explicit choice. The planner enforces
+    required capabilities and memory limits even when the user keeps a poor fit.
+    """
+    from llmsetup.planner.model_fit import assess_requested_model
+
+    reader = input_fn or input
+
+    def emit(text: str = "") -> None:
+        if stream is None:
+            console.info(text)
+        else:
+            stream.write(text + "\n")
+            stream.flush()
+
+    while profile.requested_model:
+        try:
+            assessment = assess_requested_model(profile, hardware, catalog, runtime=runtime)
+        except LlmsetupError as exc:
+            if not interactive:
+                raise
+            emit(str(exc))
+            emit("Enter a catalog model ID or name, or leave blank for automatic selection.")
+            name = _ask_text(Question(
+                "requested_model", "", "text", default="",
+            ), emit, reader)
+            profile = replace(profile, requested_model=name or None)
+            continue
+
+        profile = replace(profile, requested_model=assessment.selected_model.id)
+        emit(f"Model review: {assessment.selected_model.name} ({profile.requested_model})")
+        for message in assessment.messages:
+            emit(message)
+        alternatives: List[Candidate] = []
+        if assessment.poor_fit:
+            emit("This model is a poor fit for the requested setup.")
+            for candidate in assessment.alternatives:
+                if candidate.model.id in {item.model.id for item in alternatives}:
+                    continue
+                alternatives.append(candidate)
+            if not alternatives:
+                emit("No compatible alternative fits the detected hardware.")
+        if not interactive:
+            return profile
+
+        options = [Option("keep", f"Keep {assessment.selected_model.name}"),
+                   *[Option(candidate.model.id, f"Use {candidate.model.name}")
+                     for candidate in alternatives],
+                   Option("auto", "Choose a model automatically")]
+        choice = _ask_choice(Question(
+            "requested_model", "", "choice", options=options, default="keep",
+        ), console, emit, reader)
+        if choice == "keep":
+            emit(f"Planning will keep {profile.requested_model} fixed and tune the other settings.")
+            return profile
+        profile = replace(profile, requested_model=None if choice == "auto" else choice)
+    return profile
 
 
 def _ask(question: Question, console: Console, emit, reader) -> Any:
@@ -205,6 +271,11 @@ def profile_from_answers(answers: Dict[str, Any]) -> UseCaseProfile:
     if not isinstance(answers, dict):
         raise LlmsetupError("answers must be a mapping")
     data = dict(answers)
+
+    requested_model = data.get("requested_model")
+    if requested_model is not None and not isinstance(requested_model, str):
+        raise LlmsetupError("requested_model must be a model ID or name")
+    data["requested_model"] = (requested_model.strip() or None) if requested_model else None
 
     data["tasks"] = _enum_list(data.get("tasks") or ["chat"], Task, "task")
     data["clients"] = _enum_list(data.get("clients") or [], Client, "client")
