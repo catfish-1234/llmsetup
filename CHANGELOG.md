@@ -13,6 +13,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   response, and the completion probe retries with room for the thinking budget
   before failing. This had sent recovery through every installed runtime and a
   CPU fallback on real hardware.
+- The stability probe now handles servers that report a thinking-truncated
+  reply with no reasoning field, no usage, and a plain stop finish reason: it
+  retries once with room for the thinking budget, and failures report the
+  response shape instead of a bare empty-response verdict.
+- Streaming verification counts thinking deltas, so reasoning models that
+  stream their thinking before visible text no longer fail the streaming
+  check.
+- Windows machines with an NVIDIA GPU now get the Vulkan llama.cpp build
+  instead of the CPU build, and the planner keeps the GPU when the managed
+  runtime can use it instead of replanning against RAM with CPU-only
+  estimates. Recovery installs the GPU build before a llama.cpp attempt on
+  machines that previously fell back to slow CPU inference.
 - Recovery stops switching engines when the same model-level failure follows
   the same model onto a second engine, instead of trying every remaining
   engine and CPU path.
