@@ -147,6 +147,47 @@ def _names_match(wanted: str, served: str) -> bool:
 
 # A question with one short, unambiguous answer that any usable model gets
 # right. This is a smoke test for a broken quantization or a mismatched chat
+def _reasoning_enabled(ctx: CheckContext) -> bool:
+    """Whether this serving config lets the model think before answering.
+
+    A runtime that took no reasoning settings leaves a reasoning model at its
+    default, and the default for a hybrid-reasoning model is thinking on.
+    """
+    if not ctx.spec.is_reasoning:
+        return False
+    advanced = getattr(ctx.config, "advanced", None)
+    reasoning = getattr(advanced, "reasoning", None) if advanced is not None else None
+    if reasoning is None:
+        return True
+    return bool(getattr(reasoning, "enabled", False))
+
+
+def _reasoning_budget(ctx: CheckContext) -> int:
+    """The configured thinking ceiling, or a conservative default."""
+    advanced = getattr(ctx.config, "advanced", None)
+    reasoning = getattr(advanced, "reasoning", None) if advanced is not None else None
+    budget = getattr(reasoning, "token_budget", None) if reasoning is not None else None
+    return int(budget) if budget else 1024
+
+
+def _consumed_by_reasoning(result, ctx: CheckContext) -> bool:
+    """The server generated tokens but spent the whole budget on thinking.
+
+    With a small max_tokens a reasoning model legitimately returns no visible
+    answer: the entire budget went to the thinking block, which the API reports
+    separately from the content. That is a caller budget choice, not an
+    empty-response failure. Treating it as one sends recovery after runtimes
+    that are working, which costs a download and a relay per false alarm.
+    """
+    if not _reasoning_enabled(ctx):
+        return False
+    if result.reasoning_text and result.reasoning_text.strip():
+        return True
+    if (result.completion_tokens or 0) > 0:
+        return True
+    return result.finish_reason == "length"
+
+
 # template, not a benchmark.
 _SANITY = [
     ("What is the capital of France? Answer with only the city name.",
@@ -170,6 +211,19 @@ def check_completion(ctx: CheckContext) -> CheckResult:
                 sig.classify(result.error) or sig.UNKNOWN_ERROR,
                 detail=(result.error + "\n" + ctx.log_tail())[:2000],
             )
+        if not _strip_thinking(result.text).strip() and _consumed_by_reasoning(result, ctx):
+            # The probe budget was spent on thinking. Ask once more with room
+            # for the thinking block plus the answer before calling it empty.
+            result = ctx.client.chat(
+                [{"role": "user", "content": prompt}],
+                max_tokens=512 + _reasoning_budget(ctx), temperature=0.0,
+            )
+            if not result.ok:
+                return _fail(
+                    name, Severity.CRITICAL, "the model could not produce a completion",
+                    sig.classify(result.error) or sig.UNKNOWN_ERROR,
+                    detail=(result.error + "\n" + ctx.log_tail())[:2000],
+                )
         text = _strip_thinking(result.text)
         transcript.append(f"{prompt!r} -> {text[:120]!r}")
         if not text.strip():
@@ -813,6 +867,7 @@ def check_stability(ctx: CheckContext) -> CheckResult:
     name = "stability"
     rounds = 4
     latencies = []
+    thinking_only = 0
     for index in range(rounds):
         result = ctx.client.chat(
             [{"role": "user", "content": f"In one sentence, describe the number {index + 1}."}],
@@ -828,9 +883,13 @@ def check_stability(ctx: CheckContext) -> CheckResult:
                 failed_at_request=index + 1,
             )
         if not _strip_thinking(result.text).strip():
-            return _fail(name, Severity.CRITICAL,
-                         f"request {index + 1} returned empty output",
-                         sig.EMPTY_RESPONSE, failed_at_request=index + 1)
+            if not _consumed_by_reasoning(result, ctx):
+                return _fail(name, Severity.CRITICAL,
+                             f"request {index + 1} returned empty output",
+                             sig.EMPTY_RESPONSE, failed_at_request=index + 1)
+            # The server answered every probe; the thinking block simply ate
+            # the small probe budget, which is a max_tokens choice, not a leak.
+            thinking_only += 1
         latencies.append(result.latency_s)
 
     drift = (max(latencies) / min(latencies)) if min(latencies) > 0 else 1.0
@@ -843,8 +902,14 @@ def check_stability(ctx: CheckContext) -> CheckResult:
                      f"requests, which suggests memory pressure or thermal throttling"),
             metrics=metrics,
         )
-    return _pass(name, Severity.CRITICAL,
-                 f"{rounds} consecutive requests succeeded with stable latency", **metrics)
+    if thinking_only:
+        metrics["thinking_only_responses"] = thinking_only
+    message = f"{rounds} consecutive requests succeeded with stable latency"
+    if thinking_only:
+        message += (f"; on {thinking_only} of them the thinking block used the whole "
+                    "small probe budget, so visible answers need a max_tokens above "
+                    "the thinking budget")
+    return _pass(name, Severity.CRITICAL, message, **metrics)
 
 
 # --------------------------------------------------------------------------- #
