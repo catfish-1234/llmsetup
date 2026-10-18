@@ -116,9 +116,10 @@ class OllamaRuntime(Runtime):
     def start(self, spec: ModelSpec, config: RuntimeConfig, console: Console) -> Endpoint:
         endpoint_port = int(config.extra.get("ollama_port", DEFAULT_PORT))
         self._ensure_server(console, endpoint_port)
+        model = self.launch_command(spec, config)[2]
         return Endpoint(
             base_url=f"http://127.0.0.1:{endpoint_port}",
-            model=config.served_name or spec.ollama_name or spec.id,
+            model=model,
             runtime=self.name,
             supports_embeddings=spec.is_embedding,
             started_by_us=False,     # Ollama is a shared daemon; never kill it
@@ -139,7 +140,16 @@ class OllamaRuntime(Runtime):
             raise RuntimeUnavailable("the Ollama server did not come up", f"see {log}")
 
     def launch_command(self, spec: ModelSpec, config: RuntimeConfig) -> List[str]:
-        return ["ollama", "run", config.served_name or spec.ollama_name or spec.id]
+        # Only ensure_model assigns the derived tag after a successful create.
+        # Older saved plans may still carry the catalog ID as served_name.
+        if config.served_name == self.derived_name(spec):
+            return ["ollama", "run", config.served_name]
+        if spec.ollama_name:
+            return ["ollama", "run", spec.ollama_name]
+        raise RuntimeUnavailable(
+            "the tuned Ollama model has not been created and no official tag is known",
+            "run `llmsetup setup` without `--dry-run` to create the tuned model",
+        )
 
     def config_files(self, spec: ModelSpec, config: RuntimeConfig) -> Dict[str, str]:
         return {f"{self.derived_name(spec)}.Modelfile": self.modelfile(spec, config)}
