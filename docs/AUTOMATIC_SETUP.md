@@ -24,6 +24,14 @@ the speed to expect, and which of your tasks it serves well or badly. When the
 fit is poor, it says so plainly and names the closest alternatives that would
 fit better.
 
+Use a catalog ID or an unambiguous model name. `llmsetup catalog list` shows
+the available IDs. Both `setup --model <id>` and `plan --model <id>` use the
+same assessment. Answers files and saved profiles record the choice as
+`requested_model: <id>`. Interactive runs offer a choice after the assessment;
+`--yes`, `--json`, and answers-file runs keep the specified model without
+prompting. An unknown or ambiguous name needs correction. Speed and memory
+figures are estimates until verified on the machine.
+
 If you keep that model after hearing the tradeoffs, llmsetup optimizes for
 it. Planning holds your model fixed and tunes everything else: quantization,
 context length, GPU offload, and runtime choice. Recovery can still lower the
