@@ -154,3 +154,12 @@ def test_cli_scans_before_the_goal_interview(monkeypatch, capsys):
     assert main(["setup", "--dry-run", "--offline", "--no-register"]) == 0
     assert events == ["scan", "interview"]
     assert "Detected:" in capsys.readouterr().err
+
+def test_managed_vulkan_runtime_keeps_the_gpu(catalog, monkeypatch, tmp_path):
+    hardware = make_hardware(vram_gb=24, ram_gb=8)
+    monkeypatch.setattr("llmsetup.runtimes.install.managed_binary", lambda *a: tmp_path / "llama-server")
+    monkeypatch.setattr("llmsetup.runtimes.install.managed_flavor", lambda *a: "vulkan")
+    monkeypatch.setattr("llmsetup.util.proc.which", lambda *a: None)
+    plan = build_adaptive_plan(UseCaseProfile(), hardware, catalog, runtime="llamacpp")
+    assert plan.hardware.gpus
+    assert not any("managed portable runtime uses CPU" in note for note in plan.notes)
