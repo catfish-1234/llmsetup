@@ -6,6 +6,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Verification no longer fails a working reasoning model: a small probe budget
+  that the thinking block consumes is reported as such instead of an empty
+  response, and the completion probe retries with room for the thinking budget
+  before failing. This had sent recovery through every installed runtime and a
+  CPU fallback on real hardware.
+- Recovery stops switching engines when the same model-level failure follows
+  the same model onto a second engine, instead of trying every remaining
+  engine and CPU path.
+- The CPU fallback keeps the model already fetched when it fits in RAM rather
+  than downloading a larger model for a slower engine.
+- The report names the real trigger for runtime and CPU fallbacks, and runtime
+  choices made by automatic recovery are labelled as recovery, not as an
+  explicit user request.
+- A plan with zero GPU layers reads as CPU-only instead of partial offload.
+
 ### Added
 
 - Catalog validation on load, with errors identifying the file, model, and bad
