@@ -285,3 +285,86 @@ def test_successful_setup_does_not_ask_for_privileged_os_changes(flow, monkeypat
     assert "sudo test-command" not in stderr
     assert "sudo test-command" not in report.read_text()
     assert result["platform_actions"]  # Diagnostics remain inspectable as data.
+
+# --------------------------------------------------------------------- #
+# Real-run regressions: a reasoning model's thinking block filled the
+# verification probe budget, every engine was blamed in turn, and the CPU
+# fallback fetched a second, larger model.
+# --------------------------------------------------------------------- #
+
+def test_user_requested_runtime_keeps_explicit_label(flow, capsys):
+    flow(Engine("llamacpp"))
+    code, result, _ = setup(capsys)
+    assert code == 0
+    assert result["runtime_reason"] == "explicitly requested"
+
+
+def test_recovery_runtime_is_labelled_as_recovery_not_user_choice(flow, capsys):
+    flow(Engine("ollama", available=False), Engine("llamacpp"))
+    code, result, _ = setup(capsys, runtime="ollama")
+    assert code == 0
+    assert result["config"]["runtime"] == "llamacpp"
+    assert result["runtime_reason"].startswith("chosen by automatic recovery")
+    assert result["runtime_reason"] != "explicitly requested"
+
+
+def test_model_level_failure_stops_engine_switching_early(flow, capsys, monkeypatch):
+    """The same empty response from the same model on two engines is not an
+    engine problem; a third engine (and a CPU install) only costs time."""
+    engines = [Engine("ollama"), Engine("llamacpp")]
+    flow(*engines)
+
+    def empty(url, **kw):
+        if url.endswith("/models"):
+            data = {"data": [{"id": "qwen3-8b"}]}
+        else:
+            data = {"choices": [{"message": {"content": ""}, "finish_reason": "stop"}]}
+        return HttpResponse(200, json.dumps(data))
+
+    monkeypatch.setattr("llmsetup.util.http.request", empty)
+    installs = []
+    monkeypatch.setattr(Pipeline, "_install_cpu_runtime",
+                        lambda self: installs.append(self.hardware))
+    code, result, stderr = setup(capsys, runtime="ollama")
+    assert code == 1
+    assert not installs, "the CPU runtime install must not start after a model-level failure"
+    ollama, llamacpp = engines
+    assert ollama.launches >= 1 and llamacpp.launches >= 1
+    assert "no further engines were tried" in stderr
+    assert result["runtime_reason"].startswith("chosen by automatic recovery")
+
+
+def _pipe(hardware, catalog):
+    from llmsetup.types import Task, UseCaseProfile
+    from llmsetup.util.log import Console
+    return Pipeline(UseCaseProfile(tasks=[Task.CHAT], context_tokens=8192),
+                    hardware, catalog, Console(quiet=True))
+
+
+def test_cpu_attempt_keeps_the_model_already_fetched(flow, catalog):
+    from types import SimpleNamespace
+    pipe = _pipe(make_hardware(vram_gb=0, ram_gb=16), catalog)
+    last = SimpleNamespace(
+        checks=[SimpleNamespace()],
+        plan=SimpleNamespace(best=SimpleNamespace(model=SimpleNamespace(id="qwen3-8b"))))
+    profile = pipe._cpu_profile(pipe.profile, pipe.hardware, last)
+    assert profile.requested_model == "qwen3-8b"
+
+
+def test_cpu_attempt_replans_when_nothing_was_fetched(flow, catalog):
+    from types import SimpleNamespace
+    pipe = _pipe(make_hardware(vram_gb=0, ram_gb=16), catalog)
+    last = SimpleNamespace(checks=[], plan=SimpleNamespace(best=None))
+    profile = pipe._cpu_profile(pipe.profile, pipe.hardware, last)
+    assert profile.requested_model is None
+
+
+def test_cpu_attempt_replans_when_the_fetched_model_cannot_fit_ram(flow, catalog):
+    from types import SimpleNamespace
+    pipe = _pipe(make_hardware(vram_gb=0, ram_gb=16), catalog)
+    last = SimpleNamespace(
+        checks=[SimpleNamespace()],
+        plan=SimpleNamespace(best=SimpleNamespace(
+            model=SimpleNamespace(id="qwen3-235b-a22b"))))
+    profile = pipe._cpu_profile(pipe.profile, pipe.hardware, last)
+    assert profile.requested_model is None

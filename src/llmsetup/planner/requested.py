@@ -31,6 +31,7 @@ def build_requested_plan(
     runtime: Optional[str] = None,
     allow_partial_offload: bool = True,
     _include_fallbacks: bool = True,
+    runtime_reason: Optional[str] = None,
 ) -> Plan:
     """Keep the requested model first while tuning runtime, weights and placement.
 
@@ -63,7 +64,7 @@ def build_requested_plan(
             hint="Choose a compatible model or change the stated requirements.",
         )
 
-    options = _runtime_options(spec, profile, hardware, runtime)
+    options = _runtime_options(spec, profile, hardware, runtime, explicit_reason=runtime_reason)
     ranked: List[Tuple[Candidate, str, str]] = []
     for engine, reason in options:
         engine_budget = (int(hardware.memory_budget * 0.92)
@@ -153,10 +154,10 @@ def build_requested_plan(
 
 def _runtime_options(
     spec: ModelSpec, profile: UseCaseProfile, hardware: HardwareProfile,
-    explicit: Optional[str],
+    explicit: Optional[str], explicit_reason: Optional[str] = None,
 ) -> List[Tuple[str, str]]:
     if explicit is not None:
-        names = [(explicit, "explicitly requested")]
+        names = [(explicit, explicit_reason or "explicitly requested")]
     else:
         chosen, reason = choose_runtime(hardware, profile)
         installed = recovery_order(hardware, profile)

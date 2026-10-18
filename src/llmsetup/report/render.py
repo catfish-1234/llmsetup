@@ -79,7 +79,9 @@ def render_terminal(result: SetupResult, console: Console) -> None:
     )
     console.info(
         f"GPU layers: {config.gpu_layers}/{config.total_layers}"
-        + ("  (fully offloaded)" if config.full_gpu_offload else "  (partial. CPU is the bottleneck)")
+        + ("  (fully offloaded)" if config.full_gpu_offload
+           else "  (CPU only; no layers on the GPU)" if config.gpu_layers == 0
+           else "  (partial. CPU is the bottleneck)")
     )
     console.info(f"KV cache: {config.kv_cache_type}   flash attention: "
                  f"{'on' if config.flash_attention else 'off'}")
