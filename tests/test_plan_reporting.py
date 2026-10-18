@@ -204,3 +204,15 @@ def test_ollama_only_advertises_tuned_tag_after_successful_create(
         assert config.served_name is None
         assert runtime.launch_command(spec, config) == ["ollama", "run", spec.ollama_name]
     assert commands[0][:3] == ["ollama", "create", runtime.derived_name(spec)]
+
+def test_zero_gpu_layers_reports_cpu_only_not_partial(laptop_result):
+    laptop_result.config.gpu_layers = 0
+    output = terminal(laptop_result)
+    assert "CPU only" in output
+    assert "partial. CPU is the bottleneck" not in output
+
+
+def test_partial_offload_label_kept_when_some_layers_offload(laptop_result):
+    config = laptop_result.config
+    config.gpu_layers = max(1, config.total_layers - 1)
+    assert "partial. CPU is the bottleneck" in terminal(laptop_result)

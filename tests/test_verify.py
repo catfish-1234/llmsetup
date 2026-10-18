@@ -20,6 +20,7 @@ from llmsetup.verify.checks import (
     check_embeddings,
     check_health,
     check_json,
+    check_stability,
     check_tools,
 )
 from llmsetup.verify.client import ChatResult
@@ -309,3 +310,68 @@ class TestHelpers:
         data = _solid_png(8, 8, (220, 30, 30))
         assert data.startswith(b"\x89PNG\r\n\x1a\n")
         assert b"IHDR" in data and b"IDAT" in data and data.endswith(b"IEND\xae\x42\x60\x82")
+
+class TestReasoningTruncation:
+    """A reasoning model spends a small probe budget on the thinking block and
+    returns no visible answer. That is a max_tokens choice, not an empty
+    response, and it must not send recovery after healthy engines."""
+
+    def test_stability_tolerates_thinking_filling_the_probe_budget(self, catalog):
+        ctx = context(FakeClient(chat=ChatResult(
+            ok=True, text="", reasoning_text="let me think about the number",
+            completion_tokens=96, finish_reason="length")), catalog)
+        result = check_stability(ctx)
+        assert result.status is CheckStatus.PASS
+        assert result.metrics["thinking_only_responses"] == 4
+        assert "thinking budget" in result.message
+
+    def test_stability_still_fails_on_a_genuinely_empty_response(self, catalog):
+        ctx = context(FakeClient(chat=ChatResult(
+            ok=True, text="", completion_tokens=0, finish_reason="stop")), catalog)
+        result = check_stability(ctx)
+        assert result.status is CheckStatus.FAIL
+        assert result.failure_signature == sig.EMPTY_RESPONSE
+
+    def test_stability_fails_empty_for_a_non_reasoning_model(self, catalog):
+        ctx = context(FakeClient(chat=ChatResult(
+            ok=True, text="", completion_tokens=96, finish_reason="length")),
+            catalog, model="qwen2.5-coder-7b")
+        result = check_stability(ctx)
+        assert result.status is CheckStatus.FAIL
+        assert result.failure_signature == sig.EMPTY_RESPONSE
+
+    def test_stability_fails_empty_when_reasoning_is_disabled(self, catalog):
+        from types import SimpleNamespace
+        ctx = context(FakeClient(chat=ChatResult(
+            ok=True, text="", completion_tokens=96, finish_reason="length")), catalog)
+        ctx.config.advanced = SimpleNamespace(
+            reasoning=SimpleNamespace(enabled=False, token_budget=None))
+        result = check_stability(ctx)
+        assert result.status is CheckStatus.FAIL
+        assert result.failure_signature == sig.EMPTY_RESPONSE
+
+    def test_completion_retries_with_thinking_headroom(self, catalog):
+        budgets = []
+
+        def chat(messages, **kwargs):
+            budgets.append(kwargs["max_tokens"])
+            if len(budgets) % 2 == 1:
+                return ChatResult(ok=True, text="", reasoning_text="working",
+                                  completion_tokens=kwargs["max_tokens"],
+                                  finish_reason="length")
+            answer = "Paris" if "France" in messages[0]["content"] else "42"
+            return ChatResult(ok=True, text=answer)
+
+        ctx = context(FakeClient(chat=chat), catalog)
+        result = check_completion(ctx)
+        assert result.status is CheckStatus.PASS
+        assert budgets[0] == 512
+        assert budgets[1] > 512
+
+    def test_completion_fails_when_the_retry_also_returns_nothing(self, catalog):
+        ctx = context(FakeClient(chat=ChatResult(
+            ok=True, text="", reasoning_text="working",
+            completion_tokens=512, finish_reason="length")), catalog)
+        result = check_completion(ctx)
+        assert result.status is CheckStatus.FAIL
+        assert result.failure_signature == sig.EMPTY_RESPONSE

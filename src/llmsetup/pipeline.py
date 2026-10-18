@@ -39,6 +39,13 @@ from llmsetup.verify import signatures as sig
 from llmsetup.verify.client import OpenAIClient
 from llmsetup.verify.harness import Harness, select_checks
 
+#: Failures produced by the model or its settings, not by the engine serving
+#: it. When one of these follows the same model onto a second engine, a third
+#: engine will not fix it either.
+_MODEL_LEVEL_SIGNATURES = frozenset({
+    sig.EMPTY_RESPONSE, sig.INCOHERENT_OUTPUT, sig.REPETITION_LOOP,
+})
+
 
 class Pipeline:
     def __init__(self, profile: UseCaseProfile, hardware: HardwareProfile,
@@ -70,6 +77,11 @@ class Pipeline:
 
         original_hardware, original_profile = self.hardware, self.profile
         requested_runtime = self.runtime_name
+        self._runtime_reason: Optional[str] = None
+        # Model-level failures that follow the same model onto a second engine
+        # are not engine problems; trying a third engine only costs time.
+        followed: Dict[Tuple[str, str], Set[str]] = {}
+        stop_switching = False
         # Keep one action for an explicit model fallback only after recovery
         # has tried the requested model's settings and runtime paths. It is
         # part of the existing global budget, not a new repair loop.
@@ -89,16 +101,25 @@ class Pipeline:
             self.profile = original_profile
             self.runtime_name = name
             self._portable_cpu = mode == "portable"
+            if mode == "portable":
+                self._runtime_reason = "chosen by automatic recovery: verified user-local llama.cpp on CPU"
+            elif cpu_only:
+                self._runtime_reason = "chosen by automatic recovery: CPU after the GPU attempts failed"
+            elif name != requested_runtime:
+                self._runtime_reason = "chosen by automatic recovery after the previous attempt failed"
+            else:
+                self._runtime_reason = None
             try:
                 if cpu_only:
-                    build_adaptive_plan(self.profile, self.hardware, self.catalog, runtime="llamacpp")
+                    self.profile = self._cpu_profile(
+                        self.profile, self.hardware, last_result)
                     # The portable Linux/Windows build is CPU-only. Replan for
                     # RAM rather than claiming to use the detected GPU.
                     if self._portable_cpu and managed_binary(self.hardware) is None:
                         self._install_cpu_runtime()
                     journal.append(RepairAction(
                         strategy="portable_cpu_runtime" if self._portable_cpu else "cpu_runtime",
-                        trigger="health: runtime_unavailable",
+                        trigger=self._last_trigger(last_result),
                         description=("using verified user-local llama.cpp on CPU" if self._portable_cpu
                                      else "replanning for CPU with installed llama.cpp"), cost="high",
                     ))
@@ -115,6 +136,25 @@ class Pipeline:
                 journal.extend(result.repairs)
                 errors.extend(f"{result.plan.runtime}: {check.message}"
                               for check in result.checks if check.blocking)
+                for check in result.checks:
+                    if not check.blocking:
+                        continue
+                    signature = check.failure_signature or ""
+                    if signature not in _MODEL_LEVEL_SIGNATURES:
+                        continue
+                    model_id = result.config.model_id or (
+                        result.plan.best.model.id if result.plan.best else "")
+                    seen = followed.setdefault((signature, model_id), set())
+                    seen.add(result.plan.runtime)
+                    if len(seen) >= 2:
+                        errors.append(
+                            f"{signature} followed {model_id} across "
+                            f"{', '.join(sorted(seen))}: a model or settings "
+                            "problem, not an engine problem, so no further "
+                            "engines were tried")
+                        queue = []
+                        stop_switching = True
+                        break
             except PlanningError as exc:
                 if last_result is None and not original_profile.requested_model:
                     raise
@@ -127,7 +167,7 @@ class Pipeline:
                 message = exc.message if isinstance(exc, LlmsetupError) else str(exc)
                 errors.append(f"{actual or 'planning'}: {message}")
                 self.console.info(f"automatic recovery: {message}")
-            if not queue and mode == "auto":
+            if not stop_switching and not queue and mode == "auto":
                 installed = recovery_order(original_hardware, original_profile)
                 alternatives = [(engine, "auto") for engine in installed]
                 if "llamacpp" in installed and original_hardware.gpus:
@@ -137,7 +177,7 @@ class Pipeline:
                 queue = [item for item in dict.fromkeys(alternatives) if item not in tried]
             if queue:
                 journal.append(RepairAction(
-                    strategy="runtime_fallback", trigger="health: runtime_unavailable",
+                    strategy="runtime_fallback", trigger=self._last_trigger(last_result),
                     description=f"trying {queue[0][0]}{' on CPU' if queue[0][1] != 'auto' else ''} after the previous attempt failed",
                     cost="high",
                 ))
@@ -226,6 +266,7 @@ class Pipeline:
              if spec.id == candidate.model.id else spec for spec in catalog.models],
             catalog.quant_bpw, catalog.updated, catalog.sources, catalog.extras,
         )
+        self._runtime_reason = "kept from the failed attempt for the fallback model"
         try:
             result = self._run_once()
         except (LlmsetupError, RuntimeUnavailable, OSError) as exc:
@@ -242,6 +283,46 @@ class Pipeline:
                       for check in result.checks if check.blocking)
         return result
 
+    @staticmethod
+    def _last_trigger(last_result: Optional[SetupResult]) -> str:
+        """The check that actually sent recovery down this path."""
+        if last_result is not None:
+            failure = next((c for c in last_result.checks if c.blocking), None)
+            if failure is not None:
+                signature = failure.failure_signature or "unknown"
+                return f"{failure.name}: {signature}"
+        return "health: runtime_unavailable"
+
+    def _cpu_profile(self, profile: UseCaseProfile, hardware: HardwareProfile,
+                     last_result: Optional[SetupResult]) -> UseCaseProfile:
+        """Keep the model already fetched for the CPU attempt when it fits RAM.
+
+        The CPU fallback replans against system memory, and a larger budget
+        picks a larger model: after a small model fails on the GPU path, the
+        fallback would fetch a much bigger one for a slower engine. Keeping the
+        model that was already downloaded and tried gets to a working setup
+        faster and leaves disk untouched. Falls back to a free replan when the
+        earlier model cannot fit in RAM.
+        """
+        pinned = None
+        if (last_result is not None and last_result.checks
+                and last_result.plan is not None and last_result.plan.best is not None):
+            # Verification ran, so this model's weights are already local.
+            pinned = last_result.plan.best.model.id
+        if pinned is not None:
+            try:
+                build_adaptive_plan(replace(profile, requested_model=pinned),
+                                    hardware, self.catalog, runtime="llamacpp")
+            except PlanningError:
+                pass
+            else:
+                self.console.info(
+                    f"keeping {pinned} for the CPU attempt instead of fetching "
+                    "a larger model for a slower engine")
+                return replace(profile, requested_model=pinned)
+        build_adaptive_plan(profile, hardware, self.catalog, runtime="llamacpp")
+        return profile
+
     def _install_cpu_runtime(self) -> None:
         from llmsetup.runtimes.install import install_llamacpp
 
@@ -252,7 +333,8 @@ class Pipeline:
 
         self.console.step("Planning")
         plan = build_adaptive_plan(self.profile, self.hardware, self.catalog,
-                          runtime=self.runtime_name)
+                          runtime=self.runtime_name,
+                          runtime_reason=getattr(self, "_runtime_reason", None))
         assert plan.profile is not None
         self.profile = plan.profile
         self.hardware = plan.hardware or self.hardware

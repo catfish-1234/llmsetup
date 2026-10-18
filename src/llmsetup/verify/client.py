@@ -29,6 +29,10 @@ class ChatResult:
     completion_tokens: Optional[int] = None
     finish_reason: str = ""
     tool_calls: List[dict] = field(default_factory=list)
+    #: The thinking block, when the server splits it out of the visible answer
+    #: (llama.cpp ``reasoning_content``, Ollama ``thinking``). Empty when the
+    #: server folds thinking into the content or the model does not reason.
+    reasoning_text: str = ""
 
     @property
     def tokens_per_second(self) -> Optional[float]:
@@ -99,6 +103,8 @@ class OpenAIClient:
             completion_tokens=usage.get("completion_tokens"),
             finish_reason=choice.get("finish_reason") or "",
             tool_calls=message.get("tool_calls") or [],
+            reasoning_text=(message.get("reasoning_content")
+                            or message.get("thinking") or ""),
         )
 
     # ------------------------------------------------------------- streaming
