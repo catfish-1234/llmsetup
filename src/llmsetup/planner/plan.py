@@ -35,16 +35,19 @@ def build_plan(
     catalog: Catalog,
     runtime: Optional[str] = None,
     allow_partial_offload: bool = True,
+    runtime_reason: Optional[str] = None,
 ) -> Plan:
     """Rank every viable (model, quant) pairing for this user and this machine."""
     if profile.requested_model:
         from llmsetup.planner.requested import build_requested_plan
 
         return build_requested_plan(profile, hardware, catalog, runtime,
-                                    allow_partial_offload=allow_partial_offload)
+                                    allow_partial_offload=allow_partial_offload,
+                                    runtime_reason=runtime_reason)
     explicit = runtime is not None
     chosen_runtime, runtime_reason = (
-        (runtime, "explicitly requested") if runtime is not None else choose_runtime(hardware, profile)
+        (runtime, runtime_reason or "explicitly requested") if runtime is not None
+        else choose_runtime(hardware, profile)
     )
 
     viable = catalog.matching(profile)
@@ -378,7 +381,8 @@ def plan_embedding_model(
 
 
 def build_adaptive_plan(profile: UseCaseProfile, hardware: HardwareProfile,
-                        catalog: Catalog, runtime: Optional[str] = None) -> Plan:
+                        catalog: Catalog, runtime: Optional[str] = None,
+                        runtime_reason: Optional[str] = None) -> Plan:
     """Keep the goal, shorten context automatically when the requested window cannot fit."""
     from dataclasses import replace
 
@@ -387,7 +391,7 @@ def build_adaptive_plan(profile: UseCaseProfile, hardware: HardwareProfile,
     while True:
         try:
             plan = build_plan(replace(profile, context_tokens=context), hardware,
-                              catalog, runtime=runtime)
+                              catalog, runtime=runtime, runtime_reason=runtime_reason)
             if plan.runtime == "llamacpp" and hardware.gpus:
                 from llmsetup.runtimes.install import managed_binary
                 from llmsetup.util.proc import which
@@ -395,7 +399,8 @@ def build_adaptive_plan(profile: UseCaseProfile, hardware: HardwareProfile,
                 if not which("llama-server") and managed_binary(hardware):
                     hardware = replace(hardware, gpus=[], unified_memory=False)
                     plan = build_plan(replace(profile, context_tokens=context), hardware,
-                                      catalog, runtime="llamacpp")
+                                      catalog, runtime="llamacpp",
+                                      runtime_reason=runtime_reason)
                     plan.notes.append("the managed portable runtime uses CPU; planning against available RAM")
             if context != requested:
                 plan.notes.append(
