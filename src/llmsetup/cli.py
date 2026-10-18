@@ -324,7 +324,7 @@ def cmd_plan(args, console: Console) -> int:
             + (f"~{tps:.0f} tok/s  " if tps else "")
             + f"score {candidate.score:.3f}"
         )
-        console.info(console.dim(f"   {explain(candidate, profile)}"))
+        console.info(console.dim(f"   {explain(candidate, profile, hardware)}"))
         console.info(console.dim(
             f"   weights {gb(candidate.estimate.weights)} + "
             f"KV {gb(candidate.estimate.kv_cache)} ({candidate.estimate.kv_quant}) + "

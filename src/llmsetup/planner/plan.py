@@ -11,7 +11,7 @@ from llmsetup.planner.memory import (
     layers_that_fit,
     max_context_for_budget,
 )
-from llmsetup.planner.score import explain, score_candidate
+from llmsetup.planner.score import HIGH_MEMORY_UTILISATION, explain, score_candidate
 from llmsetup.runtimes.registry import choose_runtime, prefer_mlx_for
 from llmsetup.types import (
     GIB,
@@ -186,7 +186,7 @@ def _build_candidate(
             return None
 
     utilisation = estimate.total / budget if budget else 1.0
-    if 0.85 <= utilisation <= 1.0:
+    if HIGH_MEMORY_UTILISATION <= utilisation <= 1.0:
         where = "system RAM" if not hardware.gpus else "VRAM"
         warnings.append(
             f"uses {utilisation:.0%} of usable {where}; a long prompt or another "
@@ -249,7 +249,7 @@ def _plan_notes(
     best = candidates[0]
 
     notes.append(
-        f"{best.model.name} at {best.quant}: {explain(best, profile)}."
+        f"{best.model.name} at {best.quant}: {explain(best, profile, hardware)}."
     )
     if parallel > 1:
         notes.append(
