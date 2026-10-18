@@ -393,10 +393,11 @@ def build_adaptive_plan(profile: UseCaseProfile, hardware: HardwareProfile,
             plan = build_plan(replace(profile, context_tokens=context), hardware,
                               catalog, runtime=runtime, runtime_reason=runtime_reason)
             if plan.runtime == "llamacpp" and hardware.gpus:
-                from llmsetup.runtimes.install import managed_binary
+                from llmsetup.runtimes.install import managed_binary, managed_flavor
                 from llmsetup.util.proc import which
 
-                if not which("llama-server") and managed_binary(hardware):
+                if (not which("llama-server") and managed_binary(hardware)
+                        and managed_flavor(hardware) == "cpu"):
                     hardware = replace(hardware, gpus=[], unified_memory=False)
                     plan = build_plan(replace(profile, context_tokens=context), hardware,
                                       catalog, runtime="llamacpp",
