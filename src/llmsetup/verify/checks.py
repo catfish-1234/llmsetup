@@ -170,6 +170,14 @@ def _reasoning_budget(ctx: CheckContext) -> int:
     return int(budget) if budget else 1024
 
 
+def _response_shape(result) -> str:
+    """What the server actually returned, for debugging an empty response."""
+    return (f"finish_reason={result.finish_reason or 'none'}, "
+            f"completion_tokens={result.completion_tokens}, "
+            f"reasoning_content={'yes' if result.reasoning_text else 'no'}, "
+            f"content_length={len(result.text)}")
+
+
 def _consumed_by_reasoning(result, ctx: CheckContext) -> bool:
     """The server generated tokens but spent the whole budget on thinking.
 
@@ -883,13 +891,41 @@ def check_stability(ctx: CheckContext) -> CheckResult:
                 failed_at_request=index + 1,
             )
         if not _strip_thinking(result.text).strip():
-            if not _consumed_by_reasoning(result, ctx):
+            if _consumed_by_reasoning(result, ctx):
+                # The server answered; the thinking block simply ate the small
+                # probe budget, which is a max_tokens choice, not a leak.
+                thinking_only += 1
+            elif _reasoning_enabled(ctx):
+                # Some servers report a truncated thinking-only reply with no
+                # reasoning field, no usage and a "stop" finish reason, which
+                # looks exactly like a real empty response at this budget. Ask
+                # once more with room for the thinking block before failing.
+                retry = ctx.client.chat(
+                    [{"role": "user",
+                      "content": f"In one sentence, describe the number {index + 1}."}],
+                    max_tokens=96 + _reasoning_budget(ctx), temperature=0.0, timeout=180,
+                )
+                if retry.ok and _strip_thinking(retry.text).strip():
+                    thinking_only += 1
+                    result = retry
+                elif retry.ok:
+                    return _fail(name, Severity.CRITICAL,
+                                 f"request {index + 1} returned empty output even "
+                                 "with room for the thinking budget",
+                                 sig.EMPTY_RESPONSE, failed_at_request=index + 1,
+                                 detail=_response_shape(retry))
+                else:
+                    return _fail(name, Severity.CRITICAL,
+                                 f"request {index + 1} failed after the first probe "
+                                 "came back empty",
+                                 sig.classify(retry.error) or sig.UNKNOWN_ERROR,
+                                 detail=(retry.error + "\n" + ctx.log_tail())[:2000],
+                                 failed_at_request=index + 1)
+            else:
                 return _fail(name, Severity.CRITICAL,
                              f"request {index + 1} returned empty output",
-                             sig.EMPTY_RESPONSE, failed_at_request=index + 1)
-            # The server answered every probe; the thinking block simply ate
-            # the small probe budget, which is a max_tokens choice, not a leak.
-            thinking_only += 1
+                             sig.EMPTY_RESPONSE, failed_at_request=index + 1,
+                             detail=_response_shape(result))
         latencies.append(result.latency_s)
 
     drift = (max(latencies) / min(latencies)) if min(latencies) > 0 else 1.0

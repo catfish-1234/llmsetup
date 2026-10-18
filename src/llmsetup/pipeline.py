@@ -110,6 +110,8 @@ class Pipeline:
             else:
                 self._runtime_reason = None
             try:
+                if name == "llamacpp" and not cpu_only and original_hardware.gpus:
+                    self._ensure_gpu_runtime(original_hardware)
                 if cpu_only:
                     self.profile = self._cpu_profile(
                         self.profile, self.hardware, last_result)
@@ -326,7 +328,32 @@ class Pipeline:
     def _install_cpu_runtime(self) -> None:
         from llmsetup.runtimes.install import install_llamacpp
 
-        install_llamacpp(self.hardware, self.console)
+        install_llamacpp(self.hardware, self.console, flavor="cpu")
+
+    def _ensure_gpu_runtime(self, hardware: HardwareProfile) -> None:
+        """Give the llama.cpp attempt a GPU-capable managed build.
+
+        Without a system llama-server, the managed build is what serves the
+        attempt. A CPU build forces the planner to ignore the detected GPU and
+        run the largest model that fits in RAM on the slowest path, so when the
+        machine has a GPU the managed build must be able to use it. No-op when
+        a system llama-server exists or the right build is already installed.
+        """
+        from llmsetup.runtimes.install import (
+            desired_flavor,
+            install_llamacpp,
+            managed_flavor,
+        )
+        from llmsetup.util.proc import which
+
+        desired = desired_flavor(hardware)
+        if desired == "cpu" or which("llama-server"):
+            return
+        if managed_flavor(hardware) == desired:
+            return
+        self.console.info(
+            "fetching the GPU-capable llama.cpp build so the GPU is actually used")
+        install_llamacpp(hardware, self.console, flavor=desired)
 
     def _run_once(self) -> SetupResult:
         started = _now()
