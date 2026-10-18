@@ -545,8 +545,8 @@ def plan_sampler(spec: ModelSpec, profile: UseCaseProfile,
         chain.top_n_sigma = -1.0
         chain.penalty_last_n = 0
         notes.append(
-            "no repetition penalties: repeated tokens in code and structured "
-            "output are usually correct, and penalising them corrupts valid text"
+            "token repetition penalty, DRY and XTC off: code and structured "
+            "output may need repeated identifiers and tokens"
         )
     elif task in (Task.CREATIVE,):
         # Variety is the goal. DRY stops phrase loops without banning necessary

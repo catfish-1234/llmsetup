@@ -30,6 +30,9 @@ WEIGHTS: Dict[Priority, Dict[str, float]] = {
 # 200 tok/s model is never ranked over a better one merely for being faster.
 SPEED_SATURATION = 30.0
 
+# Reports stop describing memory headroom as comfortable at this utilisation.
+HIGH_MEMORY_UTILISATION = 0.85
+
 # Quantization levels below this lose enough quality to be worth a penalty.
 _QUANT_PENALTY = {
     "Q2_K": 0.30, "Q3_K_S": 0.20, "Q3_K_M": 0.12, "Q3_K_L": 0.08, "IQ4_XS": 0.05,
@@ -144,7 +147,8 @@ def _bpw_of(candidate: Candidate) -> float:
     return (candidate.estimate.weights * 8) / params if params else 4.85
 
 
-def explain(candidate: Candidate, profile: UseCaseProfile) -> str:
+def explain(candidate: Candidate, profile: UseCaseProfile,
+            hardware: HardwareProfile) -> str:
     """One-sentence justification, built from the winning score components."""
     weights = WEIGHTS[profile.priority]
     contributions = {
@@ -152,10 +156,18 @@ def explain(candidate: Candidate, profile: UseCaseProfile) -> str:
         for k, w in weights.items()
     }
     top = sorted(contributions, key=lambda name: contributions[name], reverse=True)[:2]
+    budget = hardware.memory_budget
+    utilisation = candidate.estimate.total / budget if budget else float("inf")
+    if utilisation > 1.0:
+        fit = "uses GPU and system RAM" if candidate.gpu_fraction else "runs in system RAM"
+    elif utilisation >= HIGH_MEMORY_UTILISATION:
+        fit = "fits within the usable memory budget with limited headroom"
+    else:
+        fit = "uses the hardware without running at the edge"
     phrases = {
         "quality": "strongest output quality in what fits",
         "speed": "fastest of the viable options",
-        "fit": "uses the hardware without running at the edge",
+        "fit": fit,
         "task": f"built for {profile.primary_task.value}",
         "license": "permissively licensed",
     }

@@ -276,6 +276,9 @@ def _render_next_steps(result: SetupResult, console: Console) -> None:
     spec, config = _spec(result), result.config
     console.print()
     console.print(console.bold("Run it yourself"))
+    note = _launch_note(result)
+    if note:
+        console.info(note)
     try:
         command = get_runtime(result.plan.runtime).launch_command(spec, config)
         console.info(shlex.join(command))
@@ -291,6 +294,24 @@ def _render_next_steps(result: SetupResult, console: Console) -> None:
         console.info(console.dim(
             "run `llmsetup doctor` after changing anything to re-test"
         ))
+
+
+def _launch_note(result: SetupResult) -> str:
+    if result.plan.runtime != "ollama":
+        return ""
+    from llmsetup.runtimes.ollama import OllamaRuntime
+
+    spec = _spec(result)
+    tag = OllamaRuntime().derived_name(spec)
+    if result.config.served_name == tag:
+        return ""
+    note = (
+        f"The tuned Ollama model `{tag}` has not been created. "
+        "Run `llmsetup setup` without `--dry-run` to create it."
+    )
+    if spec.ollama_name:
+        note += " The command below runs the official Ollama model without these tuned settings."
+    return note
 
 
 def render_markdown(result: SetupResult) -> str:
@@ -449,10 +470,13 @@ def render_markdown(result: SetupResult) -> str:
                          f"({mark}): {record.get('note', '')}")
         lines.append("")
 
+    note = _launch_note(result)
+    if note:
+        lines.extend(["## Running it without llmsetup", "", note, ""])
     try:
         command = get_runtime(plan.runtime).launch_command(spec, config)
-        lines.append("## Running it without llmsetup")
-        lines.append("")
+        if not note:
+            lines.extend(["## Running it without llmsetup", ""])
         lines.append("```bash")
         lines.append(shlex.join(command))
         lines.append("```")
