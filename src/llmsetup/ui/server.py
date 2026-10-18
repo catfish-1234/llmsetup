@@ -255,7 +255,7 @@ class Handler(BaseHTTPRequestHandler):
                     "active_params_b": c.model.active_params_b,
                     "is_moe": c.model.is_moe,
                     "score": c.score,
-                    "why": explain(c, profile),
+                    "why": explain(c, profile, hardware),
                     "warnings": c.warnings,
                     "fits_on_gpu": c.fits_on_gpu,
                     "tokens_per_second": c.score_breakdown.get("est_tokens_per_s"),

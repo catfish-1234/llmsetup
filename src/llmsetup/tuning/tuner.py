@@ -135,7 +135,7 @@ def tune(
         top_k=sampling.top_k,
         min_p=sampling.min_p,
         repeat_penalty=sampling.repeat_penalty,
-        served_name=spec.id,
+        served_name=None if runtime == "ollama" else spec.id,
         extra={"stop": sampling.stop,
                "presence_penalty": sampling.presence_penalty,
                "sampling_source": sampling.source},
@@ -447,13 +447,13 @@ def _grow_batch_into_headroom(candidate, hardware, runtime, budget, context,
         return batch, ubatch
 
     batch = max(batch, grown)
-    decisions.append(TuningDecision(
-        "batch/ubatch", f"{batch}/{grown}",
-        f"raised from {ubatch}: once the weights are placed there is memory "
-        f"left over, and prompt processing is what it buys. Sizing this from "
-        f"the card alone would have missed it, because most of this model's "
-        f"weight is not on the card",
-    ))
+    reason = (
+        f"raised from {ubatch}: memory remaining after weight placement and "
+        f"the KV cache allows a larger prompt-processing batch"
+    )
+    if gpu_layers < spec.layers:
+        reason += "; some model weights are held in system RAM"
+    decisions.append(TuningDecision("batch/ubatch", f"{batch}/{grown}", reason))
     return batch, grown
 
 

@@ -44,8 +44,8 @@ class Sampling:
 # Per-task baselines. Deterministic at the top, exploratory at the bottom.
 _TASK_DEFAULTS = {
     Task.EXTRACT:   (0.0,  1.00, 0,  0.00, 1.00, "structured extraction must be reproducible"),
-    Task.CODING:    (0.2,  0.95, 20, 0.00, 1.05, "code wants near-deterministic output"),
-    Task.AGENT:     (0.3,  0.95, 20, 0.00, 1.05, "agent tool calls need stable argument formatting"),
+    Task.CODING:    (0.2,  0.95, 20, 0.00, 1.00, "code wants near-deterministic output"),
+    Task.AGENT:     (0.3,  0.95, 20, 0.00, 1.00, "agent tool calls need stable argument formatting"),
     Task.RAG:       (0.3,  0.90, 40, 0.05, 1.05, "answers should stay close to retrieved context"),
     Task.SUMMARIZE: (0.3,  0.90, 40, 0.05, 1.05, "summaries should not invent detail"),
     Task.TRANSLATE: (0.2,  0.90, 40, 0.05, 1.05, "translation favours fidelity over variety"),
@@ -197,6 +197,15 @@ def sampling_for(spec: ModelSpec, profile: UseCaseProfile,
         notes.append(
             "raised to the reasoning-model floor: these degenerate into "
             "repetition loops when sampled too greedily"
+        )
+
+    # Match the advanced chain's disabled repetition window on every runtime,
+    # including adapters that only consume this flat sampling configuration.
+    if profile.primary_task in _CODE_LIKE:
+        repeat_penalty = 1.0
+        notes.append(
+            "repetition penalty off: code and structured output may need "
+            "repeated identifiers and tokens"
         )
 
     stop: List[str] = []
