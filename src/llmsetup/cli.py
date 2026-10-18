@@ -17,16 +17,18 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import List, Optional
 
-from llmsetup.catalog.catalog import load_catalog
+from llmsetup.catalog.catalog import Catalog, load_catalog
 from llmsetup.hardware import apply_overrides, detect_hardware
 from llmsetup.hardware.detect import summarize as summarize_hardware
 from llmsetup.interview.questions import infer_flags
 from llmsetup.interview.wizard import (
     load_answers,
     profile_from_answers,
+    review_model_choice,
     run_interview,
     save_profile,
 )
@@ -136,7 +138,7 @@ def build_parser() -> argparse.ArgumentParser:
     hardware_flags(p_setup)
     profile_flags(p_setup)
     p_setup.add_argument("--runtime", help="force a runtime (ollama, llamacpp, vllm, …)")
-    p_setup.add_argument("--model", help="force a catalog model id")
+    p_setup.add_argument("--model", help="plan around a catalog model ID or name")
     p_setup.add_argument("--quant", help="force a quantization, e.g. Q4_K_M")
     p_setup.add_argument("--quick", action="store_true",
                          help="run only the essential checks")
@@ -165,6 +167,7 @@ def build_parser() -> argparse.ArgumentParser:
     hardware_flags(p_plan)
     profile_flags(p_plan)
     p_plan.add_argument("--runtime")
+    p_plan.add_argument("--model", help="plan around a catalog model ID or name")
     p_plan.add_argument("--top", type=_positive_int, default=5, help="how many to show")
     p_plan.add_argument("--catalog", type=Path, action="append")
 
@@ -284,6 +287,7 @@ def cmd_plan(args, console: Console) -> int:
     profile = _profile(args, console)
     _auto_update(console, profile)
     catalog = load_catalog(extra_paths=getattr(args, "catalog", None))
+    profile = _review_model(args, profile, hardware, catalog, console)
     plan = build_adaptive_plan(profile, hardware, catalog, runtime=args.runtime)
     profile = plan.profile or profile
 
@@ -291,6 +295,8 @@ def cmd_plan(args, console: Console) -> int:
         print(json.dumps({
             "runtime": plan.runtime,
             "runtime_reason": plan.runtime_reason,
+            "requested_model": profile.requested_model,
+            "context_tokens": profile.context_tokens,
             "candidates": [{
                 "model": c.model.id, "name": c.model.name, "quant": c.quant,
                 "score": c.score, "breakdown": c.score_breakdown,
@@ -346,16 +352,21 @@ def cmd_setup(args, console: Console) -> int:
     _auto_update(console, profile)
     catalog = load_catalog(extra_paths=getattr(args, "catalog", None))
 
+    if profile.requested_model and args.quant:
+        from llmsetup.planner.model_fit import resolve_requested_model
+
+        selected = resolve_requested_model(profile.requested_model, catalog)
+        # Keep the full catalog for fit comparisons and exhausted-budget recovery.
+        catalog = Catalog(
+            [replace(spec, recommended_quants=[args.quant]) if spec.id == selected.id else spec
+             for spec in catalog.models],
+            catalog.quant_bpw, catalog.updated, catalog.sources, catalog.extras,
+        )
+    profile = _review_model(args, profile, hardware, catalog, console)
+
     if args.save_profile:
         save_profile(profile, args.save_profile)
         console.ok(f"answers saved to {args.save_profile}")
-
-    if args.model:
-        # An explicit model choice still gets tuned and verified; it just skips
-        # the ranking. Validate it here so the error is immediate.
-        catalog = catalog.restrict_to(args.model)
-        if args.quant:
-            catalog.models[0].recommended_quants = [args.quant]
 
     pipeline = Pipeline(
         profile, hardware, catalog, console,
@@ -440,7 +451,7 @@ def cmd_doctor(args, console: Console) -> int:
         raise LlmsetupError(f"{path} does not record which model was set up")
 
     console.step(f"Re-testing {model_id}")
-    catalog = catalog.restrict_to(model_id)
+    profile = replace(profile, requested_model=model_id)
 
     pipeline = Pipeline(profile, hardware, catalog, console,
                         runtime_name=saved.get("runtime"))
@@ -685,12 +696,14 @@ def _profile(args, console: Console) -> UseCaseProfile:
 
     for key in ("tasks", "clients", "context_tokens", "priority",
                 "concurrent_users", "needs_tools", "needs_json", "needs_vision",
-                "needs_embeddings", "commercial_use", "offline_only"):
+                "needs_embeddings", "commercial_use", "offline_only", "requested_model"):
         value = getattr(args, key, None)
         if value is not None:
             answers[key] = value
     if getattr(args, "languages", None):
         answers["languages"] = args.languages
+    if args.command in ("setup", "plan") and getattr(args, "model", None) is not None:
+        answers["requested_model"] = args.model
 
     interactive = (sys.stdin.isatty() and not getattr(args, "yes", False)
                    and not getattr(args, "json", False))
@@ -700,6 +713,14 @@ def _profile(args, console: Console) -> UseCaseProfile:
     if interactive and not have_enough:
         return run_interview(console, defaults=answers)
     return profile_from_answers(infer_flags(answers or {"tasks": ["chat"]}))
+
+
+def _review_model(args, profile, hardware, catalog, console):
+    interactive = (sys.stdin.isatty() and not getattr(args, "yes", False)
+                   and not getattr(args, "json", False)
+                   and getattr(args, "answers", None) is None)
+    return review_model_choice(profile, hardware, catalog, console,
+                               runtime=args.runtime, interactive=interactive)
 
 
 def _default_checks(profile, spec):

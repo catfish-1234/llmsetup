@@ -9,12 +9,13 @@ from conftest import make_hardware
 
 from llmsetup.cli import main
 from llmsetup.runtimes.base import Endpoint, Runtime
-from llmsetup.runtimes.registry import _REGISTRY
+from llmsetup.runtimes.registry import _REGISTRY, all_runtimes
 from llmsetup.util.http import HttpResponse
 
 
 class OfflineRuntime(Runtime):
-    name = "offline-test"
+    # Exercise a supported adapter's planning path while replacing external I/O.
+    name = "llamacpp"
     label = "Offline fixture"
     uses_gguf = False
 
@@ -45,6 +46,7 @@ def offline(monkeypatch):
     monkeypatch.setenv("LLMSETUP_AUTO_UPDATE", "0")
     monkeypatch.setattr("llmsetup.cli.detect_hardware", lambda **kw: make_hardware())
     monkeypatch.setattr(socket, "socket", lambda *a, **kw: pytest.fail("unexpected network"))
+    all_runtimes()
     runtime = OfflineRuntime()
     monkeypatch.setitem(_REGISTRY, runtime.name, runtime)
     return runtime

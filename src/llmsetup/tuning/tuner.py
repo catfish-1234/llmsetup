@@ -66,6 +66,14 @@ def tune(
     threads = _threads(hardware, candidate, decisions)
     threads_batch = _threads_batch(hardware, candidate, threads, decisions)
     kv_type = candidate.estimate.kv_quant
+    if runtime == "mlx":
+        # mlx_lm.server has no cache-dtype setting in this adapter. The tuner
+        # must not count savings that its launch command cannot apply.
+        kv_type = "f16"
+    elif runtime == "vllm" and kv_type != "f16":
+        # vLLM maps quantized caches to fp8, including a lossy GGUF cache
+        # supplied by an older/general plan. Budget its actual 8-bit cache.
+        kv_type = "q8_0"
     context = profile.context_tokens
 
     # 1. GPU offload. This is the single highest-impact setting: a model fully on
@@ -243,8 +251,10 @@ def _offload(candidate, hardware, profile, runtime, budget, parallel, ubatch,
     from llmsetup.planner.memory import KV_QUALITY_ORDER, KV_SAFE_FLOOR
 
     floor = KV_QUALITY_ORDER.index(KV_SAFE_FLOOR)
-    for candidate_kv in KV_QUALITY_ORDER[
-            KV_QUALITY_ORDER.index(kv_type) + 1:floor + 1]:
+    safe_types = ["f16"] if runtime == "mlx" else KV_QUALITY_ORDER[:floor + 1]
+    cheaper_types = (safe_types[safe_types.index(kv_type) + 1:]
+                     if kv_type in safe_types else [])
+    for candidate_kv in cheaper_types:
         trial = estimate_memory(spec, bpw, context, quant=candidate.quant,
                                 kv_quant=candidate_kv, runtime=runtime,
                                 ubatch=ubatch, parallel=parallel)
@@ -260,7 +270,7 @@ def _offload(candidate, hardware, profile, runtime, budget, parallel, ubatch,
                 "gpu_layers", f"{spec.layers} (all)", "fits once the KV cache is quantized"))
             return spec.layers, context, candidate_kv, ubatch
 
-    kv_type = KV_SAFE_FLOOR if kv_type == "f16" else kv_type
+    kv_type = safe_types[-1] if kv_type == "f16" else kv_type
 
     # Before giving up context, give up prompt-processing batch size. The
     # compute buffers scale with the micro-batch and they are pure overhead
@@ -290,7 +300,8 @@ def _offload(candidate, hardware, profile, runtime, budget, parallel, ubatch,
         spec, bpw, budget, kv_quant=kv_type, runtime=runtime,
         ubatch=ubatch, parallel=parallel,
     )
-    min_useful = _minimum_context(profile)
+    native_requested = profile.requested_model and runtime in ("mlx", "vllm")
+    min_useful = 512 if native_requested else _minimum_context(profile)
     if fitted_ctx >= min_useful:
         decisions.append(TuningDecision(
             "context", f"{fitted_ctx}",
@@ -298,6 +309,36 @@ def _offload(candidate, hardware, profile, runtime, budget, parallel, ubatch,
             f"context on the GPU beats a longer one spilling to CPU",
         ))
         return spec.layers, fitted_ctx, kv_type, ubatch
+
+    if native_requested:
+        # These adapters do not implement llama.cpp's partial layer offload.
+        # If the extra tuning margin is unavailable, use the detected budget
+        # rather than inventing a CPU/GPU split that the runtime cannot apply.
+        native_ubatch = min(ubatch, _MIN_USEFUL_UBATCH)
+        native_budget = budget if runtime == "vllm" else hardware.memory_budget
+        fitted_ctx = max_context_for_budget(
+            spec, bpw, native_budget, kv_quant=kv_type, runtime=runtime,
+            ubatch=native_ubatch, parallel=parallel, granularity=512,
+        )
+        if fitted_ctx >= 512:
+            context = min(context, fitted_ctx)
+            decisions.append(TuningDecision(
+                "gpu_layers", f"{spec.layers} (all)",
+                "the native runtime loads all layers; the configuration fits the "
+                "runtime's memory budget with a smaller prompt batch",
+            ))
+            decisions.append(TuningDecision(
+                "context", str(context),
+                "using a supported cache type and smaller prompt batch to fit "
+                "the retained model",
+            ))
+            return spec.layers, context, kv_type, native_ubatch
+        from llmsetup.util.errors import PlanningError
+
+        raise PlanningError(
+            f"{spec.name} cannot fit the native runtime's memory budget at 512 tokens",
+            hint="Choose a compatible quantized runtime or a smaller model.",
+        )
 
     # Last resort: partial offload, which costs an order of magnitude in speed.
     layers = layers_that_fit(spec, bpw, budget, context, kv_quant=kv_type,
@@ -582,6 +623,12 @@ def _runtime_specific(config: RuntimeConfig, candidate: Candidate,
 
     if config.runtime == "vllm":
         utilisation = round(min(0.95, 1.0 - SAFETY_MARGIN), 2)
+        if profile.requested_model and hardware.total_vram_bytes:
+            # vLLM reserves a fraction of total VRAM, while planning budgets
+            # the capacity currently available. Do not allocate memory already
+            # occupied by another application.
+            utilisation = min(utilisation, hardware.memory_budget
+                              * (1 - SAFETY_MARGIN) / hardware.total_vram_bytes)
         config.extra["gpu_memory_utilization"] = utilisation
         decisions.append(TuningDecision(
             "gpu_memory_utilization", str(utilisation),

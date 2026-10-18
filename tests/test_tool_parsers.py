@@ -149,7 +149,7 @@ class TestRepair:
         """Every other strategy relies on the once-per-signature rule for
         termination, so a stray flag here would let the loop cycle."""
         repeatable = {s.name for s in STRATEGIES if s.exhausts_itself}
-        assert repeatable == {"try_tool_parser", "reduce_context", "switch_model"}
+        assert repeatable == {"try_tool_parser", "reduce_context", "drop_quant_tier", "switch_model"}
 
     def test_it_is_cheap_enough_to_try_before_swapping_the_model(self, catalog):
         names = [s.name for s in sorted(strategies_for(sig.TOOLS_UNSUPPORTED),
