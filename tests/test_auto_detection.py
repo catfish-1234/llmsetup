@@ -44,9 +44,8 @@ def test_unknown_vram_uses_cpu_and_unknown_free_memory_reserves_headroom(monkeyp
     monkeypatch.setattr("llmsetup.runtimes.registry.scan_runtimes", lambda: ({}, []))
     hardware = detection.detect_hardware()
     assert hardware.gpus == [known]
-    assert hardware.usable_accel_bytes == 8 * GIB
+    assert hardware.usable_accel_bytes == 9 * GIB
     assert any("Unknown GPU: VRAM unknown" in note for note in hardware.detection_warnings)
-    assert any("reserving 20%" in note for note in hardware.detection_warnings)
 
 
 def test_broken_vendor_probe_keeps_other_gpus(monkeypatch):
@@ -96,23 +95,25 @@ def test_no_fitting_hardware_exhausts_context_fallback(catalog):
                             catalog, runtime="llamacpp")
 
 
-def test_free_memory_is_used_instead_of_installed_capacity():
+def test_free_memory_does_not_shrink_the_gpu_budget():
+    """Momentary free VRAM is usage, not capacity: other apps come and go, so
+    the plan is sized from the card with a safety margin instead."""
     hardware = make_hardware(vram_gb=24, ram_gb=32)
     hardware.gpus[0].vram_free_bytes = 4 * GIB
     hardware.ram_available_bytes = 0
-    assert hardware.usable_accel_bytes == 4 * GIB
+    assert hardware.usable_accel_bytes == int(24 * GIB * 0.9)
     assert hardware.usable_cpu_bytes == 0
 
 
-def test_multi_gpu_split_respects_free_memory_on_each_card():
+def test_multi_gpu_split_respects_capacity_on_each_card():
     from llmsetup.tuning.advanced import _tensor_split
 
-    hardware = make_hardware(vram_gb=24)
-    hardware.gpus[0].vram_free_bytes = 4 * GIB
+    hardware = make_hardware(vram_gb=16)
+    hardware.gpus[0].vram_free_bytes = 1 * GIB   # busy card: usage, not capacity
     hardware.gpus.append(GPU(1, "NVIDIA RTX 4090", Accelerator.NVIDIA, 24 * GIB,
                              vram_free_bytes=12 * GIB))
     shares = _tensor_split(hardware, 16 * GIB)
-    assert shares == [0.25, 0.75]
+    assert shares == [0.4, 0.6]
 
 
 def test_apple_gpu_budget_also_respects_available_ram():
@@ -163,3 +164,12 @@ def test_managed_vulkan_runtime_keeps_the_gpu(catalog, monkeypatch, tmp_path):
     plan = build_adaptive_plan(UseCaseProfile(), hardware, catalog, runtime="llamacpp")
     assert plan.hardware.gpus
     assert not any("managed portable runtime uses CPU" in note for note in plan.notes)
+
+def test_busy_gpu_warns_instead_of_shrinking_the_plan(monkeypatch):
+    card = GPU(0, "Known GPU", Accelerator.NVIDIA, 8 * GIB, vram_free_bytes=1 * GIB)
+    monkeypatch.setattr(detection, "detect_gpus", lambda: ([card], []))
+    monkeypatch.setattr(detection.cpu_probe, "is_apple_silicon", lambda: False)
+    monkeypatch.setattr("llmsetup.runtimes.registry.scan_runtimes", lambda: ({}, []))
+    hardware = detection.detect_hardware()
+    assert hardware.usable_accel_bytes == int(8 * GIB * 0.9)
+    assert any("in use by other apps" in note for note in hardware.detection_warnings)

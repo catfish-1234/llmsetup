@@ -55,6 +55,11 @@ def run(
             list(cmd),
             capture_output=True,
             text=True,
+            # Subprocess output is not locale text: tools like ollama emit
+            # UTF-8 regardless of the Windows code page, and decoding as
+            # cp1252 raises UnicodeDecodeError inside the reader thread.
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
             cwd=cwd,
             env=merged,
