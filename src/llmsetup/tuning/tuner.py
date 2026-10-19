@@ -453,6 +453,9 @@ def _grow_batch_into_headroom(candidate, hardware, runtime, budget, context,
     )
     if gpu_layers < spec.layers:
         reason += "; some model weights are held in system RAM"
+    # The first pass already recorded a batch/ubatch line sized from the card;
+    # replace it rather than print two lines for one knob.
+    decisions[:] = [d for d in decisions if d.setting != "batch/ubatch"]
     decisions.append(TuningDecision("batch/ubatch", f"{batch}/{grown}", reason))
     return batch, grown
 

@@ -189,3 +189,22 @@ class TestRuntimeSpecific:
         _, tuned = plan_and_tune(catalog, make_hardware(vram_gb=48, ram_gb=128),
                                  profile)
         assert tuned.config.parallel == 4
+
+
+def test_growing_batch_replaces_the_original_batch_decision(catalog):
+    """The first pass records one batch/ubatch line sized from the card; the
+    growth pass used to append a second, contradictory one (it did on the
+    round-four run)."""
+    from llmsetup.tuning.tuner import TuningDecision, _grow_batch_into_headroom
+
+    hardware = make_hardware(vram_gb=24, ram_gb=64)
+    profile = UseCaseProfile(tasks=[Task.CHAT], context_tokens=8192)
+    candidate = build_plan(profile, hardware, catalog).best
+    decisions = [TuningDecision("batch/ubatch", "512/512",
+                                "sized from the card, before the model was known")]
+    batch, ubatch = _grow_batch_into_headroom(
+        candidate, hardware, "llamacpp", hardware.memory_budget, 8192,
+        "f16", 512, 512, 1, candidate.model.layers, decisions)
+    lines = [d for d in decisions if d.setting == "batch/ubatch"]
+    assert len(lines) == 1
+    assert lines[0].value == f"{batch}/{ubatch}"

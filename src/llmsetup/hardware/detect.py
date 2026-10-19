@@ -48,9 +48,13 @@ def detect_hardware(probe_gpus: bool = True) -> HardwareProfile:
         if gpu.vram_bytes <= 0:
             warnings.append(f"{gpu.name}: VRAM unknown; using CPU instead")
             continue
-        if gpu.vram_free_bytes is None and not unified:
-            gpu.vram_free_bytes = int(gpu.vram_bytes * 0.8)
-            warnings.append(f"{gpu.name}: free VRAM unknown; reserving 20%")
+        if (gpu.vram_free_bytes is not None and not unified
+                and gpu.vram_free_bytes < gpu.vram_bytes * 0.5):
+            used_gb = (gpu.vram_bytes - gpu.vram_free_bytes) / GIB
+            warnings.append(
+                f"{gpu.name}: {used_gb:.1f} GB of VRAM is in use by other apps "
+                "right now; the plan ignores that (usage changes by the minute), "
+                "but closing GPU-heavy apps gives the model more room")
         if gpu.vendor is Accelerator.NVIDIA and not gpu.compute_capability:
             warnings.append(f"{gpu.name}: CUDA capability unknown; disabling flash attention initially")
         usable.append(gpu)

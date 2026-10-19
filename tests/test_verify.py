@@ -333,13 +333,22 @@ class TestReasoningTruncation:
         assert result.status is CheckStatus.FAIL
         assert result.failure_signature == sig.EMPTY_RESPONSE
 
-    def test_stability_fails_empty_for_a_non_reasoning_model(self, catalog):
-        ctx = context(FakeClient(chat=ChatResult(
-            ok=True, text="", completion_tokens=96, finish_reason="length")),
-            catalog, model="qwen2.5-coder-7b")
+    def test_stability_passes_when_thinking_eats_the_budget_even_mislabeled(self, catalog):
+        """A card mislabeled as non-reasoning still thinks (MiniCPM5-2B did,
+        and the false empty-response verdict switched engines for nothing).
+        The response shape, not the card, decides."""
+        def chat(messages, **kwargs):
+            if kwargs.get("max_tokens", 0) <= 96:
+                # Small probe budget: thinking eats it all, like MiniCPM5-2B.
+                return ChatResult(ok=True, text="", completion_tokens=96,
+                                  finish_reason="length")
+            return ChatResult(ok=True, text="A fine number.",
+                              completion_tokens=104, finish_reason="stop")
+
+        ctx = context(FakeClient(chat=chat), catalog, model="qwen2.5-coder-7b")
         result = check_stability(ctx)
-        assert result.status is CheckStatus.FAIL
-        assert result.failure_signature == sig.EMPTY_RESPONSE
+        assert result.status is CheckStatus.PASS
+        assert result.metrics["thinking_only_responses"] == 4
 
     def test_stability_fails_empty_when_reasoning_is_disabled(self, catalog):
         from types import SimpleNamespace
