@@ -8,6 +8,30 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- The hardware budget is sized from the card's total VRAM with a 10% safety
+  margin instead of the momentarily free VRAM. Free VRAM is usage by other
+  apps, not capacity, and sizing from it downgraded the model choice whenever
+  something else happened to be running. A busy GPU now produces a warning
+  suggesting GPU-heavy apps be closed for best speed.
+- MiniCPM5-2B is now cataloged as a reasoning model, which it is: its
+  thinking block consumed the small probe budget and the old empty-response
+  verdict sent recovery across both engines for nothing. The stability and
+  completion probes no longer trust the catalog card over the observed
+  response shape, and the stability failure detail includes the truncated raw
+  server response so the next misbehaving model can be diagnosed without a
+  rerun.
+- The MiniCPM5-2B-DSpark entry was removed: its GGUF repo publishes a single
+  unquantized file, so the planner picked it, provisioning failed, and the
+  pipeline silently switched models mid-run. Auto-discovery now skips any
+  model whose GGUF repo publishes none of the recommended quantizations and
+  trims entries to the quants actually published, and the pipeline does not
+  retry a model whose provisioning already failed in the same run.
+- Subprocess reads are decoded as UTF-8 with replacement instead of the
+  platform default, ending the cp1252 UnicodeDecodeError crashes during model
+  creation on Windows.
+- The tuner no longer prints two contradictory batch/ubatch lines when it
+  grows the batch into leftover headroom.
+
 - Verification no longer fails a working reasoning model: a small probe budget
   that the thinking block consumes is reported as such instead of an empty
   response, and the completion probe retries with room for the thinking budget

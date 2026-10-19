@@ -69,6 +69,10 @@ _EXCLUDE = re.compile(
 )
 
 
+# The quants llmsetup prefers to serve, best first.
+DEFAULT_QUANTS = ["Q4_K_M", "Q5_K_M", "Q6_K", "Q8_0"]
+
+
 @dataclass
 class Candidate:
     """A discovered model, with everything needed for a catalog entry."""
@@ -87,6 +91,7 @@ class Candidate:
     active_params_b: Optional[float] = None
     supports_vision: bool = False
     gguf_repo: Optional[str] = None
+    recommended_quants: List[str] = field(default_factory=lambda: list(DEFAULT_QUANTS))
     downloads: int = 0
     likes: int = 0
     tags: List[str] = field(default_factory=list)
@@ -111,7 +116,7 @@ class Candidate:
             "supports_vision": self.supports_vision,
             "supports_json": True,
             "hf_repo": self.repo,
-            "recommended_quants": ["Q4_K_M", "Q5_K_M", "Q6_K", "Q8_0"],
+            "recommended_quants": list(self.recommended_quants),
             # Read from config.json, which is the publisher's own statement.
             "arch_source": "measured",
             "discovered": True,
@@ -184,6 +189,33 @@ def find_gguf_repo(repo: str, timeout: float = 20.0) -> Optional[str]:
         if candidate.lower().endswith("gguf") and name.lower() in candidate.lower():
             return candidate
     return None
+
+
+
+_QUANT_RE = re.compile(
+    r"(?<![A-Za-z0-9])(Q[2-8]_K(?:_[MSL])?|Q[2-8]_[0-9]|Q8_0|IQ[1-4]_[A-Z]+|F16|BF16|F32)"
+    r"(?![A-Za-z0-9])")
+
+
+def gguf_repo_quants(repo: str, timeout: float = 20.0) -> Optional[set]:
+    """The quantization levels actually published in a GGUF repo.
+
+    Entries are ranked and chosen by their recommended quants, so an entry
+    whose repo publishes none of them can only win on paper and then fail at
+    provisioning (MiniCPM5-2B-DSpark-GGUF shipped a single unquantized file).
+    Returns None when the listing itself failed: unknown is not empty.
+    """
+    data = _get_json(f"{HF_ENDPOINT}/api/models/{repo}", timeout)
+    if not isinstance(data, dict):
+        return None
+    quants = set()
+    for item in (data or {}).get("siblings", []):
+        name = str(item.get("rfilename") or "")
+        if name.lower().endswith(".gguf"):
+            match = _QUANT_RE.search(name)
+            if match:
+                quants.add(match.group(1))
+    return quants
 
 
 # --------------------------------------------------------------------------- #
@@ -351,6 +383,15 @@ def discover(
             skip("no GGUF build published yet")
             continue
 
+        recommended = list(DEFAULT_QUANTS)
+        if gguf_repo:
+            published = gguf_repo_quants(gguf_repo, timeout)
+            if published is not None:
+                recommended = [q for q in DEFAULT_QUANTS if q in published]
+                if not recommended:
+                    skip("GGUF repo publishes none of the recommended quantizations")
+                    continue
+
         found.append(Candidate(
             id=model_id,
             repo=repo,
@@ -366,6 +407,7 @@ def discover(
             license=_license_of(item),
             supports_vision=arch["vision"],
             gguf_repo=gguf_repo,
+            recommended_quants=recommended,
             downloads=downloads,
             likes=likes,
             tags=[str(t) for t in (item.get("tags") or [])],
