@@ -109,7 +109,7 @@ def test_fit_explanation_and_warning_share_the_85_percent_boundary(catalog, util
     if cpu:
         hardware.ram_available_bytes = round(budget / 0.75)
     else:
-        hardware.gpus[0].vram_free_bytes = budget
+        hardware.gpus[0].vram_bytes = round(budget / 0.9)
     candidate = _build_candidate(spec, "Q4_K_M", profile, hardware, catalog,
                                  "ollama", hardware.memory_budget,
                                  hardware.usable_cpu_bytes, 1, False)
@@ -216,3 +216,15 @@ def test_partial_offload_label_kept_when_some_layers_offload(laptop_result):
     config = laptop_result.config
     config.gpu_layers = max(1, config.total_layers - 1)
     assert "partial. CPU is the bottleneck" in terminal(laptop_result)
+
+
+def test_unprovisionable_models_are_skipped_with_a_note(catalog):
+    """A model that failed to provision earlier in the run must not be the
+    next pick: retrying the same broken download loops forever."""
+    hardware = make_hardware(vram_gb=24, ram_gb=64)
+    profile = UseCaseProfile(tasks=[Task.CODING], context_tokens=8192)
+    excluded = {catalog.matching(profile)[0].id}
+    plan = build_plan(profile, hardware, catalog, runtime="ollama",
+                      exclude_models=excluded)
+    assert all(c.model.id not in excluded for c in plan.candidates)
+    assert any("skipping" in n and "failed earlier" in n for n in plan.notes)

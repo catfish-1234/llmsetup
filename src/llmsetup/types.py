@@ -142,8 +142,16 @@ class GPU:
 
     @property
     def available_vram_bytes(self) -> int:
-        return max(0, min(self.vram_bytes, self.vram_free_bytes)
-                   if self.vram_free_bytes is not None else self.vram_bytes)
+        """Plannable VRAM: total capacity minus a small safety margin.
+
+        Momentary free VRAM is deliberately not the budget: browsers, chat
+        apps and the desktop hold and release VRAM constantly, and sizing the
+        model to whatever happened to be free at probe time picks a tiny model
+        on a busy machine. The margin leaves room for the display and normal
+        desktop use; when other apps hold an unusual amount, detection warns
+        instead of shrinking the plan.
+        """
+        return int(self.vram_bytes * 0.9)
 
     @property
     def supports_flash_attention(self) -> bool:

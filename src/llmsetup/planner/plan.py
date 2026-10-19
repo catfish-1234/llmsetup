@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import List, Optional, Set
 
 from llmsetup.catalog.catalog import Catalog
 from llmsetup.planner.memory import (
@@ -36,6 +36,7 @@ def build_plan(
     runtime: Optional[str] = None,
     allow_partial_offload: bool = True,
     runtime_reason: Optional[str] = None,
+    exclude_models: Optional[Set[str]] = None,
 ) -> Plan:
     """Rank every viable (model, quant) pairing for this user and this machine."""
     if profile.requested_model:
@@ -52,6 +53,13 @@ def build_plan(
 
     viable = catalog.matching(profile)
     notes: List[str] = []
+    if exclude_models:
+        kept = [spec for spec in viable if spec.id not in exclude_models]
+        skipped = sorted(spec.name for spec in viable if spec.id in exclude_models)
+        for name in skipped:
+            notes.append(f"skipping {name}: provisioning it failed earlier in "
+                         "this run (the catalog entry has no usable build)")
+        viable = kept
     if not viable:
         reasons = catalog.unmatched_reasons(profile)
         detail = "; ".join(f"{count} model(s): {reason}" for reason, count in
@@ -382,7 +390,8 @@ def plan_embedding_model(
 
 def build_adaptive_plan(profile: UseCaseProfile, hardware: HardwareProfile,
                         catalog: Catalog, runtime: Optional[str] = None,
-                        runtime_reason: Optional[str] = None) -> Plan:
+                        runtime_reason: Optional[str] = None,
+                        exclude_models: Optional[Set[str]] = None) -> Plan:
     """Keep the goal, shorten context automatically when the requested window cannot fit."""
     from dataclasses import replace
 
@@ -391,7 +400,8 @@ def build_adaptive_plan(profile: UseCaseProfile, hardware: HardwareProfile,
     while True:
         try:
             plan = build_plan(replace(profile, context_tokens=context), hardware,
-                              catalog, runtime=runtime, runtime_reason=runtime_reason)
+                              catalog, runtime=runtime, runtime_reason=runtime_reason,
+                              exclude_models=exclude_models)
             if plan.runtime == "llamacpp" and hardware.gpus:
                 from llmsetup.runtimes.install import managed_binary, managed_flavor
                 from llmsetup.util.proc import which
@@ -401,7 +411,8 @@ def build_adaptive_plan(profile: UseCaseProfile, hardware: HardwareProfile,
                     hardware = replace(hardware, gpus=[], unified_memory=False)
                     plan = build_plan(replace(profile, context_tokens=context), hardware,
                                       catalog, runtime="llamacpp",
-                                      runtime_reason=runtime_reason)
+                                      runtime_reason=runtime_reason,
+                                      exclude_models=exclude_models)
                     plan.notes.append("the managed portable runtime uses CPU; planning against available RAM")
             if context != requested:
                 plan.notes.append(

@@ -172,10 +172,15 @@ def _reasoning_budget(ctx: CheckContext) -> int:
 
 def _response_shape(result) -> str:
     """What the server actually returned, for debugging an empty response."""
-    return (f"finish_reason={result.finish_reason or 'none'}, "
-            f"completion_tokens={result.completion_tokens}, "
-            f"reasoning_content={'yes' if result.reasoning_text else 'no'}, "
-            f"content_length={len(result.text)}")
+    shape = (f"finish_reason={result.finish_reason or 'none'}, "
+             f"completion_tokens={result.completion_tokens}, "
+             f"reasoning_content={'yes' if result.reasoning_text else 'no'}, "
+             f"content_length={len(result.text)}")
+    raw = getattr(result, "raw", None)
+    if isinstance(raw, dict):
+        import json as _json
+        shape += "\nraw response: " + _json.dumps(raw)[:600]
+    return shape
 
 
 def _consumed_by_reasoning(result, ctx: CheckContext) -> bool:
@@ -187,8 +192,10 @@ def _consumed_by_reasoning(result, ctx: CheckContext) -> bool:
     empty-response failure. Treating it as one sends recovery after runtimes
     that are working, which costs a download and a relay per false alarm.
     """
-    if not _reasoning_enabled(ctx):
-        return False
+    # The catalog card is not consulted here: a model mislabeled as
+    # non-reasoning still thinks (MiniCPM5-2B did, and the false
+    # empty-response verdict sent recovery across every engine). The response
+    # shape is the evidence: tokens were generated, so the server is alive.
     if result.reasoning_text and result.reasoning_text.strip():
         return True
     if (result.completion_tokens or 0) > 0:
@@ -891,11 +898,11 @@ def check_stability(ctx: CheckContext) -> CheckResult:
                 failed_at_request=index + 1,
             )
         if not _strip_thinking(result.text).strip():
-            if _consumed_by_reasoning(result, ctx):
+            if _consumed_by_reasoning(result, ctx) and _reasoning_enabled(ctx):
                 # The server answered; the thinking block simply ate the small
                 # probe budget, which is a max_tokens choice, not a leak.
                 thinking_only += 1
-            elif _reasoning_enabled(ctx):
+            else:
                 # Some servers report a truncated thinking-only reply with no
                 # reasoning field, no usage and a "stop" finish reason, which
                 # looks exactly like a real empty response at this budget. Ask
@@ -921,11 +928,6 @@ def check_stability(ctx: CheckContext) -> CheckResult:
                                  sig.classify(retry.error) or sig.UNKNOWN_ERROR,
                                  detail=(retry.error + "\n" + ctx.log_tail())[:2000],
                                  failed_at_request=index + 1)
-            else:
-                return _fail(name, Severity.CRITICAL,
-                             f"request {index + 1} returned empty output",
-                             sig.EMPTY_RESPONSE, failed_at_request=index + 1,
-                             detail=_response_shape(result))
         latencies.append(result.latency_s)
 
     drift = (max(latencies) / min(latencies)) if min(latencies) > 0 else 1.0

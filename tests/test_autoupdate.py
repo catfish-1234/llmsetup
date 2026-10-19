@@ -144,6 +144,20 @@ class TestDiscovery:
                             lambda repo, timeout=20.0: configs.get(repo))
         monkeypatch.setattr("llmsetup.catalog.discover.find_gguf_repo",
                             lambda repo, timeout=20.0: f"{repo}-GGUF")
+        monkeypatch.setattr("llmsetup.catalog.discover.gguf_repo_quants",
+                            lambda repo, timeout=20.0: {"Q4_K_M", "Q5_K_M"})
+
+    def test_skips_a_model_whose_gguf_repo_has_no_usable_quant(self, console, monkeypatch):
+        self._listing(monkeypatch,
+            [{"id": "acme/BareModel-8B", "downloads": 100_000, "likes": 300,
+              "tags": ["license:apache-2.0", "instruct"]}],
+            {"acme/BareModel-8B": {"model_type": "llama", "num_hidden_layers": 32,
+                                   "hidden_size": 4096, "num_attention_heads": 32,
+                                   "num_key_value_heads": 8,
+                                   "max_position_embeddings": 131072}})
+        monkeypatch.setattr("llmsetup.catalog.discover.gguf_repo_quants",
+                            lambda repo, timeout=20.0: set())
+        assert discover(console, known_ids=[]) == []
 
     def test_discovers_a_new_model(self, console, monkeypatch):
         self._listing(monkeypatch,

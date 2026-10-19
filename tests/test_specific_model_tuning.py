@@ -85,7 +85,7 @@ def test_vllm_reserves_available_vram_and_keeps_every_layer_on_gpu():
 
 
 def test_native_tuning_keeps_an_already_short_requested_context():
-    hardware = make_hardware(vram_gb=6)
+    hardware = make_hardware(vram_gb=8)
     plan, catalog = native_plan("vllm", 2, hardware, context=512)
     tuned = tune(plan.best, hardware, plan.profile, "vllm", catalog=catalog)
     assert tuned.config.context_tokens == 512

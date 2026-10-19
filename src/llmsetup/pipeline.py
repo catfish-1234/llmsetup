@@ -68,6 +68,8 @@ class Pipeline:
 
     # ------------------------------------------------------------------ run
 
+    _unprovisionable: Set[str]
+
     def run(self) -> SetupResult:
         """Try the selected engine, compatible installed alternatives, then a CPU fallback."""
         if self.dry_run or self.max_repairs == 0:
@@ -75,6 +77,7 @@ class Pipeline:
         from llmsetup.runtimes.install import managed_binary
         from llmsetup.runtimes.registry import recovery_order
 
+        self._unprovisionable = getattr(self, "_unprovisionable", set())
         original_hardware, original_profile = self.hardware, self.profile
         requested_runtime = self.runtime_name
         self._runtime_reason: Optional[str] = None
@@ -361,7 +364,8 @@ class Pipeline:
         self.console.step("Planning")
         plan = build_adaptive_plan(self.profile, self.hardware, self.catalog,
                           runtime=self.runtime_name,
-                          runtime_reason=getattr(self, "_runtime_reason", None))
+                          runtime_reason=getattr(self, "_runtime_reason", None),
+                          exclude_models=getattr(self, "_unprovisionable", None))
         assert plan.profile is not None
         self.profile = plan.profile
         self.hardware = plan.hardware or self.hardware
@@ -735,6 +739,12 @@ class Pipeline:
                 if attempt + 1 < attempts:
                     self.console.info(f"provisioning failed ({message}); retrying once")
                     continue
+                if "has no" in message and "build" in message:
+                    # The catalog entry points at files that do not exist.
+                    # That is permanent for this run and engine-independent,
+                    # so keep later attempts from picking the same model again.
+                    self._unprovisionable = getattr(self, "_unprovisionable", set())
+                    self._unprovisionable.add(spec.id)
                 return [CheckResult(
                     name="health", status=CheckStatus.FAIL, severity=Severity.CRITICAL,
                     message=message, failure_signature=(sig.DOWNLOAD_UNAVAILABLE
