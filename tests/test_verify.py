@@ -430,3 +430,19 @@ class TestShapelessTruncation:
         result = check_streaming(ctx)
         assert result.status is CheckStatus.PASS
         assert result.metrics["chunks"] == 3
+
+    def test_streaming_counts_ollama_reasoning_field(self, catalog, monkeypatch):
+        from llmsetup.runtimes.base import Endpoint
+        from llmsetup.verify.client import OpenAIClient
+
+        lines = iter([
+            'data: {"choices": [{"delta": {"role": "assistant", "reasoning": "hmm"}}]}',
+            'data: {"choices": [{"delta": {"reasoning": " ok"}}]}',
+            'data: [DONE]',
+        ])
+        monkeypatch.setattr("llmsetup.util.http.stream_lines", lambda *a, **kw: lines)
+        ctx = context(FakeClient(), catalog)
+        ctx.client = OpenAIClient(Endpoint("http://fixture.invalid", "m", "ollama"))
+        result = check_streaming(ctx)
+        assert result.status is CheckStatus.PASS
+        assert result.metrics["chunks"] == 2

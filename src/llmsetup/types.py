@@ -75,6 +75,9 @@ class UseCaseProfile:
     clients: List[Client] = field(default_factory=list)
     priority: Priority = Priority.BALANCED
     context_tokens: int = 8192
+    #: Smallest window that is still useful for how the model will be used
+    #: (0 means no floor). Coding agents and retrieval stop working below it.
+    context_floor: int = 0
     concurrent_users: int = 1
     needs_tools: bool = False
     needs_vision: bool = False
