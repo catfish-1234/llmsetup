@@ -2,7 +2,10 @@
 from llmsetup.interview.questions import infer_flags
 from llmsetup.interview.wizard import profile_from_answers
 from llmsetup.planner.memory import (
-    KV_ASYMMETRIC, kv_element_bytes, kv_options, kv_split,
+    KV_ASYMMETRIC,
+    kv_element_bytes,
+    kv_options,
+    kv_split,
 )
 from llmsetup.runtimes.llamacpp import LlamaCppRuntime
 

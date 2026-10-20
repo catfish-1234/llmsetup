@@ -7,9 +7,8 @@ from typing import List, Optional, Set
 from llmsetup.catalog.catalog import Catalog
 from llmsetup.planner.memory import (
     KV_ASYMMETRIC,
-    KV_QUALITY_ORDER,
-    kv_options,
     estimate_memory,
+    kv_options,
     layers_that_fit,
     max_context_for_budget,
 )
