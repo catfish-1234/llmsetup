@@ -6,8 +6,9 @@ from typing import List, Optional, Set
 
 from llmsetup.catalog.catalog import Catalog
 from llmsetup.planner.memory import (
-    KV_QUALITY_ORDER,
+    KV_ASYMMETRIC,
     estimate_memory,
+    kv_options,
     layers_that_fit,
     max_context_for_budget,
 )
@@ -145,7 +146,8 @@ def _build_candidate(
     # This means a KV quantization only ever appears in a plan because it was
     # *required*, never as a default that silently costs quality.
     estimate: Optional[MemoryEstimate] = None
-    for kv_quant in ([kv_quant_override] if kv_quant_override else KV_QUALITY_ORDER):
+    for kv_quant in ([kv_quant_override] if kv_quant_override
+                     else kv_options(runtime, bool(profile.context_floor))):
         candidate_estimate = estimate_memory(
             spec, bpw, profile.context_tokens, quant=quant, kv_quant=kv_quant,
             runtime=runtime, parallel=parallel,
@@ -156,6 +158,8 @@ def _build_candidate(
             estimate = candidate_estimate
             if kv_quant != "f16":
                 cost = ("negligible quality cost" if kv_quant == "q8_0" else
+                        "keys stay at q8_0, values at q4_0: small measured cost"
+                        if kv_quant == KV_ASYMMETRIC else
                         "measurably weaker recall over long context, if answers "
                         "start missing details far back in the prompt, this is why")
                 warnings.append(
@@ -388,14 +392,47 @@ def plan_embedding_model(
     return sorted(embedders, key=rank, reverse=True)[0]
 
 
+def _tradeoff_note(plan: Plan, requested: int, context: int, floor: int) -> Optional[str]:
+    """One line saying what the chosen context cost, so the trade is visible."""
+    best = plan.best
+    if best is None:
+        return None
+    kv = best.estimate.kv_quant
+    parts = [f"context {context:,} tokens"]
+    if requested != context:
+        parts[0] += f" (aimed for {requested:,})"
+    parts.append("KV cache " + (kv.replace("/", " keys / ") + " values" if "/" in kv else kv))
+    parts.append(f"model {best.model.name} {best.quant}")
+    if best.gpu_fraction >= 1.0:
+        parts.append("all layers on the GPU, no offload slowdown")
+    elif best.gpu_fraction <= 0.0:
+        parts.append("all layers on the CPU, so generation is much slower than on a GPU")
+    else:
+        parts.append(f"{best.gpu_fraction:.0%} of layers on the GPU, the rest in RAM, "
+                     "which makes generation noticeably slower")
+    note = "Context trade: " + "; ".join(parts) + "."
+    if floor and context < floor:
+        note += (f" This is BELOW the {floor:,} tokens that coding and agent tools "
+                 "need, because nothing larger fits this device; expect agent "
+                 "harnesses to truncate or fail on long sessions. A bigger GPU, "
+                 "more memory or a smaller model is the only real fix.")
+    return note
+
+
 def build_adaptive_plan(profile: UseCaseProfile, hardware: HardwareProfile,
                         catalog: Catalog, runtime: Optional[str] = None,
                         runtime_reason: Optional[str] = None,
                         exclude_models: Optional[Set[str]] = None) -> Plan:
-    """Keep the goal, shorten context automatically when the requested window cannot fit."""
+    """Keep the goal, shorten context automatically when the requested window cannot fit.
+
+    The window only shrinks down to the profile's floor while a plan exists there;
+    below it the plan is still returned (a smaller window beats no setup) but
+    carries an explicit warning, rather than silently handing a coding agent 8K.
+    """
     from dataclasses import replace
 
     requested = profile.context_tokens
+    floor = min(profile.context_floor, requested)
     context = requested
     while True:
         try:
@@ -419,8 +456,15 @@ def build_adaptive_plan(profile: UseCaseProfile, hardware: HardwareProfile,
                     f"requested {requested} tokens; automatically using {context} to fit "
                     "available memory and the model's context limit"
                 )
+            if floor:
+                note = _tradeoff_note(plan, requested, context, floor)
+                if note:
+                    plan.notes.append(note)
             return plan
         except PlanningError:
             if context <= 512:
                 raise
             context = max(512, context // 2)
+            if floor and context < floor and context * 2 > floor:
+                # Land on the floor itself before going under it.
+                context = floor

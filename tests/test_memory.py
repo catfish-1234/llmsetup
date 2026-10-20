@@ -155,7 +155,9 @@ def test_kv_quality_ladder_terminates(allow_lossy):
         seen.append(quant)
         quant = cheaper_kv_quant(quant, allow_lossy=allow_lossy)
     if allow_lossy:
-        assert seen == KV_QUALITY_ORDER
+        # The repair ladder is symmetric only; the asymmetric K/V type is
+        # offered by the planner directly.
+        assert seen == [k for k in KV_QUALITY_ORDER if "/" not in k]
     else:
         # The ordinary path stops at the last dtype that is genuinely free.
         assert seen == ["f16", KV_SAFE_FLOOR]

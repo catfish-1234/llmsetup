@@ -276,7 +276,9 @@ def check_streaming(ctx: CheckContext) -> CheckResult:
     name = "streaming"
     result = ctx.client.stream_chat(
         [{"role": "user", "content": "Count from 1 to 20, separated by spaces."}],
-        max_tokens=128,
+        # Room for the thinking block plus the visible answer; a reasoning
+        # model can spend a bare 128 tokens before its first content chunk.
+        max_tokens=128 + _reasoning_budget(ctx),
     )
     if not result["ok"]:
         return _fail(
@@ -284,7 +286,9 @@ def check_streaming(ctx: CheckContext) -> CheckResult:
             "streaming did not produce incremental chunks; clients will appear "
             "to hang until the whole reply is ready",
             sig.classify(result.get("error", "")) or sig.STREAMING_UNSUPPORTED,
-            detail=str(result.get("error", ""))[:1000],
+            detail=(str(result.get("error", ""))[:1000]
+                    or f"stream events={result.get('events', 0)}, "
+                       f"delta fields seen={result.get('delta_keys', [])}"),
         )
     ttft = result.get("ttft_s")
     return _pass(

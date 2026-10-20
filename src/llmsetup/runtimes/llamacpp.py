@@ -112,8 +112,10 @@ class LlamaCppRuntime(Runtime):
         # has deliberately turned it off.
         cmd += ["--flash-attn", "on" if config.flash_attention else "off"]
         if config.kv_cache_type != "f16":
-            cmd += ["--cache-type-k", config.kv_cache_type,
-                    "--cache-type-v", config.kv_cache_type]
+            from llmsetup.planner.memory import kv_split
+
+            key_type, value_type = kv_split(config.kv_cache_type)
+            cmd += ["--cache-type-k", key_type, "--cache-type-v", value_type]
         cmd += self._load_mode_flags(config)
         if spec.is_embedding:
             cmd.append("--embeddings")

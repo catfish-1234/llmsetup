@@ -6,7 +6,28 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- Context now follows how the model will be used instead of a fixed 8K. Coding
+  and agent setups aim for 32K and keep a 16K floor, retrieval keeps a 16K
+  floor, chat keeps a small default. An explicit `--context` is still
+  respected. The planner only goes below the floor when nothing larger fits,
+  and then says so plainly, along with the context, KV cache type, model and
+  offload it chose. Ollama's docs recommend at least 64K for agent tools, so
+  the floor is a minimum, not the goal.
+- New asymmetric KV cache option for llama.cpp (keys q8_0, values q4_0). Public
+  perplexity measurements show keys are the sensitive half and values are not,
+  so this saves about 40% of the cache where symmetric q4_0 breaks the model.
+  For coding, agent and retrieval profiles the planner skips symmetric caches
+  below q8_0 and shortens context instead.
+
 ### Fixed
+
+- The streaming check read only `reasoning_content` and `thinking`, but
+  Ollama's OpenAI endpoint streams thinking under `reasoning`, so a working
+  reasoning model counted zero chunks and failed. It now counts all three, the
+  probe budget includes the model's thinking budget, and a real failure reports
+  which stream fields were seen.
 
 - The hardware budget is sized from the card's total VRAM with a 10% safety
   margin instead of the momentarily free VRAM. Free VRAM is usage by other
