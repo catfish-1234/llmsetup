@@ -7,7 +7,7 @@ from dataclasses import replace
 from typing import List, Optional, Tuple
 
 from llmsetup.catalog.catalog import Catalog
-from llmsetup.planner.memory import KV_QUALITY_ORDER, kv_is_lossy, kv_lossy_allowed
+from llmsetup.planner.memory import KV_QUALITY_ORDER, kv_is_lossy, kv_lossy_allowed, kv_options
 from llmsetup.planner.score import score_candidate
 from llmsetup.runtimes.registry import choose_runtime, recovery_order
 from llmsetup.types import (
@@ -70,7 +70,7 @@ def build_requested_plan(
         engine_budget = (int(hardware.memory_budget * 0.92)
                          if engine == "vllm" else hardware.memory_budget)
         quants = _runtime_quants(spec, engine)
-        kv_quants = ["f16"] if engine == "mlx" else KV_QUALITY_ORDER
+        kv_quants = kv_options(engine, bool(profile.context_floor))
         if engine == "vllm":
             kv_quants = ["f16", "q8_0"]
         for quant in quants:

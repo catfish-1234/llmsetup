@@ -292,6 +292,8 @@ def profile_from_answers(answers: Dict[str, Any]) -> UseCaseProfile:
         raise LlmsetupError(f"context_tokens={context} is too small to be usable",
                           hint="512 is the practical minimum; 8192 is a good default")
     data["context_tokens"] = context
+    data["context_floor"] = max(0, _number(data.get("context_floor") or 0,
+                                           "context_floor", int))
 
     users = _number(data.get("concurrent_users") or 1, "concurrent_users", int)
     data["concurrent_users"] = max(1, users)

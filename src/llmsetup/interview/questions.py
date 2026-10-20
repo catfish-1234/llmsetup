@@ -185,6 +185,15 @@ def infer_flags(answers: dict) -> dict:
     except (ValueError, TypeError, OverflowError):
         raise LlmsetupError("context_tokens must be a finite whole number") from None
 
+    # Context follows the usage, not a fixed number. An agent harness sends its
+    # system prompt, tool schemas, file contents and tool results every turn, so
+    # 8K is gone before the first edit; Ollama's own docs say coding and agent
+    # tools want at least 64K. Aim for 32K (Qwen3's native window) and refuse to
+    # go below 16K unless the device truly cannot hold it.
+    if tasks & {"coding", "agent"}:
+        derived.setdefault("context_floor", 16384)
+        if context == 0:
+            derived["context_tokens"] = 32768
     if "agent" in tasks:
         derived.setdefault("needs_tools", True)
     if "extract" in tasks:
@@ -198,6 +207,7 @@ def infer_flags(answers: dict) -> dict:
     if "rag" in tasks:
         derived.setdefault("needs_embeddings", True)
         # Retrieval over documents is not useful in a short window.
+        derived.setdefault("context_floor", 16384)
         if context < 16384:
             derived["context_tokens"] = 32768
     return {k: v for k, v in derived.items() if v is not None}

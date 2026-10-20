@@ -49,8 +49,47 @@ KV_ELEMENT_BYTES = {
     "q4_0": 0.5625,
 }
 
+# Asymmetric cache: keys at q8_0, values at q4_0 ("K/V"). Measured perplexity
+# on llama.cpp shows the key cache is the sensitive half (q4_0 keys collapse the
+# model) while the value cache tolerates q4_0 almost for free, so this saves
+# about 40% of the cache for a small cost where symmetric q4_0 is unusable.
+# Only llama.cpp can set the two types separately.
+KV_ASYMMETRIC = "q8_0/q4_0"
+
 # Quality cost of quantizing the KV cache, cheapest first.
-KV_QUALITY_ORDER = ["f16", "q8_0", "q5_1", "q4_0"]
+KV_QUALITY_ORDER = ["f16", "q8_0", KV_ASYMMETRIC, "q5_1", "q4_0"]
+
+
+def kv_element_bytes(kv_quant: str) -> float:
+    """Average bytes per cache element; K and V are the same size, so a
+    ``K/V`` pair averages."""
+    parts = kv_quant.lower().split("/")
+    return sum(KV_ELEMENT_BYTES.get(part, 2.0) for part in parts) / len(parts)
+
+
+def kv_split(kv_quant: str) -> tuple:
+    """``(key_type, value_type)`` for a plain or ``K/V`` cache type."""
+    parts = kv_quant.lower().split("/")
+    return (parts[0], parts[-1])
+
+
+def kv_options(runtime: str, precision_sensitive: bool = False) -> list:
+    """Cache types worth trying on this runtime, best quality first.
+
+    Asymmetric needs llama.cpp. For precision-sensitive work (code, tool calls,
+    retrieval) a symmetric type below q8_0 is skipped: q4_0 keys are the part
+    that breaks, and a shorter context is the honest trade there.
+    """
+    if runtime == "mlx":
+        return ["f16"]
+    options = []
+    for kv in KV_QUALITY_ORDER:
+        if kv == KV_ASYMMETRIC and runtime != "llamacpp":
+            continue
+        if precision_sensitive and kv in ("q5_1", "q4_0"):
+            continue
+        options.append(kv)
+    return options
 
 # The rung below which quantizing the KV cache stops being a cheap win.
 #
@@ -124,7 +163,7 @@ def kv_bytes_per_token(spec: ModelSpec, kv_quant: str = "f16") -> float:
     the real one, because those layers stop caching once the window is full.
     Use :func:`kv_cache_bytes`, which knows the difference.
     """
-    element = KV_ELEMENT_BYTES.get(kv_quant.lower(), 2.0)
+    element = kv_element_bytes(kv_quant)
     return 2 * spec.layers * spec.kv_heads * spec.effective_head_dim * element
 
 
@@ -150,7 +189,7 @@ def kv_cache_bytes(spec: ModelSpec, context_tokens: int, kv_quant: str = "f16",
     it would cost.
     """
     context_tokens = max(1, int(context_tokens))
-    element = KV_ELEMENT_BYTES.get(kv_quant.lower(), 2.0)
+    element = kv_element_bytes(kv_quant)
     per_layer_token = 2 * spec.kv_heads * spec.effective_head_dim * element
 
     # Recurrent layers hold a state whose size does not depend on how long the
@@ -250,7 +289,7 @@ def max_context_for_budget(
     if remaining <= 0:
         return 0
 
-    element = KV_ELEMENT_BYTES.get(kv_quant.lower(), 2.0)
+    element = kv_element_bytes(kv_quant)
     per_layer_token = 2 * spec.kv_heads * spec.effective_head_dim * element * parallel
     if per_layer_token <= 0:
         return spec.max_context
@@ -322,19 +361,24 @@ def fits(estimate: MemoryEstimate, budget_bytes: int, headroom: float = 0.0) -> 
     return estimate.total <= budget_bytes * (1.0 - headroom)
 
 
+# The repair ladder is runtime-agnostic, so it never steps onto the llama.cpp-only
+# asymmetric type; the planner offers that one directly.
+_SYMMETRIC_LADDER = [kv for kv in KV_QUALITY_ORDER if kv != KV_ASYMMETRIC]
+
+
 def cheaper_kv_quant(current: str, allow_lossy: bool = False) -> Optional[str]:
-    """Next KV cache dtype down the quality ladder, or None at the bottom.
+    """Next symmetric KV cache dtype down the quality ladder, or None at the bottom.
 
     Stops at :data:`KV_SAFE_FLOOR` unless ``allow_lossy`` is set, so the
     ordinary path can never quietly hand back a dtype that changes answers.
     """
     try:
-        idx = KV_QUALITY_ORDER.index(current.lower())
+        idx = _SYMMETRIC_LADDER.index(current.lower())
     except ValueError:
         return KV_SAFE_FLOOR
     nxt = idx + 1
-    if nxt >= len(KV_QUALITY_ORDER):
+    if nxt >= len(_SYMMETRIC_LADDER):
         return None
-    if not allow_lossy and nxt > KV_QUALITY_ORDER.index(KV_SAFE_FLOOR):
+    if not allow_lossy and nxt > _SYMMETRIC_LADDER.index(KV_SAFE_FLOOR):
         return None
-    return KV_QUALITY_ORDER[nxt]
+    return _SYMMETRIC_LADDER[nxt]

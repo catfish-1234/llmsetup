@@ -104,6 +104,7 @@ class OpenAIClient:
             finish_reason=choice.get("finish_reason") or "",
             tool_calls=message.get("tool_calls") or [],
             reasoning_text=(message.get("reasoning_content")
+                            or message.get("reasoning")
                             or message.get("thinking") or ""),
         )
 
@@ -128,6 +129,8 @@ class OpenAIClient:
         started = time.monotonic()
         first_token_at: Optional[float] = None
         chunks = 0
+        events = 0
+        delta_keys: set = set()
         text = []
         error = ""
 
@@ -145,11 +148,16 @@ class OpenAIClient:
                     parsed = json.loads(payload)
                 except ValueError:
                     continue
+                events += 1
                 delta = (parsed.get("choices") or [{}])[0].get("delta") or {}
+                delta_keys.update(k for k, v in delta.items() if v)
                 content = delta.get("content")
                 # A reasoning model streams its thinking block first; those
                 # chunks are still incremental output the client sees arriving.
-                thinking = delta.get("reasoning_content") or delta.get("thinking")
+                # llama.cpp uses reasoning_content, Ollama's OpenAI endpoint uses
+                # reasoning, and Ollama's native API uses thinking.
+                thinking = (delta.get("reasoning_content") or delta.get("reasoning")
+                            or delta.get("thinking"))
                 if content or thinking:
                     if first_token_at is None:
                         first_token_at = time.monotonic()
@@ -164,6 +172,8 @@ class OpenAIClient:
             "ok": bool(chunks) and not error,
             "error": error,
             "chunks": chunks,
+            "events": events,
+            "delta_keys": sorted(delta_keys),
             "text": "".join(text),
             "ttft_s": (first_token_at - started) if first_token_at else None,
             "total_s": total,
