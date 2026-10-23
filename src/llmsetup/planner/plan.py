@@ -463,6 +463,19 @@ def build_adaptive_plan(profile: UseCaseProfile, hardware: HardwareProfile,
             return plan
         except PlanningError:
             if context <= 512:
+                # A small detected GPU can fit no useful layers even though
+                # RAM can hold the model. Try CPU only after every GPU window.
+                engine = runtime or choose_runtime(hardware, profile)[0]
+                if (hardware.gpus and not hardware.unified_memory
+                        and engine in ("llamacpp", "ollama", "lmstudio")):
+                    cpu_hardware = replace(hardware, gpus=[], unified_memory=False)
+                    plan = build_adaptive_plan(
+                        profile, cpu_hardware, catalog, runtime=engine,
+                        runtime_reason="no GPU candidate fits; using system RAM on CPU",
+                        exclude_models=exclude_models,
+                    )
+                    plan.notes.append("no model fits the GPU; all layers run on CPU using system RAM")
+                    return plan
                 raise
             context = max(512, context // 2)
             if floor and context < floor and context * 2 > floor:

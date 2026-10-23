@@ -25,7 +25,7 @@ from llmsetup.catalog.catalog import Catalog
 from llmsetup.interview.questions import QUESTIONS, Option, Question, infer_flags
 from llmsetup.types import Candidate, Client, HardwareProfile, Priority, Task, UseCaseProfile
 from llmsetup.util.errors import LlmsetupError
-from llmsetup.util.log import Console
+from llmsetup.util.log import Console, write_console
 
 
 def run_interview(console: Console, defaults: Optional[Dict[str, Any]] = None,
@@ -37,8 +37,7 @@ def run_interview(console: Console, defaults: Optional[Dict[str, Any]] = None,
     out = stream or sys.stderr
 
     def emit(text: str = "") -> None:
-        out.write(text + "\n")
-        out.flush()
+        write_console(out, text + "\n")
 
     emit("")
     emit(console.bold("Let's work out what you need."))
@@ -73,8 +72,7 @@ def review_model_choice(profile: UseCaseProfile, hardware: HardwareProfile,
         if stream is None:
             console.info(text)
         else:
-            stream.write(text + "\n")
-            stream.flush()
+            write_console(stream, text + "\n")
 
     while profile.requested_model:
         try:
