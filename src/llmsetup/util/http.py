@@ -8,6 +8,7 @@ expected state during startup polling, not an exception.
 
 from __future__ import annotations
 
+import http.client
 import json as _json
 import socket
 import time
@@ -60,12 +61,15 @@ def request(
                 resp.getcode(), body, dict(resp.headers), elapsed_s=time.monotonic() - started
             )
     except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8", "replace") if exc.fp else ""
+        try:
+            body = exc.read().decode("utf-8", "replace") if exc.fp else ""
+        except (OSError, http.client.HTTPException) as read_error:
+            body = f"could not read error response: {read_error}"
         return HttpResponse(
             exc.code, body, dict(exc.headers or {}), error=str(exc),
             elapsed_s=time.monotonic() - started,
         )
-    except (urllib.error.URLError, socket.timeout, OSError) as exc:
+    except (urllib.error.URLError, socket.timeout, OSError, http.client.HTTPException) as exc:
         return HttpResponse(0, "", error=str(exc), elapsed_s=time.monotonic() - started)
 
 
@@ -130,4 +134,7 @@ def find_free_port(host: str, start: int, limit: int = 50) -> int:
     for port in range(start, start + limit):
         if port_is_free(host, port):
             return port
-    return start
+    from llmsetup.util.errors import ProvisionError
+
+    raise ProvisionError(f"ports {start}-{start + limit - 1} on {host} are all in use",
+                         hint="stop an unused local server, then rerun `llmsetup setup`")

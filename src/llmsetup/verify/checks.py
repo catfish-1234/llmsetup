@@ -226,9 +226,9 @@ def check_completion(ctx: CheckContext) -> CheckResult:
                 sig.classify(result.error) or sig.UNKNOWN_ERROR,
                 detail=(result.error + "\n" + ctx.log_tail())[:2000],
             )
-        if not _strip_thinking(result.text).strip() and _consumed_by_reasoning(result, ctx):
-            # The probe budget was spent on thinking. Ask once more with room
-            # for the thinking block plus the answer before calling it empty.
+        if not _strip_thinking(result.text).strip():
+            # Some servers hide the thinking field and token usage entirely.
+            # Give every empty first reply one bounded retry with headroom.
             result = ctx.client.chat(
                 [{"role": "user", "content": prompt}],
                 max_tokens=512 + _reasoning_budget(ctx), temperature=0.0,
@@ -244,7 +244,8 @@ def check_completion(ctx: CheckContext) -> CheckResult:
         if not text.strip():
             return _fail(name, Severity.CRITICAL,
                          "the model returned an empty response",
-                         sig.EMPTY_RESPONSE, detail="\n".join(transcript))
+                         sig.EMPTY_RESPONSE,
+                         detail="\n".join(transcript) + "\n" + _response_shape(result))
         if expected.search(text):
             correct += 1
 

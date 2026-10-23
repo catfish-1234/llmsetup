@@ -7,9 +7,11 @@ https://github.com/ggml-org/llama.cpp/releases/expanded_assets/b11669
 from __future__ import annotations
 
 import hashlib
+import http.client
 import shutil
 import tarfile
 import tempfile
+import time
 import urllib.error
 import urllib.request
 import zipfile
@@ -161,24 +163,25 @@ def install_llamacpp(hardware: HardwareProfile, console: Console,
     if existing is not None and managed_flavor(hardware) == flavor:
         return existing
     root = _root(hardware)
-    if root.exists():
-        # A different flavor than this machine should run (usually the CPU
-        # build on a machine with a GPU). Replace it wholesale; the archives
-        # are self-contained and nothing else writes here.
-        shutil.rmtree(root)
     root.parent.mkdir(parents=True, exist_ok=True)
     url = f"https://github.com/ggml-org/llama.cpp/releases/download/{BUILD}/llama-{BUILD}-bin-{suffix}"
     console.info(f"installing verified llama.cpp {BUILD} in {root}")
+    deadline = time.monotonic() + 300
     with tempfile.TemporaryDirectory(prefix="install-", dir=root.parent) as tmp:
         archive = Path(tmp) / suffix
         for attempt in range(2):
             try:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("runtime download timed out after 300s")
                 request = urllib.request.Request(url, headers={"User-Agent": "llmsetup/0.1.0"})
-                with urllib.request.urlopen(request, timeout=30) as response, archive.open("wb") as out:
+                with urllib.request.urlopen(request, timeout=min(30, deadline - time.monotonic())) as response, archive.open("wb") as out:
                     sha = hashlib.sha256()
                     size = 0
+                    read_chunk = getattr(response, "read1", response.read)
                     while True:
-                        chunk = response.read(1024 * 1024)
+                        if time.monotonic() >= deadline:
+                            raise TimeoutError("runtime download timed out after 300s")
+                        chunk = read_chunk(1024 * 1024)
                         if not chunk:
                             break
                         size += len(chunk)
@@ -189,13 +192,18 @@ def install_llamacpp(hardware: HardwareProfile, console: Console,
                 if sha.hexdigest() != digest:
                     raise ProvisionError("runtime archive checksum mismatch")
                 break
-            except (OSError, urllib.error.URLError, ProvisionError) as exc:
-                if attempt:
-                    raise ProvisionError(f"automatic llama.cpp installation failed: {exc}") from exc
+            except (OSError, urllib.error.URLError, http.client.HTTPException, ProvisionError) as exc:
+                if attempt or time.monotonic() >= deadline:
+                    raise ProvisionError(f"automatic llama.cpp installation failed: {exc}",
+                                         hint="Rerun: llmsetup setup (with the same options)") from exc
                 console.info("runtime download failed validation or connectivity; retrying once")
         dest = Path(tmp) / "unpacked"
         dest.mkdir()
-        _unpack(archive, dest)
+        try:
+            _unpack(archive, dest)
+        except (OSError, EOFError, zipfile.BadZipFile, tarfile.TarError) as exc:
+            raise ProvisionError(f"could not unpack the runtime archive: {exc}",
+                                 hint="Rerun: llmsetup setup (with the same options)") from None
         name = "llama-server.exe" if hardware.os == "windows" else "llama-server"
         binary = next(dest.rglob(name), None)
         if binary is None:
@@ -203,9 +211,18 @@ def install_llamacpp(hardware: HardwareProfile, console: Console,
         binary.chmod(binary.stat().st_mode | 0o700)
         probe = run([str(binary), "--version"], timeout=15)
         if not probe.ok:
-            raise ProvisionError(f"portable llama.cpp cannot run on this system: {probe.output[-1000:]}")
-        if root.exists():
-            raise ProvisionError(f"incomplete runtime installation at {root}")
+            raise ProvisionError(f"portable llama.cpp cannot run on this system: "
+                                 f"{probe.failure([str(binary), '--version'])}",
+                                 hint="install a compatible llama-server on PATH, then rerun `llmsetup setup`")
         (dest / ".flavor").write_text(flavor, encoding="utf-8")
-        dest.rename(root)
+        # Keep the working flavor until its replacement has passed validation.
+        previous = Path(tmp) / "previous"
+        if root.exists():
+            root.rename(previous)
+        try:
+            dest.rename(root)
+        except OSError:
+            if previous.exists():
+                previous.rename(root)
+            raise
         return root / binary.relative_to(dest)
