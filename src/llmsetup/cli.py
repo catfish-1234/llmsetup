@@ -34,11 +34,13 @@ from llmsetup.interview.wizard import (
 )
 from llmsetup.pipeline import Pipeline, companion_embedding_plan
 from llmsetup.report.render import render_markdown, render_terminal
+from llmsetup.runtimes.base import RuntimeUnavailable
 from llmsetup.runtimes.registry import all_runtimes
 from llmsetup.types import UseCaseProfile
 from llmsetup.util.errors import LlmsetupError
 from llmsetup.util.fs import app_dir, ensure_dir, write_text
-from llmsetup.util.log import Console
+from llmsetup.util.log import Console, write_console
+from llmsetup.util.proc import format_command
 from llmsetup.util.units import gb
 
 VERSION = "0.1.0"
@@ -68,10 +70,21 @@ def main(argv: Optional[List[str]] = None) -> int:
         parser.print_help()
         return 2
 
+    rerun = "Rerun: " + format_command(["llmsetup", *(argv if argv is not None else sys.argv[1:])])
     try:
-        return handler(args, console)
+        code = handler(args, console)
+        if code:
+            console.error(rerun)
+        return code
     except LlmsetupError as exc:
         console.error(str(exc))
+        console.error(rerun)
+        return 1
+    except (RuntimeUnavailable, OSError) as exc:
+        console.error(str(exc))
+        if isinstance(exc, RuntimeUnavailable) and exc.install_hint:
+            console.error(exc.install_hint)
+        console.error(rerun)
         return 1
     except KeyboardInterrupt:
         console.error("interrupted")
@@ -770,7 +783,7 @@ def cmd_report(args, console: Console) -> int:
             f"no saved report at {path}",
             hint="run `llmsetup setup` first, every run saves one",
         )
-    sys.stdout.write(Path(path).read_text(encoding="utf-8"))
+    write_console(sys.stdout, Path(path).read_text(encoding="utf-8"))
     return 0
 
 

@@ -60,14 +60,16 @@ class MlxRuntime(Runtime):
             )
         revision = spec.mlx_revision if spec.mlx_repo else spec.hf_revision
         config.extra["model_revision"] = pin_revision(repo, revision)
-        result = run([
+        command = [
             "python3", "-c",
             "import sys; from huggingface_hub import snapshot_download; "
             "print(snapshot_download(repo_id=sys.argv[1], revision=sys.argv[2]))",
             repo, config.extra["model_revision"],
-        ], timeout=7200)
+        ]
+        result = run(command, timeout=7200)
         if not result.ok or not result.stdout.strip():
-            raise RuntimeUnavailable(f"could not download {repo} at the pinned revision")
+            raise RuntimeUnavailable(f"could not download {repo} at the pinned revision: "
+                                     f"{result.failure(command)}")
         config.model_path = result.stdout.strip()
         return config
 
@@ -88,7 +90,8 @@ class MlxRuntime(Runtime):
 
         log_path = str(ensure_dir(app_dir() / "logs") / f"mlx-{config.port}.log")
         Path(log_path).write_text("", encoding="utf-8")
-        process = spawn(self.launch_command(spec, config), log_path=log_path)
+        command = self.launch_command(spec, config)
+        process = spawn(command, log_path=log_path)
         endpoint = Endpoint(
             base_url=f"http://{config.host}:{config.port}",
             model=config.model_path or spec.id,
@@ -96,6 +99,7 @@ class MlxRuntime(Runtime):
             started_by_us=True,
             log_path=log_path,
             process=process,
+            command=command,
         )
 
         def ready() -> bool:

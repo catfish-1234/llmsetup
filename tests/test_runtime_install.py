@@ -196,3 +196,47 @@ def test_managed_flavor_defaults_to_cpu_for_legacy_installs(monkeypatch, tmp_pat
 
 def test_managed_flavor_is_none_without_an_install():
     assert install.managed_flavor(make_hardware(vram_gb=0)) is None
+
+
+def test_failed_gpu_upgrade_preserves_working_cpu_build(monkeypatch):
+    data = gpu_zip()
+    hardware = make_hardware(vram_gb=8, os_name="windows")
+    root = install._root(hardware)
+    root.mkdir(parents=True)
+    binary = root / "llama-server.exe"
+    binary.write_bytes(b"working CPU build")
+    (root / ".flavor").write_text("cpu", encoding="utf-8")
+    monkeypatch.setitem(install.GPU_ASSETS, ("windows", "x86_64"),
+                        ("vulkan", "bad-gpu.zip", "0" * 64))
+    monkeypatch.setattr(install.urllib.request, "urlopen", lambda *a, **kw: io.BytesIO(data))
+    monkeypatch.setattr(install, "run", lambda *a, **kw: pytest.fail("executed an unverified file"))
+    with pytest.raises(ProvisionError, match="checksum mismatch"):
+        install.install_llamacpp(hardware, Console(quiet=True))
+    assert binary.read_bytes() == b"working CPU build"
+    assert install.managed_flavor(hardware) == "cpu"
+
+
+def test_runtime_archive_deadline_stops_a_trickling_download(monkeypatch):
+    hardware = make_hardware(vram_gb=0)
+    clock = [0.0]
+    requests = []
+
+    class Response(io.BytesIO):
+        def read(self, size):
+            clock[0] += 301
+            return b"partial archive"
+
+        read1 = read
+
+    def urlopen(request, timeout):
+        assert 0 < timeout <= 30
+        requests.append(request)
+        return Response()
+
+    monkeypatch.setattr(install.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(install.urllib.request, "urlopen", urlopen)
+    with pytest.raises(ProvisionError, match="timed out after 300s") as error:
+        install.install_llamacpp(hardware, Console(quiet=True))
+    assert len(requests) == 1
+    assert "llmsetup setup" in error.value.hint
+    assert install.managed_binary(hardware) is None

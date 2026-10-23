@@ -16,7 +16,7 @@ from llmsetup.gguf import apply_to_spec, read_gguf_info
 from llmsetup.interop.export import register_everywhere
 from llmsetup.planner.plan import build_adaptive_plan, plan_embedding_model
 from llmsetup.repair.loop import RepairLoop, mark_resolved
-from llmsetup.repair.strategies import RepairState, strategies_for
+from llmsetup.repair.strategies import RepairState
 from llmsetup.runtimes.base import Endpoint, Runtime, RuntimeUnavailable
 from llmsetup.runtimes.registry import get_runtime
 from llmsetup.tuning import tune
@@ -74,8 +74,8 @@ class Pipeline:
         """Try the selected engine, compatible installed alternatives, then a CPU fallback."""
         if self.dry_run or self.max_repairs == 0:
             return self._run_once()
-        from llmsetup.runtimes.install import managed_binary
-        from llmsetup.runtimes.registry import recovery_order
+        from llmsetup.runtimes.install import desired_flavor, managed_binary
+        from llmsetup.runtimes.registry import choose_runtime, recovery_order
 
         self._unprovisionable = getattr(self, "_unprovisionable", set())
         original_hardware, original_profile = self.hardware, self.profile
@@ -85,10 +85,7 @@ class Pipeline:
         # are not engine problems; trying a third engine only costs time.
         followed: Dict[Tuple[str, str], Set[str]] = {}
         stop_switching = False
-        # Keep one action for an explicit model fallback only after recovery
-        # has tried the requested model's settings and runtime paths. It is
-        # part of the existing global budget, not a new repair loop.
-        self._remaining_repairs = self.max_repairs - bool(original_profile.requested_model)
+        self._remaining_repairs = self.max_repairs
         queue = [(requested_runtime, "auto")]
         tried: Set[Tuple[Optional[str], str]] = set()
         journal: List[RepairAction] = []
@@ -113,7 +110,8 @@ class Pipeline:
             else:
                 self._runtime_reason = None
             try:
-                if name == "llamacpp" and not cpu_only and original_hardware.gpus:
+                engine = name or choose_runtime(self.hardware, self.profile)[0]
+                if engine == "llamacpp" and not cpu_only and original_hardware.gpus:
                     self._ensure_gpu_runtime(original_hardware)
                 if cpu_only:
                     self.profile = self._cpu_profile(
@@ -139,7 +137,7 @@ class Pipeline:
                         result.plan.notes.append("automatic recovery tried other runtime or CPU paths; see repairs")
                     return result
                 journal.extend(result.repairs)
-                errors.extend(f"{result.plan.runtime}: {check.message}"
+                errors.extend(f"{result.plan.runtime}: {check.message}\n{check.detail}"
                               for check in result.checks if check.blocking)
                 for check in result.checks:
                     if not check.blocking:
@@ -170,11 +168,14 @@ class Pipeline:
                 actual = self._runtime.name if self._runtime else name
                 tried.add((actual, mode))
                 message = exc.message if isinstance(exc, LlmsetupError) else str(exc)
-                errors.append(f"{actual or 'planning'}: {message}")
+                hint = getattr(exc, "hint", "") or getattr(exc, "install_hint", "")
+                errors.append(f"{actual or 'planning'}: {message}" + (f"\n{hint}" if hint else ""))
                 self.console.info(f"automatic recovery: {message}")
             if not stop_switching and not queue and mode == "auto":
                 installed = recovery_order(original_hardware, original_profile)
                 alternatives = [(engine, "auto") for engine in installed]
+                if original_hardware.gpus and desired_flavor(original_hardware) != "cpu":
+                    alternatives.append(("llamacpp", "auto"))
                 if "llamacpp" in installed and original_hardware.gpus:
                     alternatives.append(("llamacpp", "cpu"))
                 # Try an existing CPU engine before fetching another executable.
@@ -186,17 +187,11 @@ class Pipeline:
                     description=f"trying {queue[0][0]}{' on CPU' if queue[0][1] != 'auto' else ''} after the previous attempt failed",
                     cost="high",
                 ))
-        if original_profile.requested_model and last_result is not None:
-            fallback = self._requested_model_fallback(last_result, original_profile, journal, errors)
-            if fallback is not None:
-                last_result = fallback
-                if not any(check.blocking for check in fallback.checks):
-                    fallback.hardware = original_hardware
-                    fallback.repairs = journal + fallback.repairs
-                    mark_resolved(fallback.repairs, fallback.checks)
-                    return fallback
         detail = "; ".join(dict.fromkeys(errors))
         hint = "Automatic recovery exhausted. " + detail + ". " + _recovery_instructions(detail)
+        if original_profile.requested_model:
+            hint += (f" Requested model {original_profile.requested_model} was kept fixed; "
+                     "choose a different model explicitly if these settings cannot work.")
         self.console.warn(hint)
         if last_result is None:
             raise LlmsetupError("setup could not provision a supported runtime and model", hint=hint)
@@ -207,86 +202,6 @@ class Pipeline:
             if check.blocking:
                 check.detail = hint
         return last_result
-
-    def _requested_model_fallback(self, failed: SetupResult, requested: UseCaseProfile,
-                                  journal: List[RepairAction], errors: List[str]) -> Optional[SetupResult]:
-        """Spend the reserved final action only after requested-model recovery ends."""
-        failure = next((check for check in failed.checks if check.blocking), None)
-        if failure is None or failed.plan.best is None:
-            return None
-        signature = failure.failure_signature or sig.UNKNOWN_ERROR
-        state = RepairState(
-            config=failed.config, candidate=failed.plan.best,
-            hardware=failed.plan.hardware or failed.hardware, profile=failed.profile,
-            catalog=self.catalog, fallbacks=list(failed.plan.fallbacks),
-            console=self.console, allow_model_switch=True,
-        )
-        outcome = None
-        strategy_name = ""
-        for strategy in strategies_for(signature):
-            if strategy.name not in ("switch_model", "use_cached_model"):
-                continue
-            try:
-                outcome = strategy.apply(state)
-            except (LlmsetupError, RuntimeUnavailable, OSError) as exc:
-                message = exc.message if isinstance(exc, LlmsetupError) else str(exc)
-                errors.append(f"{strategy.name}: {message}")
-                continue
-            if outcome is not None and outcome.switch_to is not None:
-                strategy_name = strategy.name
-                break
-        if outcome is None or outcome.switch_to is None:
-            return None
-        candidate = outcome.switch_to
-        if candidate.model.id == requested.requested_model:
-            return None
-        reason = ("the repair action budget for the requested model is exhausted"
-                  if self._remaining_repairs == 0 else
-                  "no applicable repairs or runtime paths remain for the requested model")
-        description = (
-            f"{reason}; switching from {failed.config.model_id} to {candidate.model.id} "
-            f"after {failure.name} failed ({signature}): {failure.message}"
-        )
-        self.console.info(description)
-        action = RepairAction(
-            strategy=strategy_name, trigger=f"{failure.name}: {signature}",
-            description=description, cost="high", before=failed.config.to_dict(),
-            after={"model_id": candidate.model.id, "quant": candidate.quant},
-        )
-        journal.append(action)
-        self.shutdown()
-        self.hardware = state.hardware
-        self.profile = replace(
-            failed.profile, requested_model=candidate.model.id,
-            context_tokens=min(failed.profile.context_tokens, failed.config.context_tokens),
-        )
-        self.runtime_name = failed.config.runtime
-        self._portable_cpu = bool(failed.config.extra.get("portable_runtime"))
-        self._remaining_repairs = 0
-        # Keep the selected cached quantization while retaining companion
-        # models and their metadata for retrieval and speculative decoding.
-        catalog = self.catalog
-        self.catalog = Catalog(
-            [replace(spec, recommended_quants=[candidate.quant])
-             if spec.id == candidate.model.id else spec for spec in catalog.models],
-            catalog.quant_bpw, catalog.updated, catalog.sources, catalog.extras,
-        )
-        self._runtime_reason = "kept from the failed attempt for the fallback model"
-        try:
-            result = self._run_once()
-        except (LlmsetupError, RuntimeUnavailable, OSError) as exc:
-            message = exc.message if isinstance(exc, LlmsetupError) else str(exc)
-            errors.append(f"{candidate.model.id}: {message}")
-            return None
-        finally:
-            self.catalog = catalog
-        result.profile = replace(result.profile, requested_model=requested.requested_model)
-        result.plan.profile = result.profile
-        result.plan.notes.append(description)
-        action.after = result.config.to_dict()
-        errors.extend(f"{result.plan.runtime}: {check.message}"
-                      for check in result.checks if check.blocking)
-        return result
 
     @staticmethod
     def _last_trigger(last_result: Optional[SetupResult]) -> str:
@@ -689,14 +604,14 @@ class Pipeline:
 
         try:
             endpoint = self._runtime.start(spec, config, self.console)
-        except (RuntimeUnavailable, OSError) as exc:
+        except (LlmsetupError, RuntimeUnavailable, OSError) as exc:
             # A failed launch is a check failure, so repair can act on it rather
             # than the whole run aborting.
             return [CheckResult(
                 name="health", status=CheckStatus.FAIL, severity=Severity.CRITICAL,
                 message=str(exc),
                 failure_signature=sig.classify(str(exc)) or sig.SERVER_UNREACHABLE,
-                detail=getattr(exc, "install_hint", "") or "",
+                detail=getattr(exc, "hint", "") or getattr(exc, "install_hint", "") or "",
             )]
         self._endpoint = endpoint
 

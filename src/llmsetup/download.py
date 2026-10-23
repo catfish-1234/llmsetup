@@ -135,7 +135,7 @@ def _repo_info(repo: str, revision: Optional[str] = None, timeout: float = 30.0)
                 hint="the catalog entry may be stale; run `llmsetup catalog refresh`",
             ) from None
         raise ProvisionError(f"listing {repo} failed: HTTP {exc.code}") from None
-    except (urllib.error.URLError, OSError) as exc:
+    except (urllib.error.URLError, OSError, http.client.HTTPException, ValueError) as exc:
         raise ProvisionError(
             f"could not reach {HF_ENDPOINT}: {exc}",
             hint="check connectivity, or point HF_ENDPOINT at a mirror",
@@ -289,6 +289,7 @@ def download_file(
     progress: Optional[Callable[[int, Optional[int]], None]] = None,
     timeout: float = 60.0,
     retries: int = 4,
+    total_timeout: float = 7200.0,
 ) -> Path:
     """Download with resume. Returns the final path; skips work if already complete."""
     ensure_dir(dest.parent)
@@ -299,6 +300,7 @@ def download_file(
             progress(dest.stat().st_size, remote.size)
         return dest
 
+    deadline = time.monotonic() + total_timeout
     attempt = 0
     while True:
         existing = part.stat().st_size if part.exists() else 0
@@ -310,8 +312,10 @@ def download_file(
             headers["Range"] = f"bytes={existing}-"
 
         try:
+            if time.monotonic() >= deadline:
+                raise TimeoutError(f"download timed out after {total_timeout:g}s")
             req = urllib.request.Request(remote.url, headers=headers)
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
+            with urllib.request.urlopen(req, timeout=min(timeout, deadline - time.monotonic())) as resp:
                 # A server that ignores Range restarts the file; don't append to it.
                 mode = "ab" if (existing and resp.status == 206) else "wb"
                 if mode == "wb":
@@ -340,8 +344,13 @@ def download_file(
 
                 downloaded = existing
                 with open(part, mode) as handle:
+                    # HTTPResponse.read(size) can wait for the entire chunk
+                    # while a slow peer keeps resetting the socket timeout.
+                    read_chunk = getattr(resp, "read1", resp.read)
                     while True:
-                        chunk = resp.read(CHUNK)
+                        if time.monotonic() >= deadline:
+                            raise TimeoutError(f"download timed out after {total_timeout:g}s")
+                        chunk = read_chunk(CHUNK)
                         if not chunk:
                             break
                         handle.write(chunk)
@@ -355,7 +364,7 @@ def download_file(
             os.replace(part, dest)
             return dest
 
-        except (urllib.error.URLError, OSError, http.client.IncompleteRead, ProvisionError) as exc:
+        except (urllib.error.URLError, OSError, http.client.HTTPException, ProvisionError, ValueError) as exc:
             # The final byte may have arrived before a previous process stopped.
             # A 416 confirms the remote length; only promote an exact match.
             if isinstance(exc, urllib.error.HTTPError) and exc.code == 416:
@@ -368,17 +377,17 @@ def download_file(
                         progress(existing, existing)
                     return dest
             attempt += 1
-            if attempt > retries:
+            if attempt > retries or time.monotonic() >= deadline:
                 raise ProvisionError(
                     f"download of {remote.filename} failed after {retries} retries: {exc}",
-                    hint=(f"the partial file is kept at {part}; rerun to resume, "
-                          "or download it manually into the model store"),
+                    hint=(f"the partial file is kept at {part}; "
+                          "rerun `llmsetup setup` with the same model and options to resume"),
                 ) from None
             invalid_partial = (isinstance(exc, ProvisionError) or
                                (isinstance(exc, urllib.error.HTTPError) and exc.code == 416))
             if invalid_partial and part.exists():
                 part.unlink()
-            time.sleep(min(30, 2 ** attempt))
+            time.sleep(max(0, min(30, 2 ** attempt, deadline - time.monotonic())))
 
 
 def make_progress_printer(console, label: str) -> Callable[[int, Optional[int]], None]:

@@ -176,6 +176,7 @@ class VllmRuntime(Runtime):
             started_by_us=True,
             log_path=log_path,
             process=process,
+            command=cmd,
         )
 
         def ready() -> bool:

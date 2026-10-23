@@ -19,6 +19,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from llmsetup.types import ModelSpec, RuntimeConfig
 from llmsetup.util.log import Console
+from llmsetup.util.proc import format_command
 
 
 @dataclass
@@ -34,6 +35,7 @@ class Endpoint:
     started_by_us: bool = False
     log_path: Optional[str] = None
     process: Any = None            # subprocess.Popen when we launched it
+    command: List[str] = field(default_factory=list)
 
     @property
     def chat_url(self) -> str:
@@ -99,8 +101,10 @@ class Runtime(abc.ABC):
                         tail = stream.read().decode("utf-8", errors="replace")
                 except OSError:
                     pass
-            raise RuntimeUnavailable(f"{exc}\n{tail}".strip(),
-                                     f"server log: {endpoint.log_path}") from exc
+            hint = f"server log: {endpoint.log_path}"
+            if endpoint.command:
+                hint += f"\nRerun: {format_command(endpoint.command)}"
+            raise RuntimeUnavailable(f"{exc}\n{tail}".strip(), hint) from exc
 
     def version(self) -> Optional[str]:
         return None
