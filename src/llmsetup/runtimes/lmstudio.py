@@ -18,7 +18,7 @@ from llmsetup.runtimes.registry import register
 from llmsetup.types import ModelSpec, RuntimeConfig
 from llmsetup.util import http
 from llmsetup.util.log import Console
-from llmsetup.util.proc import first_line, run, which
+from llmsetup.util.proc import first_line, format_command, run, which
 
 DEFAULT_PORT = 1234
 
@@ -59,12 +59,13 @@ class LmStudioRuntime(Runtime):
         # Put it where LM Studio looks. `lms import` is preferred because it also
         # updates LM Studio's index; the manual layout is the fallback.
         if which("lms"):
-            result = run(["lms", "import", str(path), "--yes"], timeout=600)
+            command = ["lms", "import", str(path), "--yes"]
+            result = run(command, timeout=600)
             if result.ok:
                 console.ok("imported into LM Studio via `lms import`")
                 config.served_name = spec.id
                 return config
-            console.debug(f"`lms import` failed: {result.output[:200]}")
+            console.warn(f"`lms import` failed: {result.failure(command)}")
 
         from llmsetup.interop.lmstudio import register_in_lmstudio
 
@@ -84,11 +85,15 @@ class LmStudioRuntime(Runtime):
                     "open LM Studio → Developer → Start Server, or install the `lms` CLI",
                 )
             console.info("starting LM Studio's server …")
-            run(["lms", "server", "start", "--port", str(port)], timeout=90)
+            command = ["lms", "server", "start", "--port", str(port)]
+            result = run(command, timeout=90)
+            if not result.ok:
+                raise RuntimeUnavailable(result.failure(command))
             if not http.wait_for(
                 lambda: http.request(f"{base}/v1/models", timeout=2).ok, timeout=60
             ):
-                raise RuntimeUnavailable("LM Studio's server did not come up")
+                raise RuntimeUnavailable("LM Studio's server did not come up within 60s",
+                                         f"Rerun: {format_command(command)}")
 
         # Load the model with our tuned context length. LM Studio keeps models
         # resident, so an already-loaded copy is reused.
@@ -99,7 +104,7 @@ class LmStudioRuntime(Runtime):
                 load += ["--gpu", "max" if config.full_gpu_offload else str(config.gpu_layers)]
             result = run(load, timeout=900)
             if not result.ok:
-                console.warn(f"`lms load` reported: {result.output.strip()[:200]}")
+                raise RuntimeUnavailable(f"`lms load` failed: {result.failure(load)}")
 
         served = self._resolve_served_name(base, spec, config)
         return Endpoint(

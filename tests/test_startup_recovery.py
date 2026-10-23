@@ -40,6 +40,7 @@ def test_dead_server_is_stopped_without_waiting_for_timeout(name, catalog, monke
         runtime.start(catalog.require("qwen3-8b"), config, Console(quiet=True))
     assert len(stopped) == 1
     assert signatures.classify(str(error.value)) == signatures.OUT_OF_MEMORY
+    assert "Rerun: fixture-engine" in error.value.install_hint
 
 
 def test_startup_timeout_stops_owned_server_and_returns_log(monkeypatch, tmp_path):

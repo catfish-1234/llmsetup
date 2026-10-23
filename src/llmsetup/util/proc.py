@@ -8,10 +8,20 @@ so "the command failed" is normal control flow here, not an error.
 from __future__ import annotations
 
 import os
+import shlex
 import shutil
 import subprocess
 from dataclasses import dataclass
 from typing import List, Optional, Sequence
+
+from llmsetup.util.errors import ProvisionError
+
+
+def format_command(cmd: Sequence[str]) -> str:
+    """Quote a rerun command for the current platform's command shell."""
+    if os.name == "nt":
+        return subprocess.list2cmdline(list(cmd))
+    return " ".join(shlex.quote(part) for part in cmd)
 
 
 @dataclass
@@ -28,6 +38,10 @@ class CommandResult:
     @property
     def output(self) -> str:
         return (self.stdout + "\n" + self.stderr).strip()
+
+    def failure(self, cmd: Sequence[str]) -> str:
+        reason = "command timed out" if self.timed_out else f"command exited with code {self.returncode}"
+        return f"{reason}: {self.output[-2000:]}\nRerun: {format_command(cmd)}"
 
 
 def which(name: str) -> Optional[str]:
@@ -77,6 +91,8 @@ def run(
         return CommandResult(127, "", f"{cmd[0]}: not found")
     except PermissionError as exc:
         return CommandResult(126, "", str(exc))
+    except OSError as exc:
+        return CommandResult(126, "", str(exc))
 
 
 def spawn(
@@ -91,15 +107,18 @@ def spawn(
     reads server logs to diagnose failures that the HTTP API cannot surface.
     """
     merged = {**os.environ, **(env or {})}
-    if log_path:
-        os.makedirs(os.path.dirname(os.path.abspath(log_path)) or ".", exist_ok=True)
-        # Deliberately not a context manager: the handle must outlive this
-        # function so the spawned server can keep writing to it.
-        handle = open(log_path, "ab", buffering=0)  # noqa: SIM115
-        return subprocess.Popen(list(cmd), stdout=handle, stderr=handle, env=merged, cwd=cwd)
-    return subprocess.Popen(
-        list(cmd), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=merged, cwd=cwd
-    )
+    try:
+        if log_path:
+            os.makedirs(os.path.dirname(os.path.abspath(log_path)) or ".", exist_ok=True)
+            # Popen duplicates the descriptor; only the child needs it after launch.
+            with open(log_path, "ab", buffering=0) as handle:
+                return subprocess.Popen(list(cmd), stdout=handle, stderr=handle, env=merged, cwd=cwd)
+        return subprocess.Popen(
+            list(cmd), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=merged, cwd=cwd
+        )
+    except OSError as exc:
+        raise ProvisionError(f"could not start {cmd[0]}: {exc}",
+                             hint=f"Rerun: {format_command(cmd)}") from None
 
 
 def first_line(text: str) -> str:

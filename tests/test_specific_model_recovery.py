@@ -1,4 +1,4 @@
-"""A retained model survives repairs and runtime changes before a reported fallback."""
+"""A retained model stays fixed through repairs, runtime changes, and exhaustion."""
 
 from dataclasses import replace
 
@@ -136,7 +136,7 @@ def wire(monkeypatch, *runtimes):
     return hardware
 
 
-def test_model_switch_is_final_bounded_action_and_reports_why(catalog, monkeypatch):
+def test_requested_model_stays_fixed_after_repair_budget_is_exhausted(catalog, monkeypatch):
     runtime = FixtureRuntime("llamacpp")
     hardware = wire(monkeypatch, runtime)
     profile = UseCaseProfile(requested_model="qwen3-8b")
@@ -150,23 +150,18 @@ def test_model_switch_is_final_bounded_action_and_reports_why(catalog, monkeypat
 
     monkeypatch.setattr(instance, "_launch_and_check", launch)
     result = instance.run()
-    assert result.succeeded
-    assert result.config.model_id != profile.requested_model
-    assert result.profile.requested_model == profile.requested_model
-    assert all(model == profile.requested_model for model, _, _ in attempts[:-1])
-    assert any(layers == 0 for _, _, layers in attempts[:-1])
+    assert not result.succeeded
+    assert result.config.model_id == profile.requested_model
+    assert all(model == profile.requested_model for model, _, _ in attempts)
+    assert any(layers == 0 for _, _, layers in attempts)
     actions = [action for action in result.repairs
                if action.strategy not in ("runtime_fallback", "cpu_runtime", "portable_cpu_runtime")]
     assert len(actions) == 3
-    assert actions[-1].strategy == "switch_model"
-    assert "budget" in actions[-1].description and "exhausted" in actions[-1].description
-    assert sig.OUT_OF_MEMORY in actions[-1].description
-    assert actions[-1].before["model_id"] == profile.requested_model
-    assert actions[-1].after["model_id"] == result.config.model_id
-    assert actions[-1].after["quant"] == result.config.quant
+    assert not any(action.strategy == "switch_model" for action in actions)
+    assert "was kept fixed" in result.checks[0].detail
 
 
-def test_exhausted_applicable_repairs_are_reported_without_spending_unused_actions(catalog, monkeypatch):
+def test_no_applicable_repairs_reports_requested_model_failure(catalog, monkeypatch):
     runtime = FixtureRuntime("ollama")
     hardware = wire(monkeypatch, runtime)
     instance = Pipeline(UseCaseProfile(requested_model="qwen3-8b"), hardware,
@@ -175,49 +170,45 @@ def test_exhausted_applicable_repairs_are_reported_without_spending_unused_actio
                         lambda spec, config, names: failed(sig.PROVISION_FAILED)
                         if spec.id == "qwen3-8b" else passed())
     result = instance.run()
-    assert result.succeeded
-    switches = [action for action in result.repairs if action.strategy == "switch_model"]
-    assert len(switches) == 1
-    assert "no applicable repairs or runtime paths remain" in switches[0].description
+    assert not result.succeeded
+    assert result.config.model_id == "qwen3-8b"
+    assert not any(action.strategy == "switch_model" for action in result.repairs)
+    assert "choose a different model explicitly" in result.checks[0].detail
 
 
-def test_other_cached_model_waits_until_requested_model_recovery_is_exhausted(catalog, monkeypatch):
+def test_cached_alternative_never_overrides_requested_model(catalog, monkeypatch):
     runtime = FixtureRuntime("llamacpp")
     runtime.uses_gguf = True
     hardware = wire(monkeypatch, runtime)
     instance = Pipeline(UseCaseProfile(requested_model="qwen3-8b"), hardware,
                         catalog, Console(quiet=True), runtime_name="llamacpp", register=False)
     provisions = []
-    original = runtime.ensure_model
 
     def ensure(spec, config, console):
         provisions.append(spec.id)
-        if spec.id == "qwen3-8b":
-            raise ProvisionError("network blocked")
-        return original(spec, config, console)
+        raise ProvisionError("network blocked")
 
     monkeypatch.setattr(runtime, "ensure_model", ensure)
     monkeypatch.setattr("llmsetup.runtimes.gguf_store.find_local",
                         lambda spec, quant: spec.id == "qwen3-4b")
     monkeypatch.setattr(instance, "_launch_and_check", lambda spec, config, names: passed())
     result = instance.run()
-    assert result.succeeded
-    assert result.config.model_id == "qwen3-4b"
-    assert all(model == "qwen3-8b" for model in provisions[:-1])
-    assert len(provisions) >= 5  # Two provisioning attempts on GPU and on CPU precede fallback.
-    assert result.repairs[-1].strategy == "use_cached_model"
-    assert "no applicable repairs or runtime paths remain" in result.repairs[-1].description
+    assert not result.succeeded
+    assert result.config.model_id == "qwen3-8b"
+    assert len(provisions) >= 4
+    assert set(provisions) == {"qwen3-8b"}
+    assert not any(action.strategy == "use_cached_model" for action in result.repairs)
 
 
-def test_model_fallback_keeps_companion_embedding_models_available(catalog, monkeypatch):
-    runtime = FixtureRuntime("ollama")
+def test_requested_model_recovery_keeps_companion_embedding_models(catalog, monkeypatch):
+    runtime = FixtureRuntime("llamacpp")
     hardware = wire(monkeypatch, runtime)
     profile = UseCaseProfile(requested_model="qwen3-8b", needs_embeddings=True)
     instance = Pipeline(profile, hardware, catalog, Console(quiet=True),
-                        runtime_name="ollama", register=False)
+                        runtime_name="llamacpp", register=False)
     monkeypatch.setattr(instance, "_launch_and_check",
-                        lambda spec, config, names: failed(sig.PROVISION_FAILED)
-                        if spec.id == "qwen3-8b" else passed())
+                        lambda spec, config, names: failed(sig.OUT_OF_MEMORY)
+                        if config.gpu_layers else passed())
 
     def embedding(runtime):
         spec = plan_embedding_model(instance.profile, instance.hardware, instance.catalog)
@@ -226,7 +217,8 @@ def test_model_fallback_keeps_companion_embedding_models_available(catalog, monk
     monkeypatch.setattr(instance, "_setup_embedding", embedding)
     result = instance.run()
     assert result.succeeded
-    assert result.config.model_id != profile.requested_model
+    assert result.config.model_id == profile.requested_model
+    assert result.config.gpu_layers == 0
     assert result.embedding["ok"]
     assert catalog.require(result.embedding["model"]).is_embedding
     assert instance.catalog is catalog

@@ -11,6 +11,16 @@ import sys
 from typing import Optional, TextIO
 
 
+def write_console(stream: TextIO, text: str) -> None:
+    """Keep legacy Windows consoles usable without changing their code page."""
+    try:
+        stream.write(text)
+    except UnicodeEncodeError:
+        encoding = getattr(stream, "encoding", None) or "ascii"
+        stream.write(text.encode(encoding, errors="replace").decode(encoding))
+    stream.flush()
+
+
 class Console:
     def __init__(self, stream: Optional[TextIO] = None, quiet: bool = False,
                  verbose: bool = False, color: Optional[bool] = None):
@@ -36,8 +46,7 @@ class Console:
         return self._c(text, "1")
 
     def _emit(self, text: str) -> None:
-        self.stream.write(text + "\n")
-        self.stream.flush()
+        write_console(self.stream, text + "\n")
 
     def print(self, text: str = "") -> None:
         if not self.quiet:

@@ -12,8 +12,9 @@ Python environments outside those adapters' search paths can remain invisible.
 
 A failed probe does not stop the interview to ask for a number. Unknown RAM
 uses a 2 GiB assumption. Unknown GPU capacity uses CPU inference. Unknown free
-VRAM reserves 20% of detected capacity. Known available RAM and VRAM limit the
-budget. The CLI and saved hardware report record these assumptions.
+VRAM does not reduce capacity: dedicated GPUs use total VRAM with a 10% reserve.
+Current VRAM usage only produces a warning. Available system RAM limits CPU
+plans. The CLI and saved hardware report record these assumptions.
 
 ## Asking for a specific model
 
@@ -36,14 +37,17 @@ If you keep that model after hearing the tradeoffs, llmsetup optimizes for
 it. Planning holds your model fixed and tunes everything else: quantization,
 context length, GPU offload, and runtime choice. Recovery can still lower the
 context or change the quantization to get it running, but it does not quietly
-swap in a different model. It switches away from your pick only when the
-repair budget is exhausted, and the report says exactly what changed and why.
+swap in a different model, including after the repair budget is exhausted.
+If it cannot make the model work, setup reports failure and leaves that choice
+fixed. Choose an alternative explicitly to try a different model.
 
 ## What recovery tries
 
 Planning first tries the requested context, then halves it down to 512 tokens
 if needed. Tools, vision, licensing, and other required capabilities stay in
-force. The plan records any shorter window.
+force. The plan records any shorter window. If no GPU configuration fits,
+CPU-capable runtimes try system RAM with the original desired context, shrinking
+again if needed. Shared Apple memory is never counted as a second RAM budget.
 
 During a real setup, provisioning gets one extra attempt after a failure.
 Downloads also have their existing four-retry budget and resume valid partial
@@ -82,8 +86,11 @@ that variable is unset. Setup does not use sudo, change PATH, or run a shell
 installer. Native libraries or CPU instructions required by a verified build
 may still be unavailable on an older system.
 
-This installation is a CPU fallback. It does not install GPU drivers or a CUDA
-stack, alter privileged OS settings, or install all six engines. Existing GPU
+On Windows x86-64 with a detected GPU, setup selects the self-contained Vulkan
+archive and upgrades an older managed CPU build before replanning, including
+when llama.cpp was selected automatically. CPU-only attempts use the CPU archive.
+Other platforms retain their pinned portable builds. It does not install GPU
+drivers or a CUDA stack, alter privileged OS settings, or install all six engines. Existing GPU
 engines are preferred. `plan`, `detect`, and `setup --dry-run` never install an
 engine. `--no-repair` disables repairs, extra provisioning attempts, installation, and
 runtime fallback. Download transport retries still apply.
