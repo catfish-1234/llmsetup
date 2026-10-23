@@ -38,12 +38,17 @@ source development, use `python -m pip install -e .`.
 You can make plans without a GPU or inference engine. Adapters cover Ollama,
 llama.cpp, LM Studio, vLLM, MLX, and TabbyAPI. Setup prefers an installed engine.
 If that engine is missing or fails, it tries compatible installed alternatives,
-including llama.cpp on CPU. As a last resort, it can install a pinned, checksum-verified llama.cpp build in
-its own data directory and run on CPU. It does not need administrator access.
+including llama.cpp on CPU. It can install a pinned, checksum-verified llama.cpp
+build in its own data directory. Windows x86-64 machines with a detected GPU
+get the Vulkan build; CPU-only machines get the CPU build. CPU fallback is
+available when GPU attempts fail. It does not need administrator access.
 
-## Plan or set up a model
+## Quickstart
 
 ```bash
+# Inspect hardware, current memory use, and available runtimes.
+llmsetup detect
+
 # Scan the machine and ask about your goals.
 llmsetup setup
 
@@ -55,8 +60,15 @@ llmsetup setup --dry-run --task coding --context 32768 --yes
 
 # Download, start, verify, and repair automatically.
 llmsetup setup --task coding --context 8192 --yes
+
+# Read the saved settings, checks, repair history, and launch command.
+llmsetup report
 ```
 
+`--task` is repeatable, for example `--task coding --task agent`. `--context`
+sets the desired context in tokens; setup can shorten it to fit memory.
+Without an explicit context, coding and agent profiles aim for 32K with a
+16K floor, and warn if memory forces them below that floor.
 `--yes` skips goal questions. A dry run writes a local report but runs no
 verification, so it cannot tell you whether a model works on your hardware.
 Use `llmsetup detect` to inspect the scan, or `llmsetup runtimes` to inspect
@@ -66,7 +78,9 @@ Detection covers OS, CPU and core counts, RAM, GPUs and VRAM, and installed
 runtimes where they can be detected. A failed probe does not ask you for specs.
 It uses conservative assumptions, reports them, and proceeds. If the requested
 context cannot fit, planning tries shorter windows while keeping the required
-capabilities.
+capabilities. Dedicated GPU plans use total VRAM with a 10% reserve. Current
+usage by other apps produces a warning and does not downgrade the model.
+If no GPU configuration fits, compatible runtimes try system RAM on CPU.
 
 You can also ask for a specific model by name during setup. llmsetup explains
 how that model fits your hardware, including the quantization and context it
@@ -74,6 +88,9 @@ can hold and the speed to expect, and points out better-fitting alternatives
 when the fit is poor. If you keep the model, planning and recovery tune
 everything else around it instead of swapping it out. See
 [asking for a specific model](docs/AUTOMATIC_SETUP.md#asking-for-a-specific-model).
+For a scripted choice, use `llmsetup setup --model qwen3-8b --task chat --yes`.
+If that model cannot work after recovery, setup exits with a failure and keeps
+the requested model in the report. Alternatives require an explicit choice.
 
 Setup retries transient provisioning failures and server starts, replaces
 corrupt managed weights, tries cached weights when downloads are blocked, and
@@ -129,6 +146,31 @@ Command-line options override matching profile values. Use
 JSON results go to stdout; progress and diagnostics go to stderr. Setup and
 verification return a nonzero exit code when a blocking check fails. A dry run
 can exit successfully without verifying a model.
+
+## Troubleshooting
+
+Start with `llmsetup detect`, `llmsetup runtimes`, and `llmsetup report`.
+Failures print the rerun command with your original options. Runtime failures
+also include the engine command or server log when available.
+
+| Symptom | What to do |
+| --- | --- |
+| Windows NVIDIA setup uses CPU unexpectedly | Run `llmsetup detect` to confirm the GPU. With recovery enabled, setup upgrades a managed CPU build to Vulkan before replanning. A CPU-only system build on PATH takes precedence; install a GPU-capable llama-server or remove that PATH entry. Review GPU layers in the report. |
+| VRAM is busy or setup runs out of memory | Close GPU-heavy apps and rerun the printed command. Recovery can reduce context, quantization, or GPU layers, then try CPU. Use `--context 8192` to request a smaller window explicitly. |
+| A reasoning model returns an empty first answer | Verification retries with more output-token room for thinking. Streaming recognizes `reasoning_content`, `reasoning`, and `thinking`. If the retry stays empty, the check fails and the report records it. |
+| Port is in use or a server exits | llama.cpp selects a free nearby port. A conflicting service on Ollama's port is reported. Stop the conflicting service, inspect the named log, then rerun the printed command. Failed owned servers are stopped before retrying. |
+| Download is partial, blocked, or times out | Valid `.part` files remain available for resume. Rerun with the same model and options. Check disk space, network access, model licence, and `HF_TOKEN` for gated models. A trusted mirror can be selected with `HF_ENDPOINT`. |
+| Runtime is missing or cannot load a native library | Recovery tries compatible installed engines and the managed fallback. If those fail, install a compatible runtime on PATH and rerun. `--no-repair` disables automatic installation and runtime fallback. |
+| Windows console uses cp1252 | Status, interview, and saved-report output replace unsupported characters; subprocess output is decoded as UTF-8 with replacement. Changing the code page is optional. |
+
+External operations are bounded. Ollama import has a 60-minute timeout and
+daemon startup has 45 seconds. llama.cpp startup allows 90 seconds plus 12
+seconds per GiB of weights. Model downloads use a 60-second socket timeout,
+a two-hour total budget per file, and at most four transport retries. Runtime
+archive downloads use a 30-second socket timeout and a five-minute total budget.
+An in-flight read can take up to the socket timeout before the total budget is
+checked again. A timed-out operation fails with a resume or rerun instruction.
+These limits apply per attempt; setup recovery can make further bounded attempts.
 
 ## Catalogs and downloads
 

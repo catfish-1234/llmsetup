@@ -23,7 +23,7 @@ from llmsetup.types import ModelSpec, RuntimeConfig
 from llmsetup.util import http
 from llmsetup.util.fs import app_dir, ensure_dir, write_text
 from llmsetup.util.log import Console
-from llmsetup.util.proc import first_line, run, spawn, which
+from llmsetup.util.proc import first_line, format_command, run, spawn, which
 
 DEFAULT_PORT = 11434
 
@@ -103,11 +103,12 @@ class OllamaRuntime(Runtime):
         directory = ensure_dir(app_dir() / "modelfiles")
         path = write_text(directory / f"{tag}.Modelfile", self.modelfile(spec, config))
         console.info(f"creating tuned model {tag} …")
-        result = run(["ollama", "create", tag, "-f", str(path)], timeout=3600)
+        command = ["ollama", "create", tag, "-f", str(path)]
+        result = run(command, timeout=3600)
         if not result.ok:
             raise RuntimeUnavailable(
-                f"`ollama create {tag}` failed: {result.output.strip()[:400]}",
-                f"the Modelfile is at {path}; try running the command by hand",
+                f"`ollama create {tag}` failed: {result.failure(command)}",
+                f"the Modelfile is at {path}",
             )
         config.served_name = tag
         console.ok(f"tuned model available as `{tag}`")
@@ -130,14 +131,26 @@ class OllamaRuntime(Runtime):
             return
         if not which("ollama"):
             raise RuntimeUnavailable("Ollama is not installed", self.install_hint())
+        if not http.port_is_free("127.0.0.1", port):
+            raise RuntimeUnavailable(
+                f"port {port} is in use by a service that is not a healthy Ollama server",
+                f"stop the conflicting service; Rerun: {format_command(['ollama', 'serve'])}",
+            )
         console.info("starting the Ollama server …")
         log = str(ensure_dir(app_dir() / "logs") / "ollama.log")
-        spawn(["ollama", "serve"], log_path=log)
-        if not http.wait_for(
-            lambda: http.request(f"http://127.0.0.1:{port}/api/tags", timeout=2).ok,
-            timeout=45,
-        ):
-            raise RuntimeUnavailable("the Ollama server did not come up", f"see {log}")
+        command = ["ollama", "serve"]
+        Path(log).write_text("", encoding="utf-8")
+        process = spawn(command, log_path=log,
+                        env={"OLLAMA_HOST": f"127.0.0.1:{port}"})
+        endpoint = Endpoint(f"http://127.0.0.1:{port}", "", self.name,
+                            started_by_us=True, log_path=log, process=process, command=command)
+
+        def ready() -> bool:
+            if process.poll() is not None:
+                raise RuntimeUnavailable(f"Ollama exited with code {process.returncode}")
+            return http.request(f"{endpoint.base_url}/api/tags", timeout=2).ok
+
+        self.wait_until_ready(endpoint, ready, timeout=45, interval=1)
 
     def launch_command(self, spec: ModelSpec, config: RuntimeConfig) -> List[str]:
         # Only ensure_model assigns the derived tag after a successful create.

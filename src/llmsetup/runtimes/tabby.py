@@ -90,10 +90,12 @@ class TabbyRuntime(Runtime):
 
         log_path = str(ensure_dir(app_dir() / "logs") / f"tabby-{config.port}.log")
         Path(log_path).write_text("", encoding="utf-8")
-        process = spawn(self.launch_command(spec, config), log_path=log_path)
+        command = self.launch_command(spec, config)
+        process = spawn(command, log_path=log_path)
         endpoint = Endpoint(
             base_url=f"http://{config.host}:{config.port}", model=spec.id,
             runtime=self.name, started_by_us=True, log_path=log_path, process=process,
+            command=command,
         )
 
         def ready() -> bool:

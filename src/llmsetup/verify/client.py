@@ -133,6 +133,7 @@ class OpenAIClient:
         delta_keys: set = set()
         text = []
         error = ""
+        completed = False
 
         try:
             for line in http.stream_lines(
@@ -143,13 +144,19 @@ class OpenAIClient:
                     continue
                 payload = line[5:].strip()
                 if payload == "[DONE]":
+                    completed = True
                     break
                 try:
                     parsed = json.loads(payload)
                 except ValueError:
                     continue
                 events += 1
-                delta = (parsed.get("choices") or [{}])[0].get("delta") or {}
+                if parsed.get("error"):
+                    error = str(parsed["error"])
+                    break
+                choice = (parsed.get("choices") or [{}])[0]
+                completed = completed or bool(choice.get("finish_reason"))
+                delta = choice.get("delta") or {}
                 delta_keys.update(k for k, v in delta.items() if v)
                 content = delta.get("content")
                 # A reasoning model streams its thinking block first; those
@@ -166,6 +173,9 @@ class OpenAIClient:
                         text.append(content)
         except Exception as exc:
             error = str(exc)
+
+        if chunks and not completed and not error:
+            error = "server closed the stream before completion"
 
         total = time.monotonic() - started
         return {
