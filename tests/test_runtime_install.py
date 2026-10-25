@@ -140,6 +140,33 @@ def test_unusable_verified_binary_is_not_committed(monkeypatch):
         install.install_llamacpp(hardware, Console(quiet=True))
     assert install.managed_binary(hardware) is None
 
+
+def test_missing_openmp_dependency_names_debian_package(monkeypatch):
+    hardware, _, _ = fake_asset(monkeypatch, tar_bytes())
+    read_text = Path.read_text
+
+    def os_release(path, *args, **kwargs):
+        if str(path) == "/etc/os-release":
+            return 'ID=ubuntu\nID_LIKE=debian\n'
+        return read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", os_release)
+
+    def failed_probe(command, **kwargs):
+        assert command[1:] == ["--version"]
+        return CommandResult(
+            127, "", f"{command[0]}: error while loading shared libraries: "
+            "libgomp.so.1: cannot open shared object file: No such file or directory",
+        )
+
+    monkeypatch.setattr(install, "run", failed_probe)
+    with pytest.raises(ProvisionError, match="libgomp.so.1") as error:
+        install.install_llamacpp(hardware, Console(quiet=True))
+    assert "apt install libgomp1" in error.value.hint
+    assert "llmsetup setup" in error.value.hint
+    assert install.managed_binary(hardware) is None
+
+
 def gpu_zip(data=b"fixture"):
     stream = io.BytesIO()
     with zipfile.ZipFile(stream, "w") as archive:
