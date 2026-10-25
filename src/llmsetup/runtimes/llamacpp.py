@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from llmsetup.runtimes.base import Endpoint, Runtime, RuntimeUnavailable
+from llmsetup.runtimes.dependencies import shared_library_hint
 from llmsetup.runtimes.gguf_store import fetch_gguf, fetch_projector
 from llmsetup.runtimes.registry import register
 from llmsetup.tuning.profiles import ReasoningEffort
@@ -350,7 +351,13 @@ class LlamaCppRuntime(Runtime):
         # Large models take a while to load from disk; the wait scales with size.
         timeout = 90 + (Path(config.model_path).stat().st_size / (1024 ** 3) * 12
                         if config.model_path and Path(config.model_path).exists() else 0)
-        self.wait_until_ready(endpoint, ready, timeout=timeout, interval=1.5)
+        try:
+            self.wait_until_ready(endpoint, ready, timeout=timeout, interval=1.5)
+        except RuntimeUnavailable as exc:
+            hint = shared_library_hint(str(exc))
+            if hint:
+                raise RuntimeUnavailable(str(exc), f"{hint}\n{exc.install_hint}".strip()) from exc
+            raise
         return endpoint
 
     def config_files(self, spec: ModelSpec, config: RuntimeConfig) -> Dict[str, str]:
