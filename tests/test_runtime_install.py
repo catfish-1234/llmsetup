@@ -160,7 +160,7 @@ def test_missing_openmp_dependency_names_debian_package(monkeypatch):
         )
 
     monkeypatch.setattr(install, "run", failed_probe)
-    with pytest.raises(ProvisionError, match="libgomp.so.1") as error:
+    with pytest.raises(ProvisionError, match=r"libgomp\.so\.1") as error:
         install.install_llamacpp(hardware, Console(quiet=True))
     assert "apt install libgomp1" in error.value.hint
     assert "llmsetup setup" in error.value.hint
