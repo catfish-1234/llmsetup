@@ -90,7 +90,7 @@ def test_llamacpp_missing_openmp_dependency_has_package_hint(catalog, monkeypatc
     monkeypatch.setattr("llmsetup.runtimes.llamacpp.spawn", spawn)
     config = RuntimeConfig(runtime="llamacpp", model_id="qwen3-8b", quant="Q4_K_M",
                            context_tokens=8192)
-    with pytest.raises(RuntimeUnavailable, match="libgomp.so.1") as error:
+    with pytest.raises(RuntimeUnavailable, match=r"libgomp\.so\.1") as error:
         runtime.start(catalog.require("qwen3-8b"), config, Console(quiet=True))
     assert len(stopped) == 1
     assert "apt install libgomp1" in error.value.install_hint
