@@ -127,8 +127,9 @@ def test_ollama_create_failure_prints_full_modelfile_command(monkeypatch, catalo
     monkeypatch.setattr(runtime, "_ensure_server", lambda *args: None)
     monkeypatch.setattr("llmsetup.runtimes.ollama.fetch_gguf", lambda *a: tmp_path / "m.gguf")
 
-    def run(command, timeout):
+    def run(command, timeout, env):
         assert timeout == 3600
+        assert env == {"OLLAMA_HOST": "127.0.0.1:11434"}
         return proc.CommandResult(-1 if timed_out else 1, "", "import failed", timed_out=timed_out)
     monkeypatch.setattr("llmsetup.runtimes.ollama.run", run)
     config = RuntimeConfig("ollama", "qwen3-8b", "Q4_K_M", 8192)
