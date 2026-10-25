@@ -55,3 +55,43 @@ def test_startup_timeout_stops_owned_server_and_returns_log(monkeypatch, tmp_pat
         runtime.wait_until_ready(endpoint, lambda: False, timeout=90, interval=1)
     assert stopped == [endpoint]
     assert signatures.classify(str(error.value)) == signatures.CORRUPT_WEIGHTS
+
+
+def test_llamacpp_missing_openmp_dependency_has_package_hint(catalog, monkeypatch):
+    runtime = get_runtime("llamacpp")
+    stopped = []
+    monkeypatch.setattr(runtime, "is_available", lambda: True)
+    monkeypatch.setattr(runtime, "launch_command", lambda *a: ["fixture-llama-server"])
+    monkeypatch.setattr(runtime, "stop", lambda endpoint: stopped.append(endpoint))
+    monkeypatch.setattr("llmsetup.util.http.port_is_free", lambda *a: True)
+    monkeypatch.setattr("llmsetup.util.http.time.sleep", lambda *a: pytest.fail("waited for a dead server"))
+    read_text = Path.read_text
+
+    def os_release(path, *args, **kwargs):
+        if str(path) == "/etc/os-release":
+            return 'ID=ubuntu\nID_LIKE=debian\n'
+        return read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", os_release)
+
+    class DeadProcess:
+        returncode = 127
+
+        def poll(self):
+            return self.returncode
+
+    def spawn(command, *, log_path):
+        Path(log_path).write_text(
+            "llama-server: error while loading shared libraries: libgomp.so.1: "
+            "cannot open shared object file: No such file or directory\n"
+        )
+        return DeadProcess()
+
+    monkeypatch.setattr("llmsetup.runtimes.llamacpp.spawn", spawn)
+    config = RuntimeConfig(runtime="llamacpp", model_id="qwen3-8b", quant="Q4_K_M",
+                           context_tokens=8192)
+    with pytest.raises(RuntimeUnavailable, match="libgomp.so.1") as error:
+        runtime.start(catalog.require("qwen3-8b"), config, Console(quiet=True))
+    assert len(stopped) == 1
+    assert "apt install libgomp1" in error.value.install_hint
+    assert "Rerun: fixture-llama-server" in error.value.install_hint
