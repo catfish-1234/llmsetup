@@ -18,6 +18,7 @@ import zipfile
 from pathlib import Path, PurePosixPath
 from typing import Optional
 
+from llmsetup.runtimes.dependencies import shared_library_hint
 from llmsetup.types import HardwareProfile
 from llmsetup.util.errors import ProvisionError
 from llmsetup.util.fs import app_dir
@@ -213,7 +214,8 @@ def install_llamacpp(hardware: HardwareProfile, console: Console,
         if not probe.ok:
             raise ProvisionError(f"portable llama.cpp cannot run on this system: "
                                  f"{probe.failure([str(binary), '--version'])}",
-                                 hint="install a compatible llama-server on PATH, then rerun `llmsetup setup`")
+                                 hint=shared_library_hint(probe.output) or
+                                 "install a compatible llama-server on PATH, then rerun `llmsetup setup`")
         (dest / ".flavor").write_text(flavor, encoding="utf-8")
         # Keep the working flavor until its replacement has passed validation.
         previous = Path(tmp) / "previous"
