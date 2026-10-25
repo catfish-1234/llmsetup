@@ -138,6 +138,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Verification errors block success, check names are validated before requests,
   and model listing requires a matching served model and forwards authentication.
   ([#2])
+- Ollama configuration repairs never took effect: the Modelfile was rewritten on
+  disk but the already-loaded model kept the old settings. llmsetup now re-creates
+  the model when the repaired Modelfile differs, so values like num_ctx and
+  temperature actually apply.
+- GGUF models split across several files (name-00001-of-00002.gguf and its
+  siblings) could not be imported; the importer now globs all shards of a split
+  model.
+- A llama.cpp binary that fails because a system library is missing (for example
+  libgomp.so.1) got only generic advice. Install and startup failures now name the
+  missing library and the distro package that provides it, with a generic hint when
+  the distribution is unknown. Nothing is installed automatically.
+- GPU detection on WSL found no NVIDIA card because nvidia-smi lives in
+  /usr/lib/wsl/lib, outside the usual PATH. Detection now probes that location on
+  WSL and scopes the driver library path to the discovery subprocess, leaving PATH
+  and the environment unchanged.
 
 ### Security
 
