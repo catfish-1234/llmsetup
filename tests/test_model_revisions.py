@@ -110,7 +110,7 @@ def test_ollama_imports_gguf_without_pulling_a_mutable_tag(catalog, monkeypatch,
     config = RuntimeConfig("ollama", spec.id, "Q4_K_M", 8192)
     model_path = tmp_path / "pinned.gguf"
     commands = []
-    monkeypatch.setattr(runtime, "_ensure_server", lambda console: None)
+    monkeypatch.setattr(runtime, "_ensure_server", lambda console, port: None)
     monkeypatch.setattr("llmsetup.runtimes.ollama.fetch_gguf", lambda *a: model_path)
     monkeypatch.setattr("llmsetup.runtimes.ollama.run", lambda cmd, **kw:
                         commands.append(cmd) or CommandResult(0, "", ""))

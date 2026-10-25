@@ -8,14 +8,17 @@ is the normal case on most machines.
 
 from __future__ import annotations
 
+import os
 import platform
 import re
+from pathlib import Path
 from typing import List, Tuple
 
 from llmsetup.types import GPU, Accelerator
 from llmsetup.util.proc import have, parse_csv_table, run
 
 MIB = 1024 ** 2
+_WSL_LIB_DIR = Path("/usr/lib/wsl/lib")
 
 
 def detect_gpus() -> Tuple[List[GPU], List[str]]:
@@ -50,16 +53,28 @@ def detect_gpus() -> Tuple[List[GPU], List[str]]:
 
 
 def detect_nvidia() -> Tuple[List[GPU], List[str]]:
-    if not have("nvidia-smi"):
-        return [], []
+    command = "nvidia-smi"
+    wsl = _is_wsl()
+    if not have(command):
+        if not wsl or not have(str(_WSL_LIB_DIR / "nvidia-smi")):
+            return [], []
+        command = str(_WSL_LIB_DIR / "nvidia-smi")
+
+    env = None
+    if wsl and _WSL_LIB_DIR.is_dir():
+        # WSL supplies CUDA/NVML driver libraries outside the usual Linux paths.
+        # Make them visible to this probe without changing the parent environment.
+        library_path = os.environ.get("LD_LIBRARY_PATH")
+        env = {"LD_LIBRARY_PATH": str(_WSL_LIB_DIR) + (f":{library_path}" if library_path else "")}
 
     result = run(
         [
-            "nvidia-smi",
+            command,
             "--query-gpu=index,name,memory.total,memory.free,compute_cap,driver_version",
             "--format=csv,noheader,nounits",
         ],
         timeout=20,
+        env=env,
     )
     if not result.ok:
         # A driver/library mismatch is worth surfacing: the card is there but unusable.
@@ -233,6 +248,12 @@ def detect_intel() -> Tuple[List[GPU], List[str]]:
 # --------------------------------------------------------------------------- #
 # helpers
 # --------------------------------------------------------------------------- #
+
+
+def _is_wsl() -> bool:
+    return platform.system().lower() == "linux" and any(
+        marker in platform.release().lower() for marker in ("microsoft", "wsl")
+    )
 
 
 def _is_apple_silicon() -> bool:
