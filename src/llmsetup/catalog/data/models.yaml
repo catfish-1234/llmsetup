@@ -15,7 +15,7 @@
 # overrides whatever is written here.
 
 schema_version: 1
-updated: "2026-10-12"
+updated: "2026-10-26"
 
 quant_bpw:            # effective bits per weight, including embedding overhead
   Q2_K:    3.35
@@ -1290,3 +1290,34 @@ models:
     discovered: true
     gguf_repo: unsloth/DeepSeek-R1-Distill-Qwen-1.5B-GGUF
 
+
+  # ---------------------------------------- added 2026-10-26 by `llmsetup catalog refresh`
+  - id: llama-3.2-1b
+    name: Llama 3.2 1B Instruct
+    publisher: unsloth
+    params_b: 1.0
+    layers: 16
+    hidden_size: 2048
+    kv_heads: 8
+    head_dim: 64
+    max_context: 131072
+    license: llama3.2
+    commercial_ok: false
+    quality_tier: 3
+    tasks:
+    - chat
+    - rag
+    - summarize
+    supports_tools: true
+    supports_vision: false
+    supports_json: true
+    hf_repo: unsloth/Llama-3.2-1B-Instruct
+    recommended_quants:
+    - Q4_K_M
+    - Q5_K_M
+    - Q6_K
+    - Q8_0
+    arch_source: measured
+    discovered: true
+    gguf_repo: bartowski/Llama-3.2-1B-Instruct-GGUF
+    hf_revision: 5a8abab4a5d6f164389b1079fb721cfab8d7126c
