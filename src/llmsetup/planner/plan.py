@@ -1,0 +1,483 @@
+"""Turn (use case + hardware + catalog) into a ranked, explained plan."""
+
+from __future__ import annotations
+
+from typing import List, Optional, Set
+
+from llmsetup.catalog.catalog import Catalog
+from llmsetup.planner.memory import (
+    KV_ASYMMETRIC,
+    estimate_memory,
+    kv_options,
+    layers_that_fit,
+    max_context_for_budget,
+)
+from llmsetup.planner.score import HIGH_MEMORY_UTILISATION, explain, score_candidate
+from llmsetup.runtimes.registry import choose_runtime, prefer_mlx_for
+from llmsetup.types import (
+    GIB,
+    Candidate,
+    HardwareProfile,
+    MemoryEstimate,
+    ModelSpec,
+    Plan,
+    Task,
+    UseCaseProfile,
+)
+from llmsetup.util.errors import PlanningError
+
+# Keep more than one candidate per model only when the quants differ meaningfully.
+MAX_CANDIDATES = 8
+
+
+def build_plan(
+    profile: UseCaseProfile,
+    hardware: HardwareProfile,
+    catalog: Catalog,
+    runtime: Optional[str] = None,
+    allow_partial_offload: bool = True,
+    runtime_reason: Optional[str] = None,
+    exclude_models: Optional[Set[str]] = None,
+) -> Plan:
+    """Rank every viable (model, quant) pairing for this user and this machine."""
+    if profile.requested_model:
+        from llmsetup.planner.requested import build_requested_plan
+
+        return build_requested_plan(profile, hardware, catalog, runtime,
+                                    allow_partial_offload=allow_partial_offload,
+                                    runtime_reason=runtime_reason)
+    explicit = runtime is not None
+    chosen_runtime, runtime_reason = (
+        (runtime, runtime_reason or "explicitly requested") if runtime is not None
+        else choose_runtime(hardware, profile)
+    )
+
+    viable = catalog.matching(profile)
+    notes: List[str] = []
+    if exclude_models:
+        kept = [spec for spec in viable if spec.id not in exclude_models]
+        skipped = sorted(spec.name for spec in viable if spec.id in exclude_models)
+        for name in skipped:
+            notes.append(f"skipping {name}: provisioning it failed earlier in "
+                         "this run (the catalog entry has no usable build)")
+        viable = kept
+    if not viable:
+        reasons = catalog.unmatched_reasons(profile)
+        detail = "; ".join(f"{count} model(s): {reason}" for reason, count in
+                           sorted(reasons.items(), key=lambda kv: -kv[1]))
+        raise PlanningError(
+            "no model in the catalog satisfies your requirements",
+            hint=(f"filtered out. {detail} "
+                  "Relax a requirement (shorter context, drop vision) "
+                  "or add a model with `llmsetup catalog add`."),
+        )
+
+    budget = hardware.memory_budget
+    cpu_budget = hardware.usable_cpu_bytes
+    parallel = _parallel_slots(profile)
+
+    candidates: List[Candidate] = []
+    for spec in viable:
+        for quant in spec.recommended_quants:
+            candidate = _build_candidate(
+                spec, quant, profile, hardware, catalog, chosen_runtime,
+                budget, cpu_budget, parallel, allow_partial_offload,
+            )
+            if candidate is not None:
+                candidates.append(candidate)
+
+    if not candidates:
+        raise PlanningError(
+            "every candidate model exceeds this machine's memory",
+            hint=_too_big_hint(viable, profile, hardware, catalog),
+        )
+
+    for candidate in candidates:
+        score_candidate(candidate, profile, hardware)
+
+    # Deterministic ordering: score first, then prefer the higher-quality and
+    # (at equal quality) smaller model, so equal scores never reorder run to run.
+    candidates.sort(
+        key=lambda c: (c.score, c.model.quality_tier, -c.model.params_b, c.model.id),
+        reverse=True,
+    )
+    candidates = _dedupe_by_model(candidates)[:MAX_CANDIDATES]
+
+    notes.extend(_plan_notes(candidates, profile, hardware, parallel))
+
+    # The engine choice depends on which model won, so it is revisited now that
+    # one has. On Apple Silicon this is worth a large fraction of the generation
+    # speed for any model with an MLX build.
+    if not explicit and candidates:
+        upgrade = prefer_mlx_for(candidates[0].model, hardware, chosen_runtime)
+        if upgrade is not None:
+            chosen_runtime, runtime_reason = upgrade
+
+    return Plan(
+        candidates=candidates,
+        runtime=chosen_runtime,
+        runtime_reason=runtime_reason,
+        profile=profile,
+        hardware=hardware,
+        notes=notes,
+    )
+
+
+def _build_candidate(
+    spec: ModelSpec,
+    quant: str,
+    profile: UseCaseProfile,
+    hardware: HardwareProfile,
+    catalog: Catalog,
+    runtime: str,
+    budget: int,
+    cpu_budget: int,
+    parallel: int,
+    allow_partial_offload: bool,
+    kv_quant_override: Optional[str] = None,
+    allow_cpu_fallback: bool = False,
+    bpw_override: Optional[float] = None,
+) -> Optional[Candidate]:
+    """One (model, quant) pairing, with KV quantization applied only if needed."""
+    bpw = catalog.bpw(quant) if bpw_override is None else bpw_override
+    warnings: List[str] = []
+
+    # Try KV cache dtypes from best quality down, stopping at the first that fits.
+    # This means a KV quantization only ever appears in a plan because it was
+    # *required*, never as a default that silently costs quality.
+    estimate: Optional[MemoryEstimate] = None
+    for kv_quant in ([kv_quant_override] if kv_quant_override
+                     else kv_options(runtime, bool(profile.context_floor))):
+        candidate_estimate = estimate_memory(
+            spec, bpw, profile.context_tokens, quant=quant, kv_quant=kv_quant,
+            runtime=runtime, parallel=parallel,
+        )
+        if estimate is None:
+            estimate = candidate_estimate      # keep the f16 baseline as a fallback
+        if candidate_estimate.total <= budget:
+            estimate = candidate_estimate
+            if kv_quant != "f16":
+                cost = ("negligible quality cost" if kv_quant == "q8_0" else
+                        "keys stay at q8_0, values at q4_0: small measured cost"
+                        if kv_quant == KV_ASYMMETRIC else
+                        "measurably weaker recall over long context, if answers "
+                        "start missing details far back in the prompt, this is why")
+                warnings.append(
+                    f"KV cache quantized to {kv_quant} to fit "
+                    f"{profile.context_tokens:,} tokens ({cost})"
+                )
+            break
+    assert estimate is not None
+
+    fits_on_gpu = bool(hardware.gpus) and estimate.total <= budget
+    gpu_fraction = 1.0
+
+    if not fits_on_gpu:
+        if not hardware.gpus:
+            # CPU-only: system RAM is the budget, and everything is "offloaded" to it.
+            if estimate.total > cpu_budget:
+                return None
+            gpu_fraction = 0.0
+        elif allow_partial_offload:
+            fitted_layers = layers_that_fit(
+                spec, bpw, budget, profile.context_tokens,
+                kv_quant=estimate.kv_quant, runtime=runtime, parallel=parallel,
+            )
+            gpu_fraction = fitted_layers / spec.layers if spec.layers else 0.0
+            if gpu_fraction < 0.10 or estimate.total > cpu_budget + budget:
+                if not allow_cpu_fallback or estimate.total > cpu_budget:
+                    return None
+                gpu_fraction = 0.0
+                warnings.append("the model fits in system RAM; all layers run on CPU")
+            else:
+                warnings.append(
+                    f"only {fitted_layers}/{spec.layers} layers fit in VRAM; "
+                    "the rest run on CPU and dominate latency"
+                )
+        elif allow_cpu_fallback and estimate.total <= cpu_budget:
+            gpu_fraction = 0.0
+            warnings.append("the model fits in system RAM; all layers run on CPU")
+        else:
+            return None
+
+    utilisation = estimate.total / budget if budget else 1.0
+    if HIGH_MEMORY_UTILISATION <= utilisation <= 1.0:
+        where = "system RAM" if not hardware.gpus else "VRAM"
+        warnings.append(
+            f"uses {utilisation:.0%} of usable {where}; a long prompt or another "
+            "application could push this into swap or an out-of-memory error"
+        )
+
+    if profile.max_disk_gb and estimate.weights / GIB > profile.max_disk_gb:
+        return None
+    if hardware.disk_free_bytes and estimate.weights > hardware.disk_free_bytes * 0.9:
+        warnings.append(
+            f"download needs ~{estimate.weights / GIB:.1f} GB but only "
+            f"{hardware.disk_free_bytes / GIB:.1f} GB is free"
+        )
+
+    if catalog.arch_source(spec.id) == "estimated":
+        warnings.append(
+            "architecture figures are estimated; memory numbers will be "
+            "recomputed from the real file after download"
+        )
+
+    return Candidate(
+        model=spec,
+        quant=quant,
+        estimate=estimate,
+        fits_on_gpu=fits_on_gpu,
+        gpu_fraction=gpu_fraction,
+        warnings=warnings,
+    )
+
+
+def _dedupe_by_model(candidates: List[Candidate]) -> List[Candidate]:
+    """Keep the best-scoring quant per model, then one alternate quant at most.
+
+    Without this the top of the list is the same model at five quant levels,
+    which is useless as a fallback chain, the repair loop needs *different
+    models* to fall back to, not the same one slightly smaller.
+    """
+    best_per_model: List[Candidate] = []
+    seen = set()
+    for candidate in candidates:
+        if candidate.model.id in seen:
+            continue
+        seen.add(candidate.model.id)
+        best_per_model.append(candidate)
+    return best_per_model
+
+
+def _parallel_slots(profile: UseCaseProfile) -> int:
+    """KV cache slots to budget for. Serving several users multiplies the cache."""
+    return max(1, min(profile.concurrent_users, 16))
+
+
+def _plan_notes(
+    candidates: List[Candidate],
+    profile: UseCaseProfile,
+    hardware: HardwareProfile,
+    parallel: int,
+) -> List[str]:
+    notes: List[str] = []
+    best = candidates[0]
+
+    notes.append(
+        f"{best.model.name} at {best.quant}: {explain(best, profile, hardware)}."
+    )
+    if parallel > 1:
+        notes.append(
+            f"budgeting {parallel} concurrent slots, so the KV cache is sized "
+            f"for {profile.context_tokens * parallel:,} tokens in total"
+        )
+    if best.model.is_moe:
+        notes.append(
+            f"{best.model.name} is a mixture-of-experts model: all "
+            f"{best.model.params_b:g}B parameters must be resident, but only "
+            f"{best.model.compute_params_b:g}B run per token, so it is much faster "
+            "than a dense model of the same size"
+        )
+    if best.model.is_reasoning:
+        notes.append(
+            "this is a reasoning model and emits long thinking blocks; expect "
+            "higher latency to first useful token and budget output tokens accordingly"
+        )
+    if not hardware.gpus:
+        notes.append("no GPU available, so throughput is bounded by system RAM bandwidth")
+    if profile.needs_embeddings:
+        notes.append("a separate embedding model is needed for RAG; see the embedding plan")
+    return notes
+
+
+def _too_big_hint(
+    viable: List[ModelSpec], profile: UseCaseProfile, hardware: HardwareProfile,
+    catalog: Catalog,
+) -> str:
+    """When nothing fits, say what *would*, a number the user can act on."""
+    budget = hardware.memory_budget
+    smallest = min(viable, key=lambda s: s.params_b)
+    quant = smallest.recommended_quants[-1] if smallest.recommended_quants else "Q4_K_M"
+    reachable = max_context_for_budget(
+        smallest, catalog.bpw(quant), budget, kv_quant="q8_0",
+    )
+    if reachable > 0:
+        return (
+            f"the smallest match ({smallest.name}) fits at about "
+            f"{reachable:,} tokens of context, not {profile.context_tokens:,}. "
+            f"Retry with --context {reachable}."
+        )
+    return (
+        f"even {smallest.name} needs more than the {budget / GIB:.1f} GB available. "
+        "Close memory-heavy apps and rerun `llmsetup setup`. If no model fits, add a smaller "
+        "compatible model to the catalog or use a machine with more available RAM."
+    )
+
+
+#: What an inline completion has to come back within before people turn it off.
+#: A suggestion that lands after the next keystroke is worse than none, so this
+#: is the constraint the whole choice is made against.
+_COMPLETION_LATENCY_BUDGET_MS = 500
+
+#: Above this many *active* parameters the model is too slow to sit in the
+#: typing loop, whatever else it has going for it. Active rather than total,
+#: because decode speed is set by the parameters that run per token: a 30B
+#: mixture of experts that activates 3B answers at 3B speed, so it belongs here
+#: even though a dense 30B would not.
+_COMPLETION_MAX_ACTIVE_PARAMS_B = 8.0
+
+
+def plan_completion_model(
+    profile: UseCaseProfile, hardware: HardwareProfile, catalog: Catalog,
+    chat_model: Optional[ModelSpec] = None,
+) -> Optional[ModelSpec]:
+    """Pick a companion model for inline completion.
+
+    Editors run two models rather than one, and for a reason worth stating: the
+    completion model is measured on how fast it answers, not on how well it
+    reasons. Anything that fires on every keystroke has a few hundred
+    milliseconds before people switch it off, and a 30B model cannot make that
+    on consumer hardware however good its code is.
+
+    So this deliberately picks small, and it picks only from models trained to
+    fill a gap. An instruction-tuned model handed a prefix and a suffix does not
+    do a worse job of infilling; it does not do the job at all, because it was
+    never taught the tokens that express it.
+    """
+    if Task.AUTOCOMPLETE not in profile.tasks:
+        return None
+
+    candidates = [m for m in catalog.completion_models()
+                  if m.compute_params_b <= _COMPLETION_MAX_ACTIVE_PARAMS_B]
+    if not candidates:
+        return None
+
+    # The chat model already occupies memory, so the completion model is sized
+    # against what is left rather than against the card.
+    budget = hardware.memory_budget
+    if chat_model is not None:
+        budget -= int(chat_model.params_b * 1e9 * 4.85 / 8)
+    affordable = [m for m in candidates
+                  if int(m.params_b * 1e9 * 4.85 / 8) < max(0, budget)]
+
+    # Fewest active parameters first, because that is what decides how long the
+    # editor waits. Quality breaks ties between models that answer as quickly
+    # as each other.
+    pool = affordable or candidates
+    return sorted(pool, key=lambda m: (m.compute_params_b, -m.quality_tier))[0]
+
+
+def plan_embedding_model(
+    profile: UseCaseProfile, hardware: HardwareProfile, catalog: Catalog
+) -> Optional[ModelSpec]:
+    """Pick a companion embedding model for RAG.
+
+    Multilingual corpora need a multilingual retriever; an English-only model
+    will quietly return poor neighbours rather than fail loudly.
+    """
+    if not (profile.needs_embeddings or Task.RAG in profile.tasks):
+        return None
+
+    embedders = catalog.embedding_models()
+    if not embedders:
+        return None
+
+    non_english = [lang for lang in profile.languages if lang != "en"]
+
+    def rank(spec: ModelSpec) -> tuple:
+        multilingual_fit = 1 if (not non_english or
+                                 all(lang in spec.languages for lang in non_english)) else 0
+        return (multilingual_fit, spec.quality_tier, -spec.params_b)
+
+    return sorted(embedders, key=rank, reverse=True)[0]
+
+
+def _tradeoff_note(plan: Plan, requested: int, context: int, floor: int) -> Optional[str]:
+    """One line saying what the chosen context cost, so the trade is visible."""
+    best = plan.best
+    if best is None:
+        return None
+    kv = best.estimate.kv_quant
+    parts = [f"context {context:,} tokens"]
+    if requested != context:
+        parts[0] += f" (aimed for {requested:,})"
+    parts.append("KV cache " + (kv.replace("/", " keys / ") + " values" if "/" in kv else kv))
+    parts.append(f"model {best.model.name} {best.quant}")
+    if best.gpu_fraction >= 1.0:
+        parts.append("all layers on the GPU, no offload slowdown")
+    elif best.gpu_fraction <= 0.0:
+        parts.append("all layers on the CPU, so generation is much slower than on a GPU")
+    else:
+        parts.append(f"{best.gpu_fraction:.0%} of layers on the GPU, the rest in RAM, "
+                     "which makes generation noticeably slower")
+    note = "Context trade: " + "; ".join(parts) + "."
+    if floor and context < floor:
+        note += (f" This is BELOW the {floor:,} tokens that coding and agent tools "
+                 "need, because nothing larger fits this device; expect agent "
+                 "harnesses to truncate or fail on long sessions. A bigger GPU, "
+                 "more memory or a smaller model is the only real fix.")
+    return note
+
+
+def build_adaptive_plan(profile: UseCaseProfile, hardware: HardwareProfile,
+                        catalog: Catalog, runtime: Optional[str] = None,
+                        runtime_reason: Optional[str] = None,
+                        exclude_models: Optional[Set[str]] = None) -> Plan:
+    """Keep the goal, shorten context automatically when the requested window cannot fit.
+
+    The window only shrinks down to the profile's floor while a plan exists there;
+    below it the plan is still returned (a smaller window beats no setup) but
+    carries an explicit warning, rather than silently handing a coding agent 8K.
+    """
+    from dataclasses import replace
+
+    requested = profile.context_tokens
+    floor = min(profile.context_floor, requested)
+    context = requested
+    while True:
+        try:
+            plan = build_plan(replace(profile, context_tokens=context), hardware,
+                              catalog, runtime=runtime, runtime_reason=runtime_reason,
+                              exclude_models=exclude_models)
+            if plan.runtime == "llamacpp" and hardware.gpus:
+                from llmsetup.runtimes.install import managed_binary, managed_flavor
+                from llmsetup.util.proc import which
+
+                if (not which("llama-server") and managed_binary(hardware)
+                        and managed_flavor(hardware) == "cpu"):
+                    hardware = replace(hardware, gpus=[], unified_memory=False)
+                    plan = build_plan(replace(profile, context_tokens=context), hardware,
+                                      catalog, runtime="llamacpp",
+                                      runtime_reason=runtime_reason,
+                                      exclude_models=exclude_models)
+                    plan.notes.append("the managed portable runtime uses CPU; planning against available RAM")
+            if context != requested:
+                plan.notes.append(
+                    f"requested {requested} tokens; automatically using {context} to fit "
+                    "available memory and the model's context limit"
+                )
+            if floor:
+                note = _tradeoff_note(plan, requested, context, floor)
+                if note:
+                    plan.notes.append(note)
+            return plan
+        except PlanningError:
+            if context <= 512:
+                # A small detected GPU can fit no useful layers even though
+                # RAM can hold the model. Try CPU only after every GPU window.
+                engine = runtime or choose_runtime(hardware, profile)[0]
+                if (hardware.gpus and not hardware.unified_memory
+                        and engine in ("llamacpp", "ollama", "lmstudio")):
+                    cpu_hardware = replace(hardware, gpus=[], unified_memory=False)
+                    plan = build_adaptive_plan(
+                        profile, cpu_hardware, catalog, runtime=engine,
+                        runtime_reason="no GPU candidate fits; using system RAM on CPU",
+                        exclude_models=exclude_models,
+                    )
+                    plan.notes.append("no model fits the GPU; all layers run on CPU using system RAM")
+                    return plan
+                raise
+            context = max(512, context // 2)
+            if floor and context < floor and context * 2 > floor:
+                # Land on the floor itself before going under it.
+                context = floor

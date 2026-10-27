@@ -1,0 +1,107 @@
+name: Catalog auto-update
+
+# Keeps the shipped model catalog current without anyone pushing by hand.
+# Installed copies of llmsetup pull this file on their own cadence, so a model
+# that lands here reaches users without a release.
+on:
+  schedule:
+    # 06:00 UTC on Mondays and Thursdays. Open-weight releases cluster around
+    # midweek; twice a week keeps the catalog fresh without churning the repo.
+    - cron: "0 6 * * 1,4"
+  workflow_dispatch:
+    inputs:
+      max_new:
+        description: "Maximum models to add in this run"
+        default: "8"
+      min_downloads:
+        description: "Popularity floor for a discovered model"
+        default: "5000"
+      dry_run:
+        description: "Report what would change without committing"
+        type: boolean
+        default: false
+
+# Never let two updates race on the same file.
+concurrency:
+  group: catalog-update
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    env:
+      LLMSETUP_AUTO_UPDATE: "0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+
+      - name: Install
+        run: python -m pip install -c requirements-ci.txt -e ".[dev]" ruff
+
+      - name: Lint code and maintenance scripts
+        run: ruff check src/ tests/ scripts/
+
+      - name: Discover and merge new models
+        id: update
+        env:
+          LLMSETUP_MAX_NEW: ${{ github.event.inputs.max_new || '8' }}
+          LLMSETUP_MIN_DOWNLOADS: ${{ github.event.inputs.min_downloads || '5000' }}
+          LLMSETUP_DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+        run: |
+          extra_args=()
+          if [[ "$LLMSETUP_DRY_RUN" == "true" ]]; then
+            extra_args+=(--dry-run)
+          fi
+          python scripts/update_catalog.py \
+            --max-new "$LLMSETUP_MAX_NEW" \
+            --min-downloads "$LLMSETUP_MIN_DOWNLOADS" \
+            "${extra_args[@]}"
+
+      - name: Check whether the catalog changed
+        id: diff
+        run: |
+          if git diff --quiet -- src/llmsetup/catalog/data/models.yaml; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No catalog changes."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            git --no-pager diff --stat -- src/llmsetup/catalog/data/models.yaml
+          fi
+
+      # The full suite gates the commit. The update script already validated the
+      # catalog, but the tests are the same gate a human change goes through and
+      # a broken catalog must never reach main.
+      - name: Run the test suite against the updated catalog
+        if: steps.diff.outputs.changed == 'true'
+        run: pytest -q
+
+      - name: Verify the CLI still plans with it
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          llmsetup catalog list
+          llmsetup plan --vram 24 --gpu-vendor nvidia --task coding --yes
+          llmsetup plan --vram 8  --gpu-vendor nvidia --task chat --yes
+          llmsetup plan --cpu-only --ram 16 --task chat --yes
+
+      - name: Commit
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/llmsetup/catalog/data/models.yaml
+          git commit -m "Auto-update model catalog
+
+          Discovered by scripts/update_catalog.py from the Hugging Face Hub.
+          Architecture fields are read from each model's config.json, and the
+          catalog was validated (loads, plausible values, planning works) plus
+          the full test suite before this commit."
+          git push

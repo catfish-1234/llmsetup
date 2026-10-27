@@ -1,0 +1,118 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "23 8 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: tests (python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install test tools
+        run: python -m pip install -c requirements-ci.txt -e ".[dev]"
+      - name: Full tests and coverage floor
+        # Baseline is 74.9% on main; ratchet this floor as boundary coverage grows.
+        run: python -m pytest --cov=llmsetup --cov-report=term-missing --cov-fail-under=74
+      - name: Smoke-test the CLI
+        env:
+          LLMSETUP_AUTO_UPDATE: "0"
+        run: |
+          llmsetup --version
+          llmsetup catalog list
+          llmsetup runtimes
+          llmsetup plan --vram 24 --gpu-vendor nvidia --task coding --yes
+
+  lint:
+    name: lint and source security
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -c requirements-ci.txt ruff bandit mypy types-PyYAML
+      - run: ruff check src/ tests/ scripts/
+      - name: Type-check the library
+        run: mypy src/llmsetup
+      - name: Check source security
+        # B310 flags every urllib call. User-selected file:// catalogs and HF
+        # mirrors are supported; URL trust boundaries need separate review.
+        run: bandit -r src/ -ll -ii --skip B310
+
+  audit:
+    name: dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -c requirements-ci.txt -e . pip-audit
+      - name: Audit installed runtime dependency versions
+        run: |
+          python - <<'PY' > requirements-audit.txt
+          import importlib.metadata as md
+          from packaging.requirements import Requirement
+          for raw in md.requires("llmsetup") or []:
+              requirement = Requirement(raw)
+              if requirement.marker is None or requirement.marker.evaluate({"extra": ""}):
+                  print(f"{requirement.name}=={md.version(requirement.name)}")
+          PY
+          pip-audit --requirement requirements-audit.txt --strict
+
+  package:
+    name: build and installed wheel
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -c requirements-ci.txt build twine
+      - name: Build wheel from sdist and validate metadata
+        run: |
+          python -m build
+          python -m twine check dist/*
+      - name: Check the installed artifact outside the checkout
+        env:
+          LLMSETUP_HOME: ${{ runner.temp }}/llmsetup-home
+          LLMSETUP_AUTO_UPDATE: "0"
+        run: |
+          python -m venv "$RUNNER_TEMP/wheel-env"
+          "$RUNNER_TEMP/wheel-env/bin/python" -m pip install -c requirements-ci.txt dist/*.whl
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/wheel-env/bin/python" "$GITHUB_WORKSPACE/scripts/check_wheel.py"
+          "$RUNNER_TEMP/wheel-env/bin/llmsetup" --version
+          "$RUNNER_TEMP/wheel-env/bin/llmsetup" plan --cpu-only --ram 16 --task chat --yes
