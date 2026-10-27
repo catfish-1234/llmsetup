@@ -81,3 +81,10 @@ ignore = [
 # Tests reach into private helpers on purpose, to pin behaviour that has no
 # public surface (regex helpers, JSON extraction, PNG generation).
 "tests/*" = ["SIM117"]
+
+[tool.coverage.run]
+# tests/test_module_entrypoint.py runs the CLI as a real subprocess. pytest-cov
+# 7.1.0 no longer measures those subprocesses on its own; coverage's subprocess
+# patch (added in coverage 7.10) restores that measurement so the module
+# entrypoint keeps counting toward the 74% floor.
+patch = ["subprocess"]
