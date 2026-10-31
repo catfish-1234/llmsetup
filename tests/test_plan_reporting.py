@@ -54,6 +54,34 @@ def test_code_like_tasks_disable_flat_penalty_with_and_without_publisher(catalog
     assert "repetition penalty off" in sampling.rationale
 
 
+def markdown(result):
+    return render_markdown(result)
+
+
+def test_advisory_failure_is_visible_under_success_verdict(laptop_result):
+    laptop_result.checks = [
+        CheckResult(name="streaming", status=CheckStatus.PASS, severity=Severity.REQUIRED),
+        CheckResult(name="tool_calling", status=CheckStatus.FAIL,
+                    severity=Severity.ADVISORY,
+                    message="model described the tool call in prose"),
+    ]
+    assert laptop_result.succeeded
+    out = markdown(laptop_result)
+    assert "all required checks passed; 1 advisory check(s) failed" in out
+    assert "every required check passed" not in out
+    assert "**tool_calling** (advisory, not blocking): model described the tool call in prose" in out
+
+
+def test_clean_success_keeps_original_verdict(laptop_result):
+    laptop_result.checks = [
+        CheckResult(name="streaming", status=CheckStatus.PASS, severity=Severity.REQUIRED),
+        CheckResult(name="tool_calling", status=CheckStatus.PASS, severity=Severity.ADVISORY),
+    ]
+    out = markdown(laptop_result)
+    assert "**Verified: yes, every required check passed**" in out
+    assert "## Unresolved" not in out
+
+
 def test_coding_sampler_report_and_modelfile_agree(laptop_result):
     config = laptop_result.config
     sampler = config.advanced.sampler
