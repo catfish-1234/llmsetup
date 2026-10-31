@@ -39,7 +39,14 @@ def render_terminal(result: SetupResult, console: Console) -> None:
     console.print()
     console.print(console.bold("=" * 68))
     if result.succeeded:
-        headline = "Setup complete and verified"
+        issues = [
+            f"{check.name}: {check.status.value.upper()}"
+            + (" (advisory)" if check.severity is Severity.ADVISORY else "")
+            for check in result.checks
+            if check.status in (CheckStatus.FAIL, CheckStatus.WARN)
+        ]
+        headline = ("Setup complete; check issues: " + "; ".join(issues)
+                    if issues else "Setup complete and verified")
     elif not result.checks_ran:
         headline = "Plan ready. Nothing was tested"
     else:
@@ -78,8 +85,8 @@ def render_terminal(result: SetupResult, console: Console) -> None:
         + (f" x {config.parallel} slots" if config.parallel > 1 else "")
     )
     console.info(
-        f"GPU layers: {config.gpu_layers}/{config.total_layers}"
-        + ("  (fully offloaded)" if config.full_gpu_offload
+        f"Planned GPU layers: {config.gpu_layers}/{config.total_layers}"
+        + ("  (full offload requested; residency not observed)" if config.full_gpu_offload
            else "  (CPU only; no layers on the GPU)" if config.gpu_layers == 0
            else "  (partial. CPU is the bottleneck)")
     )
@@ -311,7 +318,7 @@ def _launch_note(result: SetupResult) -> str:
         f"The tuned Ollama model `{tag}` has not been created. "
         "Run `llmsetup setup` without `--dry-run` to create it."
     )
-    if spec.ollama_name:
+    if spec.ollama_name and not result.config.extra.get("cached_only"):
         note += " The command below runs the official Ollama model without these tuned settings."
     return note
 
@@ -352,8 +359,10 @@ def render_markdown(result: SetupResult) -> str:
                      f"(weights {estimate.weights / GIB:.1f} + "
                      f"KV {estimate.kv_cache / GIB:.1f} + "
                      f"overhead {estimate.overhead / GIB:.1f}) |")
-    lines.append(f"| GPU layers | {config.gpu_layers} / {config.total_layers} |")
+    lines.append(f"| Planned GPU layers | {config.gpu_layers} / {config.total_layers} |")
     lines.append(f"| KV cache | {config.kv_cache_type} |")
+    lines.append("")
+    lines.append("GPU placement is planned; actual offload residency was not observed.")
     lines.append("")
     lines.append(f"Runtime chosen because: {plan.runtime_reason}.")
     lines.append("")

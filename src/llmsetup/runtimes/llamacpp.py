@@ -13,7 +13,7 @@ from typing import Dict, List, Optional
 
 from llmsetup.runtimes.base import Endpoint, Runtime, RuntimeUnavailable
 from llmsetup.runtimes.dependencies import shared_library_hint
-from llmsetup.runtimes.gguf_store import fetch_gguf, fetch_projector
+from llmsetup.runtimes.gguf_store import fetch_gguf, fetch_projector, require_cached
 from llmsetup.runtimes.registry import register
 from llmsetup.tuning.profiles import ReasoningEffort
 from llmsetup.types import ModelSpec, RuntimeConfig
@@ -63,6 +63,12 @@ class LlamaCppRuntime(Runtime):
 
     def ensure_model(self, spec: ModelSpec, config: RuntimeConfig,
                      console: Console) -> RuntimeConfig:
+        if config.extra.get("cached_only"):
+            # Do not trust model_path after a quantization or model repair.
+            config.model_path = str(require_cached(spec, config.quant))
+            if spec.supports_vision:
+                config.mmproj_path = str(require_cached(spec, config.quant, projector=True))
+            return config
         if not (config.model_path and Path(config.model_path).exists()):
             config.model_path = str(fetch_gguf(spec, config.quant, console))
         # A vision model without its projector loads and serves happily; it just
@@ -84,7 +90,7 @@ class LlamaCppRuntime(Runtime):
             "--host", config.host,
             "--port", str(config.port),
             "--ctx-size", str(config.context_tokens * config.parallel),
-            "--n-gpu-layers", str(config.gpu_layers),
+            "--n-gpu-layers", str(config.llama_gpu_layers),
             "--batch-size", str(config.batch_size),
             "--ubatch-size", str(config.ubatch_size),
             "--parallel", str(config.parallel),

@@ -12,7 +12,16 @@ from llmsetup.runtimes.base import RuntimeUnavailable
 from llmsetup.runtimes.ollama import OllamaRuntime
 from llmsetup.tuning.sampling import sampling_for
 from llmsetup.tuning.tuner import _grow_batch_into_headroom, tune
-from llmsetup.types import GIB, RuntimeConfig, SetupResult, Task, UseCaseProfile
+from llmsetup.types import (
+    GIB,
+    CheckResult,
+    CheckStatus,
+    RuntimeConfig,
+    SetupResult,
+    Severity,
+    Task,
+    UseCaseProfile,
+)
 from llmsetup.util.log import Console
 from llmsetup.util.proc import CommandResult
 
@@ -228,3 +237,55 @@ def test_unprovisionable_models_are_skipped_with_a_note(catalog):
                       exclude_models=excluded)
     assert all(c.model.id not in excluded for c in plan.candidates)
     assert any("skipping" in n and "failed earlier" in n for n in plan.notes)
+
+
+@pytest.mark.parametrize("status,severity", [
+    (CheckStatus.FAIL, Severity.ADVISORY),
+    (CheckStatus.WARN, Severity.ADVISORY),
+    (CheckStatus.WARN, Severity.REQUIRED),
+])
+def test_completion_headline_names_check_issues(laptop_result, status, severity):
+    laptop_result.checks = [
+        CheckResult("health", CheckStatus.PASS, Severity.CRITICAL),
+        CheckResult("tool_calling", status, severity),
+    ]
+    assert laptop_result.succeeded  # Exit status and advisory semantics stay intact.
+    headline = next(line for line in terminal(laptop_result).splitlines()
+                    if "Setup complete" in line)
+    assert "Setup complete and verified" not in headline
+    assert f"tool_calling: {status.value.upper()}" in headline
+    assert ("(advisory)" in headline) is (severity is Severity.ADVISORY)
+
+
+def test_completion_headline_names_every_advisory_issue(laptop_result):
+    laptop_result.checks = [
+        CheckResult("tool_calling", CheckStatus.FAIL),
+        CheckResult("throughput", CheckStatus.WARN),
+    ]
+    headline = next(line for line in terminal(laptop_result).splitlines()
+                    if "Setup complete" in line)
+    assert "tool_calling: FAIL (advisory)" in headline
+    assert "throughput: WARN (advisory)" in headline
+
+
+@pytest.mark.parametrize("checks,headline", [
+    ([CheckResult("health", CheckStatus.PASS, Severity.CRITICAL)],
+     "Setup complete and verified"),
+    ([CheckResult("health", CheckStatus.PASS), CheckResult("vision", CheckStatus.SKIP)],
+     "Setup complete and verified"),
+    ([], "Plan ready. Nothing was tested"),
+    ([CheckResult("vision", CheckStatus.SKIP)], "Plan ready. Nothing was tested"),
+    ([CheckResult("health", CheckStatus.FAIL, Severity.CRITICAL)],
+     "Setup finished with unresolved problems"),
+])
+def test_existing_completion_headlines_stay_intact(laptop_result, checks, headline):
+    laptop_result.checks = checks
+    assert f"  {headline}\n" in terminal(laptop_result)
+
+
+def test_reports_distinguish_planned_offload_from_observed_residency(laptop_result):
+    laptop_result.checks = [CheckResult("health", CheckStatus.PASS)]
+    for output in (terminal(laptop_result), render_markdown(laptop_result)):
+        assert "Planned GPU layers" in output
+        assert "not observed" in output
+        assert "fully offloaded" not in output
