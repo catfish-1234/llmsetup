@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from llmsetup.runtimes.base import Endpoint, Runtime, RuntimeUnavailable
-from llmsetup.runtimes.gguf_store import fetch_gguf
+from llmsetup.runtimes.gguf_store import CachedModelUnavailable, fetch_gguf, require_cached
 from llmsetup.runtimes.registry import register
 from llmsetup.types import ModelSpec, RuntimeConfig
 from llmsetup.util import http
@@ -76,7 +76,7 @@ class OllamaRuntime(Runtime):
             f"FROM {base}",
             "",
             f"PARAMETER num_ctx {config.context_tokens}",
-            f"PARAMETER num_gpu {config.gpu_layers}",
+            f"PARAMETER num_gpu {config.llama_gpu_layers}",
             f"PARAMETER num_batch {config.ubatch_size}",
             f"PARAMETER temperature {config.temperature}",
             f"PARAMETER top_p {config.top_p}",
@@ -96,11 +96,13 @@ class OllamaRuntime(Runtime):
 
     def ensure_model(self, spec: ModelSpec, config: RuntimeConfig,
                      console: Console) -> RuntimeConfig:
+        # Resolve before starting a daemon or calling a fetching helper.
+        cached = require_cached(spec, config.quant) if config.extra.get("cached_only") else None
         self._ensure_server(console, int(config.extra.get("ollama_port", DEFAULT_PORT)))
 
         # Native Ollama tags are mutable and cannot be pulled by digest. Import
         # the shared pinned GGUF instead, so a tag update cannot change a rerun.
-        path = fetch_gguf(spec, config.quant, console)
+        path = cached if cached is not None else fetch_gguf(spec, config.quant, console)
         config.model_path = str(path)
         config.extra["from_gguf"] = True
         console.warn(
@@ -113,6 +115,10 @@ class OllamaRuntime(Runtime):
 
     def _create_model(self, spec: ModelSpec, config: RuntimeConfig, console: Console) -> None:
         """Apply every Modelfile setting, including changes made by repair."""
+        if config.extra.get("cached_only"):
+            # A local FROM imports bytes; a tag FROM may implicitly pull them.
+            config.model_path = str(require_cached(spec, config.quant))
+            config.extra["from_gguf"] = True
         tag = self.derived_name(spec)
         port = int(config.extra.get("ollama_port", DEFAULT_PORT))
         contents = self.modelfile(spec, config)
@@ -179,6 +185,10 @@ class OllamaRuntime(Runtime):
         # Older saved plans may still carry the catalog ID as served_name.
         if config.served_name == self.derived_name(spec):
             return ["ollama", "run", config.served_name]
+        if config.extra.get("cached_only"):
+            raise CachedModelUnavailable(
+                f"--cached-only: tuned local model {spec.id}:{config.quant} has not been created"
+            )
         if spec.ollama_name:
             return ["ollama", "run", spec.ollama_name]
         raise RuntimeUnavailable(

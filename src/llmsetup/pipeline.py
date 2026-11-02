@@ -18,6 +18,7 @@ from llmsetup.planner.plan import build_adaptive_plan, plan_embedding_model
 from llmsetup.repair.loop import RepairLoop, mark_resolved
 from llmsetup.repair.strategies import RepairState
 from llmsetup.runtimes.base import Endpoint, Runtime, RuntimeUnavailable
+from llmsetup.runtimes.gguf_store import CachedModelUnavailable, require_cached
 from llmsetup.runtimes.registry import get_runtime
 from llmsetup.tuning import tune
 from llmsetup.tuning.profiles import SpecType
@@ -46,13 +47,15 @@ _MODEL_LEVEL_SIGNATURES = frozenset({
     sig.EMPTY_RESPONSE, sig.INCOHERENT_OUTPUT, sig.REPETITION_LOOP,
 })
 
+_CACHE_MISS = "cached_model_missing"
+
 
 class Pipeline:
     def __init__(self, profile: UseCaseProfile, hardware: HardwareProfile,
                  catalog: Catalog, console: Console, *,
                  runtime_name: Optional[str] = None, quick: bool = False,
                  dry_run: bool = False, max_repairs: int = 12,
-                 register: bool = True, sweep: bool = False):
+                 register: bool = True, sweep: bool = False, cached_only: bool = False):
         self.profile = profile
         self.hardware = hardware
         self.catalog = catalog
@@ -63,6 +66,7 @@ class Pipeline:
         self.max_repairs = max_repairs
         self.register = register
         self.sweep = sweep
+        self.cached_only = cached_only
         self._endpoint: Optional[Endpoint] = None
         self._runtime: Optional[Runtime] = None
 
@@ -129,6 +133,9 @@ class Pipeline:
                 result = self._run_once()
                 last_result = result
                 tried.add((result.plan.runtime, mode))
+                if any(check.failure_signature == _CACHE_MISS for check in result.checks):
+                    result.repairs = journal + result.repairs
+                    return result
                 if not any(check.blocking for check in result.checks):
                     result.hardware = original_hardware
                     result.repairs = journal + result.repairs
@@ -158,6 +165,10 @@ class Pipeline:
                         queue = []
                         stop_switching = True
                         break
+            except CachedModelUnavailable:
+                # Draft/retriever misses also stop recovery rather than choosing
+                # another engine or a different uncached model.
+                raise
             except PlanningError as exc:
                 if last_result is None and not original_profile.requested_model:
                     raise
@@ -347,7 +358,8 @@ class Pipeline:
             self.console.step("Starting the server")
             checks = self._launch_and_check(candidate.model, config, None)
 
-        if any(c.blocking for c in checks):
+        if (any(c.blocking for c in checks)
+                and not any(c.failure_signature == _CACHE_MISS for c in checks)):
             self.console.step("Repairing")
             state = RepairState(
                 config=config, candidate=candidate, hardware=self.hardware,
@@ -473,9 +485,14 @@ class Pipeline:
                    "portable_runtime": getattr(self, "_portable_cpu", False)},
         )
 
+        failures = self._check_cached(spec, config, runtime)
+        if failures:
+            raise CachedModelUnavailable(failures[0].message)
         try:
             config = runtime.ensure_model(spec, config, self.console)
             endpoint = runtime.start(spec, config, self.console)
+        except CachedModelUnavailable:
+            raise
         except (RuntimeUnavailable, LlmsetupError, OSError) as exc:
             message = exc.message if isinstance(exc, LlmsetupError) else str(exc)
             self.console.info(f"could not start the embedding model: {message}")
@@ -542,6 +559,10 @@ class Pipeline:
             plan.draft_model_id = None
             return
 
+        if self.cached_only:
+            plan.draft_path = str(require_cached(spec, plan.draft_quant))
+            return
+
         self.console.info(
             f"fetching {spec.name} as a speculative draft model "
             f"(~{plan.expected_speedup:.2f}x on predictable output)"
@@ -600,10 +621,15 @@ class Pipeline:
                           names: Optional[Sequence[str]]) -> List[CheckResult]:
         """Bring up a server and run checks. Launch failures become check results."""
         assert self._runtime is not None
+        failures = self._check_cached(spec, config, self._runtime)
+        if failures:
+            return failures
         self._stop_endpoint()
 
         try:
             endpoint = self._runtime.start(spec, config, self.console)
+        except CachedModelUnavailable as exc:
+            return self._cached_failure(exc)
         except (LlmsetupError, RuntimeUnavailable, OSError) as exc:
             # A failed launch is a check failure, so repair can act on it rather
             # than the whole run aborting.
@@ -631,6 +657,9 @@ class Pipeline:
         """Callback handed to the repair loop."""
         assert self._runtime is not None
         spec = self._current_spec(config)
+        failures = self._check_cached(spec, config, self._runtime)
+        if failures:
+            return failures
         if (not config.model_path or
                 (self._runtime.uses_gguf and not Path(config.model_path).exists()) or
                 (config.model_id, config.quant) != getattr(self, "_provisioned", None)):
@@ -643,12 +672,17 @@ class Pipeline:
         assert self._runtime is not None
         attempts = 2 if self.max_repairs else 1
         for attempt in range(attempts):
+            failures = self._check_cached(spec, config, self._runtime)
+            if failures:
+                return failures
             try:
                 updated = self._runtime.ensure_model(spec, config, self.console)
                 if updated is not config:
                     config.__dict__.update(updated.__dict__)
                 self._provisioned = (config.model_id, config.quant)
                 return []
+            except CachedModelUnavailable as exc:
+                return self._cached_failure(exc)
             except (LlmsetupError, RuntimeUnavailable, OSError) as exc:
                 message = exc.message if isinstance(exc, LlmsetupError) else str(exc)
                 if attempt + 1 < attempts:
@@ -667,6 +701,33 @@ class Pipeline:
                     detail=getattr(exc, "hint", "") or getattr(exc, "install_hint", "") or "",
                 )]
         return []
+
+    def _check_cached(self, spec: ModelSpec, config: RuntimeConfig,
+                      runtime: Runtime) -> List[CheckResult]:
+        if not self.cached_only:
+            return []
+        config.extra["cached_only"] = True
+        try:
+            if runtime.name not in ("ollama", "llamacpp"):
+                # Other adapters can fetch on launch through their own caches.
+                # Without proof of exact identity and a local-only launch, stop.
+                raise CachedModelUnavailable(
+                    f"--cached-only: cannot verify retained weights for {spec.id}:{config.quant} "
+                    f"on {runtime.name}; use Ollama or llama.cpp with the shared GGUF store"
+                )
+            config.model_path = str(require_cached(spec, config.quant))
+            if runtime.name == "llamacpp" and spec.supports_vision:
+                config.mmproj_path = str(require_cached(spec, config.quant, projector=True))
+        except CachedModelUnavailable as exc:
+            return self._cached_failure(exc)
+        return []
+
+    @staticmethod
+    def _cached_failure(exc: CachedModelUnavailable) -> List[CheckResult]:
+        return [CheckResult(
+            name="model_cache", status=CheckStatus.FAIL, severity=Severity.CRITICAL,
+            message=exc.message, failure_signature=_CACHE_MISS, detail=exc.hint or "",
+        )]
 
     def _current_spec(self, config: RuntimeConfig) -> ModelSpec:
         return self.catalog.require(config.model_id)
