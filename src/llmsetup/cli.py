@@ -165,6 +165,9 @@ def build_parser() -> argparse.ArgumentParser:
                               "llama-bench")
     p_setup.add_argument("--no-repair", action="store_true",
                          help="report failures instead of fixing them")
+    p_setup.add_argument("--cached-only", action="store_true",
+                         help="require retained model weights; never download weights "
+                              "(Ollama/llama.cpp shared GGUF store)")
     p_setup.add_argument("--report", type=Path, help="write a markdown report here")
     p_setup.add_argument("--save-profile", type=Path,
                          help="save the answers for a repeatable run")
@@ -196,6 +199,8 @@ def build_parser() -> argparse.ArgumentParser:
     common(p_doctor)
     hardware_flags(p_doctor)
     p_doctor.add_argument("--profile", type=Path, help="saved setup JSON to re-test")
+    p_doctor.add_argument("--cached-only", action="store_true",
+                          help="require retained model weights, including every repair fallback")
 
     p_report = sub.add_parser(
         "report", help="reprint the last setup's report (paste this into a bug report)")
@@ -387,6 +392,7 @@ def cmd_setup(args, console: Console) -> int:
         max_repairs=0 if args.no_repair else 12,
         register=not args.no_register,
         sweep=getattr(args, "sweep", False),
+        cached_only=getattr(args, "cached_only", False),
     )
     try:
         result = pipeline.run()
@@ -467,7 +473,8 @@ def cmd_doctor(args, console: Console) -> int:
     profile = replace(profile, requested_model=model_id)
 
     pipeline = Pipeline(profile, hardware, catalog, console,
-                        runtime_name=saved.get("runtime"))
+                        runtime_name=saved.get("runtime"),
+                        cached_only=getattr(args, "cached_only", False))
     try:
         result = pipeline.run()
     finally:

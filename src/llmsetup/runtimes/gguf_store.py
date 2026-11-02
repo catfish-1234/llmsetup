@@ -28,6 +28,23 @@ from llmsetup.util.fs import ensure_dir, model_store, safe_subpath
 from llmsetup.util.log import Console
 
 
+class CachedModelUnavailable(ProvisionError):
+    """The requested retained weights cannot be used without a fetch."""
+
+
+def require_cached(spec: ModelSpec, quant: str, *, projector: bool = False) -> Path:
+    """Resolve only this model/quant/revision, including every weight shard."""
+    path = find_local_projector(spec, quant) if projector else find_local(spec, quant)
+    if path is None:
+        component = "vision projector" if projector else "complete GGUF weights"
+        raise CachedModelUnavailable(
+            f"--cached-only: missing {component} for {spec.id}:{quant} "
+            f"in the local store ({store_path(spec, quant)})",
+            hint="choose a model and quant already retained in the shared GGUF store",
+        )
+    return path
+
+
 def store_path(spec: ModelSpec, quant: str) -> Path:
     """Where a model's weights live. Mirrors publisher/model so it reads like HF.
 
