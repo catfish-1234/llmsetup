@@ -1,16 +1,23 @@
 """Ollama must serve repaired settings and import every split GGUF shard."""
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from conftest import make_hardware
 
 from llmsetup.pipeline import Pipeline
+from llmsetup.planner.memory import kv_cache_bytes, overhead_bytes, weight_bytes
+from llmsetup.planner.plan import build_plan
 from llmsetup.runtimes.base import RuntimeUnavailable
+from llmsetup.runtimes.llamacpp import LlamaCppRuntime
 from llmsetup.runtimes.ollama import OllamaRuntime
-from llmsetup.types import RuntimeConfig, UseCaseProfile
+from llmsetup.tuning import tune
+from llmsetup.types import RuntimeConfig, Task, UseCaseProfile
 from llmsetup.util.log import Console
 from llmsetup.util.proc import CommandResult
+from llmsetup.verify.checks import CheckContext, check_throughput
+from llmsetup.verify.client import ChatResult
 
 
 @pytest.fixture
@@ -135,3 +142,50 @@ def test_split_source_includes_all_shards(catalog, tmp_path):
         (tmp_path / f"model-{index:05d}-of-00002.gguf").write_bytes(b"GGUF")
     # The real CLI's glob import is exercised separately in test_ollama_live.py.
     assert f"FROM {tmp_path / 'model-?????-of-00002.gguf'}\n" in OllamaRuntime().modelfile(spec, config)
+
+
+@pytest.mark.parametrize("runtime_name", ["ollama", "llamacpp"])
+@pytest.mark.parametrize("fraction", [0.0, 0.5, 1.0])
+def test_planned_offload_adapter_memory_and_prediction_agree(
+        catalog, monkeypatch, runtime_name, fraction):
+    hardware = make_hardware(vram_gb=24)
+    profile = UseCaseProfile(tasks=[Task.CODING], context_tokens=8192)
+    plan = build_plan(profile, hardware, catalog.restrict_to("qwen2.5-coder-7b"),
+                      runtime=runtime_name)
+    candidate = plan.best
+    assert candidate.gpu_fraction == 1.0
+    config = tune(candidate, hardware, profile, runtime_name, catalog=catalog).config
+    assert config.gpu_layers == config.total_layers == candidate.model.layers == 28
+    config.gpu_layers = round(config.total_layers * fraction)
+
+    # The retained 0.40.11 log has -ngl 28 -> 28/29. Binary inspection confirms
+    # the complete runtime count is n_layer + 1; no live residency is inferred.
+    expected_count = 29 if fraction == 1.0 else config.gpu_layers
+    if runtime_name == "ollama":
+        assert f"PARAMETER num_gpu {expected_count}\n" in OllamaRuntime().modelfile(
+            candidate.model, config)
+    else:
+        runtime = LlamaCppRuntime()
+        monkeypatch.setattr(runtime, "_flags", lambda *a: set())
+        command = runtime.launch_command(candidate.model, config)
+        assert command[command.index("--n-gpu-layers") + 1] == str(expected_count)
+
+    # Output and model weights were already budgeted; runtime translation must
+    # neither add a transformer KV layer nor change the planner's memory budget.
+    estimate = candidate.estimate
+    assert estimate.weights == weight_bytes(candidate.model, catalog.bpw(candidate.quant))
+    assert estimate.kv_cache == kv_cache_bytes(candidate.model, estimate.context_tokens,
+                                              estimate.kv_quant)
+    assert estimate.overhead == overhead_bytes(candidate.model, runtime_name)
+    fractions = []
+
+    def predict(hardware, active_bytes, gpu_fraction):
+        fractions.append(gpu_fraction)
+        return 50.0
+
+    monkeypatch.setattr("llmsetup.verify.checks.estimate_tokens_per_second", predict)
+    client = SimpleNamespace(chat=lambda *a, **kw: ChatResult(
+        ok=True, text="sample", completion_tokens=100, latency_s=2.0))
+    result = check_throughput(CheckContext(client, candidate.model, config, profile, hardware))
+    assert fractions == [fraction]
+    assert result.metrics["predicted_tokens_per_second"] == 50.0

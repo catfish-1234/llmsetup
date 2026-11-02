@@ -522,6 +522,20 @@ class RuntimeConfig:
     def full_gpu_offload(self) -> bool:
         return self.gpu_layers >= self.total_layers
 
+    @property
+    def llama_gpu_layers(self) -> int:
+        """Translate planned layers to llama.cpp's count, including output.
+
+        The retained Ollama 0.40.11 log maps num_gpu=28 to -ngl 28 and
+        reports 28/29 offloaded (output plus 27 repeating layers). Its bundled
+        llama_model::n_gpu_layers/load_tensors code counts n_layer + 1 for all.
+        Keep that extra runtime layer out of planner fractions and KV sizing.
+        Partial requests retain their existing runtime count.
+        """
+        if self.total_layers > 0 and self.full_gpu_offload:
+            return self.total_layers + 1
+        return self.gpu_layers
+
     def copy(self) -> "RuntimeConfig":
         import copy as _copy
 
