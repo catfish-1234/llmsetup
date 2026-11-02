@@ -141,7 +141,7 @@ def test_uncached_initial_plan_stops_before_provision_or_recovery(setup, monkeyp
 
 
 def test_cached_initial_plan_allows_local_ollama_import(setup):
-    instance, runtime, spec, create, start = setup
+    instance, _runtime, spec, create, start = setup
     path = retain(spec)
     result = instance.run()
     assert result.succeeded
@@ -157,7 +157,7 @@ def test_cached_initial_plan_allows_local_ollama_import(setup):
 
 
 def test_flag_absent_keeps_existing_fetch_path(setup, monkeypatch, tmp_path):
-    instance, runtime, spec, create, start = setup
+    instance, _runtime, spec, create, _start = setup
     instance.cached_only = False
     path = tmp_path / "downloaded.gguf"
     path.write_bytes(b"GGUF")
@@ -171,7 +171,7 @@ def test_flag_absent_keeps_existing_fetch_path(setup, monkeypatch, tmp_path):
 
 @pytest.mark.parametrize("mismatch", ["quant", "model", "revision", "incomplete-shards"])
 def test_cache_identity_must_match_exactly(setup, mismatch):
-    instance, runtime, spec, create, start = setup
+    instance, _runtime, spec, create, start = setup
     if mismatch == "quant":
         retain(spec, "Q5_K_M")
     elif mismatch == "model":
@@ -213,7 +213,7 @@ def test_cached_llamacpp_uses_exact_local_path(catalog, no_fetch):
 
 
 def test_cached_shards_import_together(setup):
-    instance, runtime, spec, create, start = setup
+    instance, _runtime, spec, create, _start = setup
     first = retain(spec, filename="model-00001-of-00002.gguf")
     retain(spec, filename="model-00002-of-00002.gguf")
     assert instance.run().succeeded
@@ -245,7 +245,7 @@ def test_repair_reprovision_cannot_reuse_stale_weights(setup, catalog, monkeypat
 
 
 def test_real_repair_loop_fallback_stops_on_uncached_candidate(setup, catalog, monkeypatch):
-    instance, runtime, spec, create, start = setup
+    instance, _runtime, spec, create, start = setup
     retain(spec)
     other = catalog.require("qwen3-4b")
     instance.catalog = Catalog([spec, other], catalog.quant_bpw)
@@ -287,7 +287,7 @@ def test_retry_rechecks_cache_if_weights_disappear(setup, monkeypatch):
 
 @pytest.mark.parametrize("cached", [False, True])
 def test_draft_model_respects_cached_only(setup, cached):
-    instance, runtime, spec, create, start = setup
+    instance, runtime, spec, _create, _start = setup
     draft = SimpleNamespace(needs_draft_model=True, draft_model_id=spec.id,
                             draft_quant="Q4_K_M", draft_path=None, spec_type=SpecType.DRAFT)
     config = RuntimeConfig("ollama", spec.id, "Q4_K_M", 8192,
@@ -327,7 +327,7 @@ def test_embedding_retry_cannot_fetch_an_uncached_model(setup, monkeypatch):
 
 
 def test_cached_only_never_uses_an_unverified_runtime_cache(setup, monkeypatch):
-    instance, runtime, spec, create, start = setup
+    instance, _runtime, spec, _create, _start = setup
     retain(spec)
     instance._runtime = SimpleNamespace(name="vllm", ensure_model=Mock())
     config = RuntimeConfig("vllm", spec.id, "Q4_K_M", 8192)
@@ -365,7 +365,7 @@ def test_cli_cached_only_is_separate_from_catalog_offline_flag():
 @pytest.mark.parametrize("command", ["setup", "doctor"])
 def test_cli_passes_guard_and_reports_a_blocking_cache_error(setup, monkeypatch,
                                                            tmp_path, capsys, command):
-    instance, runtime, spec, create, start = setup
+    instance, _runtime, spec, create, start = setup
     monkeypatch.setattr("llmsetup.cli.detect_hardware", lambda **kw: instance.hardware)
     monkeypatch.setattr("llmsetup.cli.load_catalog", lambda **kw: instance.catalog)
     monkeypatch.setenv("LLMSETUP_AUTO_UPDATE", "0")
