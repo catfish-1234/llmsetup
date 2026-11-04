@@ -26,7 +26,7 @@ from llmsetup.util.fs import app_dir, ensure_dir, write_text
 from llmsetup.util.units import human_bytes
 
 HF_ENDPOINT = os.environ.get("HF_ENDPOINT", "https://huggingface.co").rstrip("/")
-USER_AGENT = "llmsetup/0.1 (+https://github.com/catfish-1234/open-source-llm)"
+USER_AGENT = "llmsetup/0.1 (+https://github.com/catfish-1234/llmsetup)"
 CHUNK = 1024 * 1024
 
 

@@ -8,7 +8,7 @@ time. Use a supported Python interpreter and current inference engines.
 
 ## Report a vulnerability privately
 
-Use [GitHub private vulnerability reporting](https://github.com/catfish-1234/Open-source-llm/security/advisories/new)
+Use [GitHub private vulnerability reporting](https://github.com/catfish-1234/llmsetup/security/advisories/new)
 if the repository offers it. If that control is unavailable, open an issue
 requesting a private reporting channel **without vulnerability details**, and
 wait for a maintainer to provide one. Do not put an exploit, access token,
