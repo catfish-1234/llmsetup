@@ -5,7 +5,7 @@ LLMs under Apache-2.0. The distribution name, Python import, and CLI command are
 all `llmsetup`. The version remains `0.1.0`.
 
 The source repository stays at
-[catfish-1234/Open-source-llm](https://github.com/catfish-1234/Open-source-llm).
+[catfish-1234/llmsetup](https://github.com/catfish-1234/llmsetup).
 The GitHub repository is not being renamed. Install from that repository;
 this rename does not publish a package, create a tag, or create a release.
 
