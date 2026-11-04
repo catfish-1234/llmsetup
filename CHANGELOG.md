@@ -173,19 +173,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - A `doctor` command to re-test and repair an existing setup.
 - A local browser UI served over loopback.
 
-[Unreleased]: https://github.com/catfish-1234/Open-source-llm/compare/9937189e39c46810d35a4b531ddf7964ce5dff35...HEAD
-[0.1.0]: https://github.com/catfish-1234/Open-source-llm/pull/1
-[#2]: https://github.com/catfish-1234/Open-source-llm/pull/2
-[#3]: https://github.com/catfish-1234/Open-source-llm/pull/3
-[#4]: https://github.com/catfish-1234/Open-source-llm/pull/4
-[#5]: https://github.com/catfish-1234/Open-source-llm/pull/5
-[#6]: https://github.com/catfish-1234/Open-source-llm/pull/6
-[#7]: https://github.com/catfish-1234/Open-source-llm/pull/7
-[#8]: https://github.com/catfish-1234/Open-source-llm/pull/8
-[#9]: https://github.com/catfish-1234/Open-source-llm/pull/9
-[#10]: https://github.com/catfish-1234/Open-source-llm/pull/10
-[#11]: https://github.com/catfish-1234/Open-source-llm/pull/11
-[#12]: https://github.com/catfish-1234/Open-source-llm/pull/12
-[#14]: https://github.com/catfish-1234/Open-source-llm/pull/14
-[#15]: https://github.com/catfish-1234/Open-source-llm/pull/15
-[#17]: https://github.com/catfish-1234/Open-source-llm/pull/17
+[Unreleased]: https://github.com/catfish-1234/llmsetup/compare/9937189e39c46810d35a4b531ddf7964ce5dff35...HEAD
+[0.1.0]: https://github.com/catfish-1234/llmsetup/pull/1
+[#2]: https://github.com/catfish-1234/llmsetup/pull/2
+[#3]: https://github.com/catfish-1234/llmsetup/pull/3
+[#4]: https://github.com/catfish-1234/llmsetup/pull/4
+[#5]: https://github.com/catfish-1234/llmsetup/pull/5
+[#6]: https://github.com/catfish-1234/llmsetup/pull/6
+[#7]: https://github.com/catfish-1234/llmsetup/pull/7
+[#8]: https://github.com/catfish-1234/llmsetup/pull/8
+[#9]: https://github.com/catfish-1234/llmsetup/pull/9
+[#10]: https://github.com/catfish-1234/llmsetup/pull/10
+[#11]: https://github.com/catfish-1234/llmsetup/pull/11
+[#12]: https://github.com/catfish-1234/llmsetup/pull/12
+[#14]: https://github.com/catfish-1234/llmsetup/pull/14
+[#15]: https://github.com/catfish-1234/llmsetup/pull/15
+[#17]: https://github.com/catfish-1234/llmsetup/pull/17

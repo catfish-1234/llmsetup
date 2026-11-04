@@ -38,7 +38,7 @@ from llmsetup.util.log import Console
 #: main, which a scheduled workflow keeps current, so the repo is the
 #: distribution channel and there is no extra infrastructure to run.
 DEFAULT_CATALOG_URL = (
-    "https://raw.githubusercontent.com/catfish-1234/Open-source-llm/"
+    "https://raw.githubusercontent.com/catfish-1234/llmsetup/"
     "main/src/llmsetup/catalog/data/models.yaml"
 )
 
