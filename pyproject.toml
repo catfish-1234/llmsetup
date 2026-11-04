@@ -42,10 +42,10 @@ dev = ["pytest>=7", "pytest-cov>=4", "ruff==0.17.1"]
 llmsetup = "llmsetup.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/catfish-1234/Open-source-llm"
-Source = "https://github.com/catfish-1234/Open-source-llm"
-Issues = "https://github.com/catfish-1234/Open-source-llm/issues"
-Documentation = "https://github.com/catfish-1234/Open-source-llm#readme"
+Homepage = "https://github.com/catfish-1234/llmsetup"
+Source = "https://github.com/catfish-1234/llmsetup"
+Issues = "https://github.com/catfish-1234/llmsetup/issues"
+Documentation = "https://github.com/catfish-1234/llmsetup#readme"
 
 [tool.setuptools.packages.find]
 where = ["src"]

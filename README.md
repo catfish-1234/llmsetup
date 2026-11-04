@@ -10,7 +10,7 @@ When something fails, it tries repairs and fallback options automatically.
 It only gives you a manual step after those options have failed.
 
 This is the Python project at
-[catfish-1234/Open-source-llm](https://github.com/catfish-1234/Open-source-llm),
+[catfish-1234/llmsetup](https://github.com/catfish-1234/llmsetup),
 licensed under Apache-2.0. It was renamed from llmfit to avoid confusion with the
 unrelated [AlexsJones/llmfit](https://github.com/AlexsJones/llmfit) Rust project.
 See [the name change and migration notes](docs/POSITIONING.md).
@@ -23,8 +23,8 @@ repository; the renamed package has not been published to PyPI. You need
 repository access to clone it.
 
 ```bash
-git clone https://github.com/catfish-1234/Open-source-llm.git
-cd Open-source-llm
+git clone https://github.com/catfish-1234/llmsetup.git
+cd llmsetup
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install .
