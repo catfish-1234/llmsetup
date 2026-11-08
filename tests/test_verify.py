@@ -482,3 +482,26 @@ class TestVerifySummaryLine:
 
         results = [CheckResult(name="a", status=CheckStatus.PASS)]
         assert _check_summary_line(results) == "1/1 checks passed"
+
+
+class TestEndpointBaseUrl:
+    """A pasted OpenAI-style base URL ending in /v1 must not double the prefix."""
+
+    def test_trailing_v1_suffix_is_dropped(self):
+        from llmsetup.runtimes.base import Endpoint
+
+        ep = Endpoint(base_url="http://127.0.0.1:1234/v1", model="m", runtime="x")
+        assert ep.models_url == "http://127.0.0.1:1234/v1/models"
+        assert ep.chat_url == "http://127.0.0.1:1234/v1/chat/completions"
+
+    def test_trailing_slash_and_v1_suffix_are_dropped(self):
+        from llmsetup.runtimes.base import Endpoint
+
+        ep = Endpoint(base_url="http://127.0.0.1:1234/v1/", model="m", runtime="x")
+        assert ep.models_url == "http://127.0.0.1:1234/v1/models"
+
+    def test_plain_host_port_is_untouched(self):
+        from llmsetup.runtimes.base import Endpoint
+
+        ep = Endpoint(base_url="http://127.0.0.1:11434", model="m", runtime="x")
+        assert ep.models_url == "http://127.0.0.1:11434/v1/models"
