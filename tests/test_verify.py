@@ -446,3 +446,39 @@ class TestShapelessTruncation:
         result = check_streaming(ctx)
         assert result.status is CheckStatus.PASS
         assert result.metrics["chunks"] == 2
+
+
+class TestVerifySummaryLine:
+    """The terminal tally must not count skipped or warned checks as passed."""
+
+    def test_skips_after_a_critical_failure_are_not_passes(self):
+        from llmsetup.cli import _check_summary_line
+        from llmsetup.types import CheckResult
+
+        results = [
+            CheckResult(name="health", status=CheckStatus.PASS),
+            CheckResult(name="completion", status=CheckStatus.FAIL,
+                        severity=Severity.CRITICAL),
+            *[CheckResult(name=f"later{i}", status=CheckStatus.SKIP)
+              for i in range(7)],
+        ]
+        assert _check_summary_line(results) == \
+            "1/9 checks passed (1 failed, 7 skipped)"
+
+    def test_warnings_are_not_passes_either(self):
+        from llmsetup.cli import _check_summary_line
+        from llmsetup.types import CheckResult
+
+        results = [
+            CheckResult(name="a", status=CheckStatus.PASS),
+            CheckResult(name="b", status=CheckStatus.WARN),
+        ]
+        assert _check_summary_line(results) == \
+            "1/2 checks passed (1 warning(s))"
+
+    def test_all_pass_has_no_breakdown(self):
+        from llmsetup.cli import _check_summary_line
+        from llmsetup.types import CheckResult
+
+        results = [CheckResult(name="a", status=CheckStatus.PASS)]
+        assert _check_summary_line(results) == "1/1 checks passed"

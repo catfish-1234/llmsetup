@@ -417,6 +417,27 @@ def cmd_setup(args, console: Console) -> int:
     return 0 if result.succeeded else 1
 
 
+def _check_summary_line(results: List) -> str:
+    """The terminal tally line. Only actual passes count as passed: a check
+    skipped after an early critical failure is not a pass, and neither is a
+    warning."""
+    from llmsetup.types import CheckStatus
+
+    passed = sum(1 for r in results if r.status is CheckStatus.PASS)
+    skipped = sum(1 for r in results if r.status is CheckStatus.SKIP)
+    warned = sum(1 for r in results if r.status is CheckStatus.WARN)
+    failed_count = len(results) - passed - skipped - warned
+    parts = []
+    if failed_count:
+        parts.append(f"{failed_count} failed")
+    if warned:
+        parts.append(f"{warned} warning(s)")
+    if skipped:
+        parts.append(f"{skipped} skipped")
+    detail = f" ({', '.join(parts)})" if parts else ""
+    return f"{passed}/{len(results)} checks passed{detail}"
+
+
 def cmd_verify(args, console: Console) -> int:
     from llmsetup.runtimes.base import Endpoint
     from llmsetup.verify.client import OpenAIClient
@@ -442,9 +463,7 @@ def cmd_verify(args, console: Console) -> int:
         print(json.dumps([r.to_dict() for r in results], indent=2))
     failed = [r for r in results if r.blocking]
     console.print()
-    console.print(console.bold(
-        f"{len(results) - len(failed)}/{len(results)} checks passed"
-    ))
+    console.print(console.bold(_check_summary_line(results)))
     return 1 if failed else 0
 
 
