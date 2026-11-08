@@ -18,9 +18,14 @@ See [the name change and migration notes](docs/POSITIONING.md).
 ## Install
 
 Use Python 3.9 or newer, preferably a version that still receives security
-updates. PyYAML is the only runtime Python dependency. Install from this
-repository; the renamed package has not been published to PyPI. You need
-repository access to clone it.
+updates. PyYAML is the only runtime Python dependency.
+
+```bash
+python -m pip install llmsetup
+llmsetup --version
+```
+
+To install from source instead:
 
 ```bash
 git clone https://github.com/catfish-1234/llmsetup.git
