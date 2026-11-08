@@ -15,14 +15,29 @@ from contextlib import contextmanager
 
 import pytest
 
+from conftest import make_hardware
+
 from llmsetup.ui.server import STATIC, Handler, UiServer, _setup_command
 from llmsetup.util.log import Console
 
 
 @contextmanager
-def running_server():
-    """A real server on an ephemeral port, torn down afterwards."""
+def running_server(hardware=None):
+    """A real server on an ephemeral port, torn down afterwards.
+
+    Pass a hardware profile to pin the machine the API plans for. Without one
+    the server detects the host, so plan assertions would depend on how much
+    memory the machine running the tests happens to have."""
     server = UiServer(("127.0.0.1", 0), Handler, Console(quiet=True))
+    if hardware is not None:
+        server.cache["hardware_obj"] = hardware
+        server.cache["hardware"] = {
+            **hardware.to_dict(),
+            "summary": "test machine",
+            "bandwidth": "",
+            "memory_budget": hardware.memory_budget,
+            "memory_budget_gb": round(hardware.memory_budget / (1024 ** 3), 1),
+        }
     server.allowed_hosts = {f"127.0.0.1:{server.server_address[1]}", "127.0.0.1"}
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -163,7 +178,7 @@ class TestApi:
             assert {"ollama", "llamacpp", "vllm"} <= names
 
     def test_plan_returns_ranked_candidates_with_a_memory_breakdown(self):
-        with running_server() as base:
+        with running_server(hardware=make_hardware()) as base:
             data = post(base + "/api/plan",
                         {"tasks": ["coding"], "context_tokens": 8192})
             assert data.get("candidates")
@@ -175,7 +190,7 @@ class TestApi:
             assert memory["total_gb"] >= memory["weights_gb"]
 
     def test_plan_shortens_oversized_context_and_reports_the_change(self):
-        with running_server() as base:
+        with running_server(hardware=make_hardware()) as base:
             data = post(base + "/api/plan",
                         {"tasks": ["chat"], "needs_vision": True,
                          "context_tokens": 900_000})
@@ -183,6 +198,18 @@ class TestApi:
             assert data["profile"]["context_tokens"] < 900_000
             assert data["profile"]["needs_vision"]
             assert any("automatically using" in note for note in data["notes"])
+
+    def test_plan_on_a_tiny_machine_explains_that_nothing_fits(self):
+        """When no candidate fits, the API says so with a next step instead
+        of returning an empty or broken ranking."""
+        tiny = make_hardware(vram_gb=0, ram_gb=2)
+        with running_server(hardware=tiny) as base:
+            data = post(base + "/api/plan",
+                        {"tasks": ["chat"], "needs_vision": True,
+                         "context_tokens": 900_000})
+            assert data.get("error")
+            assert "memory" in data["error"]
+            assert data.get("hint")
 
     def test_plan_rejects_invalid_answers_with_an_explanation(self):
         with running_server() as base:
