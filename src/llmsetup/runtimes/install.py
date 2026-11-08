@@ -174,7 +174,7 @@ def install_llamacpp(hardware: HardwareProfile, console: Console,
             try:
                 if time.monotonic() >= deadline:
                     raise TimeoutError("runtime download timed out after 300s")
-                request = urllib.request.Request(url, headers={"User-Agent": "llmsetup/0.1.0"})
+                request = urllib.request.Request(url, headers={"User-Agent": "llmsetup/0.1.1"})
                 with urllib.request.urlopen(request, timeout=min(30, deadline - time.monotonic())) as response, archive.open("wb") as out:
                     sha = hashlib.sha256()
                     size = 0

@@ -8,7 +8,7 @@ from llmsetup.catalog.catalog import load_catalog
 metadata = importlib.metadata.metadata("llmsetup")
 distribution = importlib.metadata.distribution("llmsetup")
 assert metadata["Name"] == "llmsetup"
-assert metadata["Version"] == "0.1.0"
+assert metadata["Version"] == "0.1.1"
 assert distribution.read_text("top_level.txt").strip() == "llmsetup"
 assert {entry.name: entry.value for entry in distribution.entry_points
         if entry.group == "console_scripts"} == {"llmsetup": "llmsetup.cli:main"}
