@@ -37,6 +37,15 @@ class Endpoint:
     process: Any = None            # subprocess.Popen when we launched it
     command: List[str] = field(default_factory=list)
 
+    def __post_init__(self) -> None:
+        # Users paste the OpenAI-style base URL from a server's docs, which
+        # includes the /v1 suffix; this client appends /v1 itself, so a pasted
+        # suffix would double it and 404 every request with a misleading
+        # "server is not answering" health failure. Drop it instead.
+        self.base_url = self.base_url.rstrip("/")
+        if self.base_url.lower().endswith("/v1"):
+            self.base_url = self.base_url[:-3]
+
     @property
     def chat_url(self) -> str:
         return f"{self.base_url.rstrip('/')}/v1/chat/completions"
