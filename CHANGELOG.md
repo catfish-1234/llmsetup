@@ -6,6 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-08
+
+### Added
+
+- Published to PyPI. `python -m pip install llmsetup` now works, and tagged
+  releases publish through GitHub Actions with trusted publishing.
+
 ### Changed
 
 - Context now follows how the model will be used instead of a fixed 8K. Coding
