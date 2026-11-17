@@ -28,7 +28,7 @@ from typing import Any, Dict, List, Optional, Sequence
 
 from llmsetup.download import (
     HF_ENDPOINT,
-    _auth_headers,
+    hub_request,
     pin_revision,
     saved_revision,
     validate_repo,
@@ -139,7 +139,7 @@ class Candidate:
 def _get_json(url: str, timeout: float = 20.0) -> Optional[Any]:
     """GET and parse JSON. Returns None on any failure, because discovery is best-effort."""
     try:
-        request = urllib.request.Request(url, headers=_auth_headers())
+        request = hub_request(url)
         with urllib.request.urlopen(request, timeout=timeout) as response:
             return json.loads(response.read().decode("utf-8"))
     except (urllib.error.URLError, urllib.error.HTTPError, OSError, ValueError):

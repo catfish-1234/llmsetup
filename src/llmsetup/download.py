@@ -19,7 +19,7 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, List, Optional
+from typing import Callable, Dict, List, Optional
 
 from llmsetup.util.errors import ProvisionError
 from llmsetup.util.fs import app_dir, ensure_dir, write_text
@@ -74,13 +74,22 @@ def validate_repo(repo: str) -> str:
     return text
 
 
-def _auth_headers() -> dict:
-    headers = {"User-Agent": USER_AGENT}
+def hub_request(url: str, headers: Optional[Dict[str, str]] = None) -> urllib.request.Request:
+    """A Hub request whose token cannot follow a redirect to another host.
+
+    The token is needed for gated repos (Llama, Gemma) the user has already
+    accepted. Hub downloads redirect to a CDN, and urllib copies ordinary
+    headers onto every redirect, so a plain ``Authorization`` header would be
+    replayed to whichever host the redirect names, including one chosen by a
+    misbehaving ``HF_ENDPOINT`` mirror. An unredirected header is never copied.
+    :class:`llmsetup.util.http.CredentialSafeRedirectHandler`, installed by the
+    CLI, restores it for redirects that stay on the same scheme, host and port.
+    """
+    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, **(headers or {})})
     token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
     if token:
-        # Needed for gated repos (Llama, Gemma) the user has already accepted.
-        headers["Authorization"] = f"Bearer {token}"
-    return headers
+        request.add_unredirected_header("Authorization", f"Bearer {token}")
+    return request
 
 
 def validate_revision(revision: Optional[str]) -> str:
@@ -118,7 +127,7 @@ def _repo_info(repo: str, revision: Optional[str] = None, timeout: float = 30.0)
     url = f"{HF_ENDPOINT}/api/models/{urllib.parse.quote(validate_repo(repo), safe='/')}"
     if revision:
         url += f"/revision/{validate_revision(revision)}"
-    req = urllib.request.Request(url, headers=_auth_headers())
+    req = hub_request(url)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             data = json.loads(resp.read().decode("utf-8"))
@@ -307,14 +316,12 @@ def download_file(
         if remote.size is not None and existing > remote.size:
             part.unlink()
             existing = 0
-        headers = _auth_headers()
-        if existing:
-            headers["Range"] = f"bytes={existing}-"
+        headers = {"Range": f"bytes={existing}-"} if existing else {}
 
         try:
             if time.monotonic() >= deadline:
                 raise TimeoutError(f"download timed out after {total_timeout:g}s")
-            req = urllib.request.Request(remote.url, headers=headers)
+            req = hub_request(remote.url, headers)
             with urllib.request.urlopen(req, timeout=min(timeout, deadline - time.monotonic())) as resp:
                 # A server that ignores Range restarts the file; don't append to it.
                 mode = "ab" if (existing and resp.status == 206) else "wb"

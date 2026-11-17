@@ -194,3 +194,97 @@ class TestLinkSafety:
         link_or_copy(source, link)
 
         assert target.read_bytes() == b"original"
+
+
+class TestCredentialRedirects:
+    """The Hugging Face token must not follow a redirect to another host."""
+
+    @staticmethod
+    def _servers(redirect_to):
+        import threading
+        from http.server import BaseHTTPRequestHandler, HTTPServer
+
+        seen = {}
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def do_GET(self):
+                key = (self.server.server_address[1], self.path)
+                seen[key] = self.headers.get("Authorization")
+                if self.path == "/start":
+                    self.send_response(302)
+                    self.send_header("Location", redirect_to(self.server.server_address[1]))
+                    self.end_headers()
+                    return
+                body = b"{}"
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        servers = [HTTPServer(("127.0.0.1", 0), Handler) for _ in range(2)]
+        for server in servers:
+            threading.Thread(target=server.serve_forever, daemon=True).start()
+        return servers, seen
+
+    @pytest.mark.parametrize("installed", [False, True])
+    def test_token_is_dropped_on_cross_host_redirect(self, monkeypatch, installed):
+        import urllib.request
+
+        from llmsetup.download import hub_request
+        from llmsetup.util.http import install_credential_safe_redirects
+
+        monkeypatch.setenv("HF_TOKEN", "hf_secret")
+        monkeypatch.setattr(urllib.request, "_opener", None)
+        other = {}
+        servers, seen = self._servers(lambda port: f"http://127.0.0.1:{other['port']}/cdn")
+        other["port"] = servers[1].server_address[1]
+        try:
+            if installed:
+                install_credential_safe_redirects()
+            start = f"http://127.0.0.1:{servers[0].server_address[1]}/start"
+            with urllib.request.urlopen(hub_request(start), timeout=5) as response:
+                assert response.status == 200
+        finally:
+            for server in servers:
+                server.shutdown()
+            urllib.request.install_opener(None)
+        assert seen[(servers[0].server_address[1], "/start")] == "Bearer hf_secret"
+        assert seen[(other["port"], "/cdn")] is None
+
+    def test_token_survives_same_origin_redirect_with_safe_handler(self, monkeypatch):
+        import urllib.request
+
+        from llmsetup.download import hub_request
+        from llmsetup.util.http import install_credential_safe_redirects
+
+        monkeypatch.setenv("HF_TOKEN", "hf_secret")
+        servers, seen = self._servers(lambda port: f"http://127.0.0.1:{port}/renamed")
+        port = servers[0].server_address[1]
+        try:
+            install_credential_safe_redirects()
+            with urllib.request.urlopen(hub_request(f"http://127.0.0.1:{port}/start"),
+                                        timeout=5) as response:
+                assert response.status == 200
+        finally:
+            for server in servers:
+                server.shutdown()
+            urllib.request.install_opener(None)
+        assert seen[(port, "/renamed")] == "Bearer hf_secret"
+
+    def test_https_to_http_downgrade_is_refused(self):
+        import io
+        import urllib.error
+        import urllib.request
+        from email.message import Message
+
+        from llmsetup.util.http import CredentialSafeRedirectHandler
+
+        request = urllib.request.Request("https://huggingface.co/a/b/resolve/x/m.gguf")
+        headers = Message()
+        headers["Location"] = "http://evil.example/m.gguf"
+        with pytest.raises(urllib.error.HTTPError, match="HTTPS to http"):
+            CredentialSafeRedirectHandler().redirect_request(
+                request, io.BytesIO(), 302, "Found", headers, "http://evil.example/m.gguf")

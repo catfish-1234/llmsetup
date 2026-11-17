@@ -56,6 +56,9 @@ def _positive_int(value: str) -> int:
 def main(argv: Optional[List[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    from llmsetup.util.http import install_credential_safe_redirects
+
+    install_credential_safe_redirects()
     console = Console(quiet=getattr(args, "quiet", False),
                       verbose=getattr(args, "verbose", False))
 

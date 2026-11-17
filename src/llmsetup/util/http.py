@@ -13,6 +13,7 @@ import json as _json
 import socket
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Iterator, Optional
@@ -121,6 +122,52 @@ def wait_for(
         if raise_errors:
             raise
         return False
+
+
+def _origin(url: str) -> tuple:
+    parts = urllib.parse.urlsplit(url)
+    default = {"http": 80, "https": 443}.get(parts.scheme)
+    try:
+        port = parts.port or default
+    except ValueError:
+        port = None
+    return parts.scheme.lower(), (parts.hostname or "").lower(), port
+
+
+class CredentialSafeRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Redirects that cannot leak credentials or downgrade the transport.
+
+    The standard handler copies every ordinary header onto the redirected
+    request, so a token in ``Authorization`` is replayed to whatever host the
+    redirect names. Credentials here travel as unredirected headers, which the
+    standard handler drops on every redirect. This handler puts them back only
+    when the redirect stays on the same scheme, host and port, which is what a
+    renamed Hugging Face repo needs, and refuses an HTTPS to HTTP downgrade.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        new = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if new is None:
+            return None
+        old_origin, new_origin = _origin(req.full_url), _origin(new.full_url)
+        if old_origin[0] == "https" and new_origin[0] != "https":
+            raise urllib.error.HTTPError(
+                newurl, code, f"refusing to follow a redirect from HTTPS to {new_origin[0]}",
+                headers, fp)
+        if old_origin == new_origin:
+            for name, value in req.unredirected_hdrs.items():
+                if name.lower() in ("authorization", "proxy-authorization"):
+                    new.add_unredirected_header(name, value)
+        return new
+
+
+def install_credential_safe_redirects() -> None:
+    """Make ``urllib.request.urlopen`` use :class:`CredentialSafeRedirectHandler`.
+
+    Called once by the CLI. Library callers get the safe default regardless:
+    credentials sent as unredirected headers never follow a redirect at all.
+    """
+    urllib.request.install_opener(urllib.request.build_opener(CredentialSafeRedirectHandler))
 
 
 def port_is_free(host: str, port: int) -> bool:
