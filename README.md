@@ -68,6 +68,9 @@ llmsetup setup --task coding --context 8192 --yes
 
 # Read the saved settings, checks, repair history, and launch command.
 llmsetup report
+
+# Start the last verified setup again, exactly as it was tested.
+llmsetup start
 ```
 
 `--task` is repeatable, for example `--task coding --task agent`. `--context`
@@ -113,8 +116,12 @@ provisioning attempts, installation, and runtime fallback. Download transport
 retries still apply. A preferred `--runtime` may change during recovery.
 
 After verification, llmsetup stops servers it started. Shared Ollama and
-LM Studio daemons keep running. The report includes a command to start the model
-again; generated client snippets need a running endpoint.
+LM Studio daemons keep running. `llmsetup start` runs the verified model again
+in the foreground with the exact command setup tested, nothing re-planned;
+`llmsetup start --print` prints that command instead. For Ollama and LM Studio
+it shows the endpoint, since their daemons serve the model on demand. Only a
+setup whose checks passed can be started this way; after changing anything,
+run `llmsetup doctor`. Generated client snippets need a running endpoint.
 
 ## Other commands
 

@@ -8,6 +8,7 @@ inspected on its own:
     llmsetup plan        what would you pick, and why?
     llmsetup verify      does my current endpoint actually work?
     llmsetup doctor      re-test and repair an existing setup
+    llmsetup start       start the last verified setup again
     llmsetup export      register an existing model with my other apps
     llmsetup catalog     inspect or extend the model list
 """
@@ -43,7 +44,7 @@ from llmsetup.util.log import Console, write_console
 from llmsetup.util.proc import format_command
 from llmsetup.util.units import gb
 
-VERSION = "0.1.1"
+VERSION = "0.2.0"
 
 
 def _positive_int(value: str) -> int:
@@ -66,7 +67,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "setup": cmd_setup, "detect": cmd_detect, "plan": cmd_plan,
         "verify": cmd_verify, "doctor": cmd_doctor, "export": cmd_export,
         "catalog": cmd_catalog, "runtimes": cmd_runtimes, "ui": cmd_ui,
-        "report": cmd_report,
+        "report": cmd_report, "start": cmd_start,
     }.get(args.command)
 
     if handler is None:
@@ -204,6 +205,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_doctor.add_argument("--profile", type=Path, help="saved setup JSON to re-test")
     p_doctor.add_argument("--cached-only", action="store_true",
                           help="require retained model weights, including every repair fallback")
+
+    p_start = sub.add_parser(
+        "start", help="start the last verified setup again, exactly as it was tested")
+    common(p_start)
+    p_start.add_argument("--setup", type=Path, help="saved setup JSON to start")
+    p_start.add_argument("--print", dest="print_only", action="store_true",
+                         help="print the launch command instead of running it")
 
     p_report = sub.add_parser(
         "report", help="reprint the last setup's report (paste this into a bug report)")
@@ -816,6 +824,24 @@ def cmd_report(args, console: Console) -> int:
     return 0
 
 
+def cmd_start(args, console: Console) -> int:
+    """Run the last verified setup again, with the exact command it was tested with."""
+    from llmsetup.launch import load_launch, start
+    from llmsetup.util.fs import read_json
+
+    path = args.setup or (app_dir() / "last-setup.json")
+    if not Path(path).exists():
+        raise LlmsetupError(
+            f"no saved setup at {path}",
+            hint="run `llmsetup setup` first; a verified run records how to start it",
+        )
+    record = load_launch(read_json(Path(path)), Path(path))
+    if args.json:
+        print(json.dumps(record, indent=2))
+        return 0
+    return start(record, console, print_only=args.print_only)
+
+
 def _save_last(result) -> None:
     """Record the run so `llmsetup doctor` can re-test it and `llmsetup report` can
     reprint it.
@@ -828,7 +854,13 @@ def _save_last(result) -> None:
 
     try:
         directory = ensure_dir(app_dir())
-        write_json(directory / "last-setup.json", result.to_dict())
+        from llmsetup.launch import launch_record
+
+        record = result.to_dict()
+        launch = launch_record(result)
+        if launch is not None:
+            record["launch"] = launch
+        write_json(directory / "last-setup.json", record)
         write_text(directory / "last-report.md", render_markdown(result))
     except OSError:
         pass
