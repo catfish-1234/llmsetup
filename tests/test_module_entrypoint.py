@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 
-@pytest.mark.parametrize("flag,expected", [("--version", "llmsetup 0.1.1"),
+@pytest.mark.parametrize("flag,expected", [("--version", "llmsetup 0.2.0"),
                                            ("--help", "Pick, tune, verify")])
 def test_module_entrypoint(flag, expected):
     source = Path(__file__).resolve().parents[1] / "src"

@@ -6,6 +6,47 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-17
+
+### Added
+
+- `llmsetup start` runs the last verified setup again in the foreground, with
+  the exact command setup tested: nothing is re-planned or re-tuned, so what
+  starts is what passed. `--print` prints the command instead, and `--json`
+  prints the launch record. Ollama and LM Studio setups show the endpoint
+  instead, since their shared daemons serve the model on demand. The command
+  checks that the runtime is still installed and the port is free before it
+  starts. Only a run whose checks passed records a launch command; an older
+  saved setup or a failed one points to `llmsetup doctor`.
+
+### Security
+
+- The Hugging Face token no longer follows a redirect to another host.
+  urllib copies ordinary headers onto every redirect, so `HF_TOKEN` was
+  replayed to the CDN a download redirects to, and to any host an
+  `HF_ENDPOINT` mirror redirected to. The token is now an unredirected
+  header, restored only for redirects to the same scheme, host and port (a
+  renamed repo), and an HTTPS to HTTP redirect is refused.
+- The local UI refuses requests a browser marks as cross-site. The Host
+  allowlist already stopped DNS rebinding, but any web page could still POST
+  to `http://127.0.0.1:<port>` with a loopback Host header. `Origin` and
+  `Sec-Fetch-Site` are now checked, and plan requests must be
+  `application/json`, so a form cannot submit one without a CORS preflight.
+- Catalog values written into generated files are validated and escaped. An
+  `ollama_name` or model name containing a line break could add directives
+  such as `SYSTEM` or `ADAPTER` to the Ollama Modelfile, and catalogs are
+  user-extensible and auto-updated. `ollama_name`, text fields and quant names
+  are checked at the catalog boundary, Modelfile values are quoted so they
+  cannot close early, and a missing `FROM` source is an error rather than
+  `FROM None`.
+
+### Fixed
+
+- Continue and Aider snippets quote their YAML values, so a model name or
+  Ollama tag containing `: ` or ` #` no longer produces broken YAML.
+- Hardware detection in the local UI runs once even when the page fetches
+  several endpoints at the same time.
+
 ## [0.1.1] - 2026-11-08
 
 ### Added
