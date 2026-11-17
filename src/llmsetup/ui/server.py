@@ -51,6 +51,7 @@ class UiServer(ThreadingHTTPServer):
         self.allowed_hosts = _allowed_hosts(address[1])
         #: Cached so the page loads instantly; hardware does not change mid-session.
         self.cache: Dict[str, Any] = {}
+        self.cache_lock = threading.Lock()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -66,6 +67,24 @@ class Handler(BaseHTTPRequestHandler):
     def _host_ok(self) -> bool:
         host = (self.headers.get("Host") or "").lower()
         return host in self.server.allowed_hosts
+
+    def _same_origin(self) -> bool:
+        """Reject requests a browser marks as coming from another site.
+
+        The Host check stops DNS rebinding, but a page on any other site can
+        still POST to ``http://127.0.0.1:<port>`` with the right Host. Browsers
+        attach ``Origin`` (and ``Sec-Fetch-Site``) to those requests, so a
+        mismatch is refused. A request with neither header is a non-browser
+        client such as curl, which the Host check already constrains.
+        """
+        site = (self.headers.get("Sec-Fetch-Site") or "").lower()
+        if site and site not in ("same-origin", "none"):
+            return False
+        origin = self.headers.get("Origin")
+        if origin is None:
+            return True
+        parsed = urlparse(origin.lower())
+        return parsed.scheme == "http" and parsed.netloc in self.server.allowed_hosts
 
     def _send(self, status: int, body: bytes, content_type: str) -> None:
         self.send_response(status)
@@ -108,6 +127,9 @@ class Handler(BaseHTTPRequestHandler):
         if not self._host_ok():
             self._json(403, {"error": "host not allowed"})
             return
+        if not self._same_origin():
+            self._json(403, {"error": "cross-origin request refused"})
+            return
 
         path = urlparse(self.path).path
         if path in ("/", "/index.html"):
@@ -126,6 +148,15 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         if not self._host_ok():
             self._json(403, {"error": "host not allowed"})
+            return
+        if not self._same_origin():
+            self._json(403, {"error": "cross-origin request refused"})
+            return
+        content_type = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+        if content_type != "application/json":
+            # A cross-site form can only send form or text bodies without a
+            # CORS preflight, so requiring JSON closes that path as well.
+            self._json(415, {"error": "expected application/json"})
             return
 
         path = urlparse(self.path).path
@@ -146,6 +177,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def _hardware(self) -> Dict[str, Any]:
         cache = self.server.cache
+        # The page fetches several endpoints at once, and each request runs on
+        # its own thread; without the lock each one would run detection.
+        with self.server.cache_lock:
+            return self._detect_once(cache)
+
+    def _detect_once(self, cache: Dict[str, Any]) -> Dict[str, Any]:
         if "hardware" not in cache:
             from llmsetup.hardware import detect_hardware
             from llmsetup.hardware.bandwidth import describe_bandwidth

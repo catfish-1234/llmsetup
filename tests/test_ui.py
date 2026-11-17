@@ -117,6 +117,48 @@ class TestSecurity:
                 opener.open(request, timeout=30)
             assert excinfo.value.code == 403
 
+    @pytest.mark.parametrize("headers", [
+        {"Origin": "https://evil.example.com"},
+        {"Origin": "null"},
+        {"Sec-Fetch-Site": "cross-site"},
+    ])
+    def test_refuses_a_cross_site_post_with_a_loopback_host(self, headers):
+        """A page on another site can POST to loopback with the right Host
+        header. The browser still marks the request as cross-site."""
+        with running_server(make_hardware()) as base:
+            request = urllib.request.Request(
+                base + "/api/plan", data=b"{}", method="POST",
+                headers={"Content-Type": "application/json", **headers},
+            )
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+            with pytest.raises(urllib.error.HTTPError) as excinfo:
+                opener.open(request, timeout=30)
+            assert excinfo.value.code == 403
+
+    def test_refuses_a_form_encoded_post(self):
+        """Without a CORS preflight a cross-site page can only send form or
+        text bodies, so the plan endpoint accepts JSON alone."""
+        with running_server(make_hardware()) as base:
+            request = urllib.request.Request(
+                base + "/api/plan", data=b"tasks=coding", method="POST",
+                headers={"Content-Type": "text/plain"},
+            )
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+            with pytest.raises(urllib.error.HTTPError) as excinfo:
+                opener.open(request, timeout=30)
+            assert excinfo.value.code == 415
+
+    def test_accepts_a_same_origin_browser_post(self):
+        with running_server(make_hardware()) as base:
+            request = urllib.request.Request(
+                base + "/api/plan", data=b"{}", method="POST",
+                headers={"Content-Type": "application/json", "Origin": base,
+                         "Sec-Fetch-Site": "same-origin"},
+            )
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+            with opener.open(request, timeout=60) as response:
+                assert response.status == 200
+
     def test_sends_hardening_headers(self):
         with running_server() as base:
             opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
