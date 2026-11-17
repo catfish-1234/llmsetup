@@ -79,13 +79,23 @@ def snippets(endpoint: Endpoint, spec: ModelSpec,
     }
 
 
+def _q(value: str) -> str:
+    """A YAML scalar that cannot change the document's structure.
+
+    Model names come from the catalog and from Hugging Face, and Ollama tags
+    contain colons. A JSON string is a valid YAML double-quoted scalar, so
+    ``#``, ``: `` and line breaks stay inside the value.
+    """
+    return json.dumps(str(value), ensure_ascii=False)
+
+
 def _continue_yaml(model: str, base: str, spec: ModelSpec,
                    config: RuntimeConfig) -> str:
     return f"""models:
-  - name: {spec.name} (llmsetup)
+  - name: {_q(f"{spec.name} (llmsetup)")}
     provider: openai
-    model: {model}
-    apiBase: {base}
+    model: {_q(model)}
+    apiBase: {_q(base)}
     apiKey: {DUMMY_KEY}
     defaultCompletionOptions:
       contextLength: {config.context_tokens}
@@ -106,10 +116,10 @@ def _continue_autocomplete(model: str, base: str, spec: ModelSpec) -> str:
     Where the same model can do both, it still has to be listed twice, because
     the roles carry different settings.
     """
-    return f"""  - name: {spec.name} autocomplete (llmsetup)
+    return f"""  - name: {_q(f"{spec.name} autocomplete (llmsetup)")}
     provider: openai
-    model: {model}
-    apiBase: {base}
+    model: {_q(model)}
+    apiBase: {_q(base)}
     apiKey: {DUMMY_KEY}
     defaultCompletionOptions:
       # Completions are read at a glance and replaced by the next keystroke, so
@@ -122,15 +132,16 @@ def _continue_autocomplete(model: str, base: str, spec: ModelSpec) -> str:
 
 
 def _aider(model: str, base: str) -> str:
+    one_line = " ".join(f"openai/{model}".split())
     return f"""# ~/.aider.conf.yml
-openai-api-base: {base}
+openai-api-base: {_q(base)}
 openai-api-key: {DUMMY_KEY}
-model: openai/{model}
+model: {_q(f"openai/{model}")}
 
 # Or on the command line:
-#   aider --openai-api-base {base} \\
+#   aider --openai-api-base {shlex.quote(" ".join(base.split()))} \\
 #         --openai-api-key {DUMMY_KEY} \\
-#         --model openai/{model}
+#         --model {shlex.quote(one_line)}
 """
 
 

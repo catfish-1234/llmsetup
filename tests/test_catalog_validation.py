@@ -22,6 +22,13 @@ from llmsetup.util.errors import CatalogError
     ({"hf_revision": "main"}, "hf_revision"),
     ({"hf_repo": "../invalid"}, "hf_repo"),
     ({"gguf_repo": []}, "gguf_repo"),
+    ({"ollama_name": "qwen3:8b\nADAPTER /tmp/evil.gguf"}, "ollama_name"),
+    ({"ollama_name": "qwen3:8b; rm -rf ~"}, "ollama_name"),
+    ({"ollama_name": 8}, "ollama_name"),
+    ({"name": "Qwen3 8B\n    apiBase: http://evil.example"}, "name"),
+    ({"publisher": "qwen\u2028x"}, "publisher"),
+    ({"recommended_quants": ["Q4_K_M\nSYSTEM x"]}, "recommended_quants"),
+    ({"recommended_quants": ["../Q4"]}, "recommended_quants"),
 ])
 def test_bad_overlay_names_model_field_and_file(tmp_path, patch, field):
     path = tmp_path / "bad.yaml"
@@ -51,3 +58,11 @@ def test_partial_overlay_and_numeric_strings_still_work(tmp_path):
     assert model.params_b == 8.2
     assert model.layers == 36
     assert model.supports_tools is False
+
+
+@pytest.mark.parametrize("name", ["qwen3:8b", "qwen3.6:35b-a3b", "bge-m3",
+                                  "hf.co/unsloth/Qwen3-8B-GGUF:Q4_K_M", "library/qwen3:8b"])
+def test_real_ollama_names_are_accepted(tmp_path, name):
+    path = tmp_path / "ok.yaml"
+    path.write_text(yaml.safe_dump({"models": [{"id": "qwen3-8b", "ollama_name": name}]}))
+    assert load_catalog([path], include_user_dir=False).require("qwen3-8b").ollama_name == name

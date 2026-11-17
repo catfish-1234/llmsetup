@@ -177,3 +177,25 @@ class TestLinkStrategy:
         destination.write_bytes(b"stale")
         link_or_copy(source, destination)
         assert destination.read_bytes() == b"new content"
+
+
+def test_client_yaml_snippets_keep_hostile_names_inside_their_values(catalog):
+    from dataclasses import replace
+
+    import yaml
+
+    from llmsetup.interop.openai_clients import snippets
+    from llmsetup.runtimes.base import Endpoint
+    from llmsetup.types import RuntimeConfig
+
+    spec = replace(catalog.require("qwen3-8b"), name="Qwen #1: fine-tune",
+                   supports_fim=True)
+    endpoint = Endpoint("http://127.0.0.1:11434", "qwen3:8b # tag", "ollama")
+    out = snippets(endpoint, spec, RuntimeConfig("ollama", spec.id, "Q4_K_M", 8192))
+    models = yaml.safe_load(out["continue"]["content"])["models"]
+    assert models[0]["name"] == "Qwen #1: fine-tune (llmsetup)"
+    assert models[0]["model"] == "qwen3:8b # tag"
+    assert models[1]["roles"] == ["autocomplete"]
+    aider = yaml.safe_load(out["aider"]["content"])
+    assert aider["model"] == "openai/qwen3:8b # tag"
+    assert aider["openai-api-base"] == "http://127.0.0.1:11434/v1"

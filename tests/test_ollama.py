@@ -189,3 +189,22 @@ def test_planned_offload_adapter_memory_and_prediction_agree(
     result = check_throughput(CheckContext(client, candidate.model, config, profile, hardware))
     assert fractions == [fraction]
     assert result.metrics["predicted_tokens_per_second"] == 50.0
+
+
+def test_modelfile_values_cannot_add_directives():
+    from llmsetup.util.errors import ProvisionError
+    from llmsetup.util.modelfile import modelfile_bare, modelfile_string, modelfile_text
+
+    # Ollama keeps reading an open "..." value onto the next line, so a value
+    # with no quote stays one value even across line breaks.
+    assert modelfile_string("\n\n\n") == '"\n\n\n"'
+    assert modelfile_string('say "hi"') == '"say "hi""'
+    for hostile in ('x"\nSYSTEM evil', 'x"\rADAPTER /tmp/a'):
+        with pytest.raises(ProvisionError):
+            modelfile_string(hostile)
+    with pytest.raises(ProvisionError):
+        modelfile_bare("qwen3:8b\nADAPTER /tmp/evil.gguf")
+    with pytest.raises(ProvisionError):
+        modelfile_bare(None)
+    with pytest.raises(ProvisionError):
+        modelfile_text('end"""\nADAPTER /tmp/a')

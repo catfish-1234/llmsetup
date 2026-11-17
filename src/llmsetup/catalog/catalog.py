@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import math
 import os
+import re
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
@@ -358,7 +359,37 @@ def _coerce_types(fields: Dict[str, Any], model_id: str, path: Path) -> Dict[str
                             (name != "notes" and not out[name].strip())):
             raise CatalogError(f"{model_id}.{name} must be a string in {path}")
 
+    # These values end up inside generated files (an Ollama Modelfile, client
+    # YAML, llama-swap commands). A line break in one would let an entry add
+    # its own directives there, such as a SYSTEM prompt or an ADAPTER.
+    for name in ("id", "name", "publisher", "license", "ollama_name", "chat_template",
+                 "tokenizer_family"):
+        value = out.get(name)
+        if isinstance(value, str) and _CONTROL.search(value):
+            raise CatalogError(f"{model_id}.{name} must be a single line in {path}")
+
+    if out.get("ollama_name") is not None:
+        value = out["ollama_name"]
+        if not isinstance(value, str) or not _OLLAMA_NAME.fullmatch(value):
+            raise CatalogError(
+                f"{model_id}.ollama_name must be an Ollama model name such as "
+                f"`qwen3:8b`, got {value!r} in {path}")
+
+    for quant in out.get("recommended_quants", ()):
+        if not _QUANT_NAME.fullmatch(quant):
+            raise CatalogError(
+                f"{model_id}.recommended_quants has an invalid quantization {quant!r} in {path}")
+
     return out
+
+
+#: C0/C1 control characters, line and paragraph separators.
+_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f\u2028\u2029]")
+#: An Ollama model reference: optional registry host and namespace, a name, an
+#: optional tag. ``hf.co/owner/repo:Q4_K_M`` and ``qwen3:8b`` both qualify.
+_OLLAMA_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*){0,3}"
+                          r"(?::[A-Za-z0-9][A-Za-z0-9._-]{0,127})?")
+_QUANT_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}")
 
 
 def _validate_spec(spec: ModelSpec, path: Path) -> None:
