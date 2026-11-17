@@ -18,7 +18,10 @@ concurrency:
 jobs:
   test:
     name: tests (python ${{ matrix.python-version }})
-    runs-on: ubuntu-latest
+    # ubuntu-latest is Ubuntu 26.04, for which setup-python publishes no Python
+    # 3.9 build. 3.9 is still a supported floor (requires-python), so that leg
+    # runs on the newest image that has it rather than being dropped silently.
+    runs-on: ${{ matrix.python-version == '3.9' && 'ubuntu-24.04' || 'ubuntu-latest' }}
     timeout-minutes: 15
     strategy:
       fail-fast: false
