@@ -6,6 +6,28 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-18
+
+### Added
+
+- `llmsetup start --detach` runs the verified setup in the background: its own
+  session, so closing the terminal does not stop it, output in `server.log`
+  under the data directory, and a wait (`--wait`, default 180 seconds) until
+  the endpoint answers. A server that exits while loading is reported with the
+  end of its log.
+- `llmsetup status` reports whether the background server is alive and
+  answering, with its endpoint, start time and log (`--json` for scripts; exit
+  code 3 when nothing is running).
+- `llmsetup stop` ends the background server, gracefully and then forcibly
+  after 15 seconds. It only signals a process whose command line still names
+  the recorded executable, so a process ID the system has since reused for
+  another program is treated as a stale record, never as a target.
+
+### Changed
+
+- CI tools: pytest 9.2.0 on Python 3.10 and later (3.9 keeps 8.4.2), ruff
+  0.17.4, types-PyYAML 6.0.12.20261103.
+
 ## [0.2.0] - 2026-11-17
 
 ### Added
