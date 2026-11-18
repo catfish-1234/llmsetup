@@ -71,6 +71,11 @@ llmsetup report
 
 # Start the last verified setup again, exactly as it was tested.
 llmsetup start
+
+# Or keep it running in the background, then check on it and stop it.
+llmsetup start --detach
+llmsetup status
+llmsetup stop
 ```
 
 `--task` is repeatable, for example `--task coding --task agent`. `--context`
@@ -118,7 +123,12 @@ retries still apply. A preferred `--runtime` may change during recovery.
 After verification, llmsetup stops servers it started. Shared Ollama and
 LM Studio daemons keep running. `llmsetup start` runs the verified model again
 in the foreground with the exact command setup tested, nothing re-planned;
-`llmsetup start --print` prints that command instead. For Ollama and LM Studio
+`llmsetup start --print` prints that command instead. `llmsetup start --detach`
+runs it in the background with output in `server.log` under the data directory,
+waits until the endpoint answers, and records the process so `llmsetup status`
+can report whether it is alive and answering and `llmsetup stop` can end it.
+`stop` only signals a process that is still the recorded server, so a reused
+process ID is never touched. For Ollama and LM Studio
 it shows the endpoint, since their daemons serve the model on demand. Only a
 setup whose checks passed can be started this way; after changing anything,
 run `llmsetup doctor`. Generated client snippets need a running endpoint.

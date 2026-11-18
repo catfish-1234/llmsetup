@@ -80,6 +80,29 @@ def _port(base_url: str) -> Optional[int]:
         return None
 
 
+def preflight(record: Dict[str, Any]) -> None:
+    """Refuse to start when the runtime is gone or the port is taken."""
+    command: List[str] = record["command"]
+    base_url = str(record.get("base_url", ""))
+    model = str(record.get("served_model") or record.get("model_id") or "")
+    executable = command[0]
+    if not (Path(executable).is_file() or which(executable)):
+        raise LlmsetupError(
+            f"{executable} is no longer installed",
+            hint="run `llmsetup doctor` to reinstall the runtime and re-test the setup")
+
+    from llmsetup.util.http import port_is_free
+
+    port = _port(base_url)
+    host = urlsplit(base_url).hostname or "127.0.0.1"
+    if port is not None and not port_is_free(host, port):
+        raise LlmsetupError(
+            f"port {port} is already in use, so the model cannot start there",
+            hint=(f"if it is already running, check it with `llmsetup status` or "
+                  f"`llmsetup verify --base-url {base_url} --model {model}`; "
+                  "otherwise stop whatever holds the port and rerun `llmsetup start`"))
+
+
 def start(record: Dict[str, Any], console: Console, print_only: bool = False,
           runner=subprocess.call) -> int:
     """Print or run the recorded command. Returns the process exit code."""
@@ -98,21 +121,7 @@ def start(record: Dict[str, Any], console: Console, print_only: bool = False,
         return 0
 
     executable = command[0]
-    if not (Path(executable).is_file() or which(executable)):
-        raise LlmsetupError(
-            f"{executable} is no longer installed",
-            hint="run `llmsetup doctor` to reinstall the runtime and re-test the setup")
-
-    from llmsetup.util.http import port_is_free
-
-    port = _port(base_url)
-    host = urlsplit(base_url).hostname or "127.0.0.1"
-    if port is not None and not port_is_free(host, port):
-        raise LlmsetupError(
-            f"port {port} is already in use, so the model cannot start there",
-            hint=(f"if it is already running, check it with "
-                  f"`llmsetup verify --base-url {base_url} --model {model}`; "
-                  "otherwise stop whatever holds the port and rerun `llmsetup start`"))
+    preflight(record)
 
     console.step(f"Starting {model}")
     console.info(f"OpenAI-compatible endpoint: {base_url}/v1  model {model}")

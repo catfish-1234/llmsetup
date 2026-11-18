@@ -8,7 +8,9 @@ inspected on its own:
     llmsetup plan        what would you pick, and why?
     llmsetup verify      does my current endpoint actually work?
     llmsetup doctor      re-test and repair an existing setup
-    llmsetup start       start the last verified setup again
+    llmsetup start       start the last verified setup again (--detach for background)
+    llmsetup status      is the background server running?
+    llmsetup stop        stop the background server
     llmsetup export      register an existing model with my other apps
     llmsetup catalog     inspect or extend the model list
 """
@@ -44,7 +46,7 @@ from llmsetup.util.log import Console, write_console
 from llmsetup.util.proc import format_command
 from llmsetup.util.units import gb
 
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 
 
 def _positive_int(value: str) -> int:
@@ -67,7 +69,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "setup": cmd_setup, "detect": cmd_detect, "plan": cmd_plan,
         "verify": cmd_verify, "doctor": cmd_doctor, "export": cmd_export,
         "catalog": cmd_catalog, "runtimes": cmd_runtimes, "ui": cmd_ui,
-        "report": cmd_report, "start": cmd_start,
+        "report": cmd_report, "start": cmd_start, "status": cmd_status, "stop": cmd_stop,
     }.get(args.command)
 
     if handler is None:
@@ -77,7 +79,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     rerun = "Rerun: " + format_command(["llmsetup", *(argv if argv is not None else sys.argv[1:])])
     try:
         code = handler(args, console)
-        if code:
+        # `status` reports state through its exit code (3: not running), like
+        # `systemctl status`; that is an answer, not a failure to rerun.
+        if code and args.command != "status":
             console.error(rerun)
         return code
     except LlmsetupError as exc:
@@ -212,6 +216,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_start.add_argument("--setup", type=Path, help="saved setup JSON to start")
     p_start.add_argument("--print", dest="print_only", action="store_true",
                          help="print the launch command instead of running it")
+    p_start.add_argument("--detach", action="store_true",
+                         help="run in the background with output in a log file; stop it with `llmsetup stop`")
+    p_start.add_argument("--wait", type=float, default=180.0, metavar="SECONDS",
+                         help="with --detach, how long to wait for the endpoint to answer (default 180)")
+
+    p_status = sub.add_parser("status", help="is the background server running and answering?")
+    common(p_status)
+
+    p_stop = sub.add_parser("stop", help="stop the server started by `llmsetup start --detach`")
+    common(p_stop)
 
     p_report = sub.add_parser(
         "report", help="reprint the last setup's report (paste this into a bug report)")
@@ -839,7 +853,42 @@ def cmd_start(args, console: Console) -> int:
     if args.json:
         print(json.dumps(record, indent=2))
         return 0
+    if args.detach and not args.print_only and not record.get("shared_daemon"):
+        from llmsetup.launch import preflight
+        from llmsetup.server import start_detached
+
+        preflight(record)
+        return start_detached(record, console, wait_s=args.wait)
     return start(record, console, print_only=args.print_only)
+
+
+def cmd_status(args, console: Console) -> int:
+    """Report the background server started by `llmsetup start --detach`."""
+    from llmsetup.server import status
+
+    report = status()
+    if args.json:
+        print(json.dumps(report, indent=2))
+        return 0 if report["running"] else 3
+    if not report["managed"]:
+        console.info("no background server is recorded; start one with `llmsetup start --detach`")
+        return 3
+    if not report["running"]:
+        console.warn(f"the recorded server (pid {report['pid']}) is not running")
+        console.info(f"its log is {report['log']}; start it again with `llmsetup start --detach`")
+        return 3
+    (console.ok if report["healthy"] else console.warn)(
+        f"{report['model']} is running (pid {report['pid']}) and "
+        + ("answering" if report["healthy"] else "not answering yet"))
+    console.info(f"OpenAI-compatible endpoint: {report['base_url']}/v1")
+    console.info(console.dim(f"started {report['started_at']}  log {report['log']}"))
+    return 0
+
+
+def cmd_stop(args, console: Console) -> int:
+    from llmsetup.server import stop
+
+    return stop(console)
 
 
 def _save_last(result) -> None:
