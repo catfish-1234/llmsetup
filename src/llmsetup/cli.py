@@ -11,6 +11,7 @@ inspected on its own:
     llmsetup start       start the last verified setup again (--detach for background)
     llmsetup status      is the background server running?
     llmsetup stop        stop the background server
+    llmsetup logs        show the background server's log (-f to follow)
     llmsetup export      register an existing model with my other apps
     llmsetup catalog     inspect or extend the model list
 """
@@ -70,6 +71,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "verify": cmd_verify, "doctor": cmd_doctor, "export": cmd_export,
         "catalog": cmd_catalog, "runtimes": cmd_runtimes, "ui": cmd_ui,
         "report": cmd_report, "start": cmd_start, "status": cmd_status, "stop": cmd_stop,
+        "logs": cmd_logs,
     }.get(args.command)
 
     if handler is None:
@@ -226,6 +228,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_stop = sub.add_parser("stop", help="stop the server started by `llmsetup start --detach`")
     common(p_stop)
+
+    p_logs = sub.add_parser("logs", help="show the log of the server started by `llmsetup start --detach`")
+    common(p_logs)
+    p_logs.add_argument("-n", "--lines", type=_positive_int, default=50,
+                        help="how many lines from the end to show (default 50)")
+    p_logs.add_argument("-f", "--follow", action="store_true",
+                        help="keep printing new lines until the server stops or you press Ctrl-C")
 
     p_report = sub.add_parser(
         "report", help="reprint the last setup's report (paste this into a bug report)")
@@ -890,6 +899,16 @@ def cmd_stop(args, console: Console) -> int:
     from llmsetup.server import stop
 
     return stop(console)
+
+
+def cmd_logs(args, console: Console) -> int:
+    from llmsetup.server import current_log, logs, tail
+
+    if args.json:
+        path = current_log()
+        print(json.dumps({"log": str(path), "lines": tail(path, args.lines)}, indent=2))
+        return 0
+    return logs(console, lines=args.lines, follow=args.follow)
 
 
 def _save_last(result) -> None:

@@ -6,6 +6,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `llmsetup logs` prints the end of the background server's log (`-n` lines,
+  default 50; `--json` for scripts), and `--follow` keeps printing new output
+  until the server stops or you press Ctrl-C. The log is read from the end,
+  so a large one stays fast, and terminal escape sequences in it are shown
+  inert: a model server can echo request text into its log, and none of it
+  can move the cursor, retitle the terminal or clear the screen.
+
 ### Fixed
 
 - `llmsetup start --detach` while the server it started earlier is still

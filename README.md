@@ -72,9 +72,10 @@ llmsetup report
 # Start the last verified setup again, exactly as it was tested.
 llmsetup start
 
-# Or keep it running in the background, then check on it and stop it.
+# Or keep it running in the background, then check on it, read its log, and stop it.
 llmsetup start --detach
 llmsetup status
+llmsetup logs --follow
 llmsetup stop
 ```
 
@@ -127,6 +128,9 @@ in the foreground with the exact command setup tested, nothing re-planned;
 runs it in the background with output in `server.log` under the data directory,
 waits until the endpoint answers, and records the process so `llmsetup status`
 can report whether it is alive and answering and `llmsetup stop` can end it.
+`llmsetup logs` prints the end of that log (`-n` lines, default 50), and
+`--follow` keeps printing until the server stops; escape sequences in the log
+are shown inert.
 `stop` only signals a process that is still the recorded server, so a reused
 process ID is never touched. For Ollama and LM Studio
 it shows the endpoint, since their daemons serve the model on demand. Only a

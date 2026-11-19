@@ -1,4 +1,4 @@
-"""Background serving: `llmsetup start --detach`, `llmsetup status`, `llmsetup stop`.
+"""Background serving: `llmsetup start --detach`, `status`, `logs` and `stop`.
 
 `start` runs the verified command in the foreground, which ties the model to a
 terminal. Detached, the same command runs in its own session with output in a
@@ -13,14 +13,16 @@ and otherwise treats the record as stale and removes it.
 
 from __future__ import annotations
 
+import codecs
 import datetime
 import os
+import re
 import signal
 import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, TextIO
 
 from llmsetup.util import http
 from llmsetup.util.errors import LlmsetupError
@@ -256,3 +258,78 @@ def stop(console: Console, grace_s: float = 15.0) -> int:
     clear_state()
     console.ok("stopped")
     return 0
+
+
+# --------------------------------------------------------------------------- #
+# logs
+# --------------------------------------------------------------------------- #
+
+#: ANSI escape sequences, then any other control character but tab and newline. The log is
+#: written by a model server that may echo request text, so it is shown inert: nothing in it
+#: can move the cursor, retitle the terminal or clear the screen.
+_ANSI = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[@-Z\\-_])")
+_CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
+
+
+def _inert(text: str) -> str:
+    # A carriage return is dropped rather than shown: CRLF line ends and progress bars that
+    # redraw one line are the common sources, and neither should print as "?".
+    return _CONTROL.sub("?", _ANSI.sub("", text.replace("\r", "")))
+
+
+def tail(path: Path, lines: int, block: int = 64 * 1024) -> List[str]:
+    """The last ``lines`` lines of a file, read backwards so a large log stays cheap."""
+    with open(path, "rb") as handle:
+        handle.seek(0, os.SEEK_END)
+        end = handle.tell()
+        data = b""
+        while end > 0 and data.count(b"\n") <= lines:
+            start = max(0, end - block)
+            handle.seek(start)
+            data = handle.read(end - start) + data
+            end = start
+    text = data.decode("utf-8", errors="replace")
+    return [_inert(line) for line in text.splitlines()[-lines:]] if lines else []
+
+
+def current_log() -> Path:
+    """The recorded server's log, else the default log location; it must exist."""
+    state = read_state()
+    path = Path(state["log"]) if state and isinstance(state.get("log"), str) else log_path()
+    if not path.is_file():
+        raise LlmsetupError("there is no server log yet",
+                            hint="start a background server with `llmsetup start --detach`")
+    return path
+
+
+def logs(console: Console, lines: int = 50, follow: bool = False, poll_s: float = 0.5,
+         out: Optional[TextIO] = None) -> int:
+    """Print the end of the background server's log, and with ``follow`` keep printing."""
+    stream = out or sys.stdout
+    state = read_state()
+    path = current_log()
+    for line in tail(path, lines):
+        stream.write(line + "\n")
+    stream.flush()
+    if not follow:
+        return 0
+    if state is None or not server_running(state):
+        console.info("the background server is not running, so there is nothing more to follow")
+        return 0
+    # Incremental, so a multi-byte character split across two reads still decodes.
+    decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+    with open(path, "rb") as handle:
+        handle.seek(0, os.SEEK_END)
+        try:
+            while True:
+                chunk = handle.read()
+                if chunk:
+                    stream.write(_inert(decoder.decode(chunk)))
+                    stream.flush()
+                elif not server_running(state):
+                    console.info("the background server stopped")
+                    return 0
+                else:
+                    time.sleep(poll_s)
+        except KeyboardInterrupt:
+            return 0
