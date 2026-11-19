@@ -100,3 +100,19 @@ def test_cli_start_detach_uses_the_saved_launch_record(record, monkeypatch):
         cli.main(["stop"])
     time.sleep(0.2)
     assert read_state() is None
+
+
+def test_cli_start_detach_twice_names_the_running_server(record, capsys):
+    """The port is busy because of our own server; say that, not just "port in use"."""
+    from llmsetup.util.fs import app_dir, write_json
+
+    write_json(app_dir() / "last-setup.json", {"succeeded": True, "launch": record})
+    try:
+        assert cli.main(["start", "--detach", "--wait", "20"]) == 0
+        capsys.readouterr()
+        assert cli.main(["start", "--detach", "--wait", "5"]) != 0
+        err = capsys.readouterr().err
+        assert "already running (pid" in err
+        assert "llmsetup stop" in err
+    finally:
+        cli.main(["stop"])

@@ -127,14 +127,23 @@ def _popen_detached(command: List[str], log: Path) -> subprocess.Popen:
         return subprocess.Popen(command, stdout=handle, stderr=handle, stdin=subprocess.DEVNULL, **kwargs)
 
 
-def start_detached(record: Dict[str, Any], console: Console, wait_s: float = 180.0,
-                   popen: Callable[[List[str], Path], Any] = _popen_detached) -> int:
-    """Start the recorded command in the background and wait until it answers."""
+def ensure_not_running() -> None:
+    """Refuse to start a second background server while the recorded one is alive.
+
+    Checked before the port preflight, whose generic "port in use" would otherwise be the
+    message for the most common case: the server llmsetup itself started is still running.
+    """
     existing = read_state()
     if existing is not None and server_running(existing):
         raise LlmsetupError(
             f"a server started by llmsetup is already running (pid {existing['pid']}) at {existing.get('base_url')}",
             hint="run `llmsetup status` to check it, or `llmsetup stop` before starting another")
+
+
+def start_detached(record: Dict[str, Any], console: Console, wait_s: float = 180.0,
+                   popen: Callable[[List[str], Path], Any] = _popen_detached) -> int:
+    """Start the recorded command in the background and wait until it answers."""
+    ensure_not_running()
     clear_state()
 
     command: List[str] = record["command"]

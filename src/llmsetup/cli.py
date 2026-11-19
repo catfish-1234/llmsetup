@@ -855,8 +855,9 @@ def cmd_start(args, console: Console) -> int:
         return 0
     if args.detach and not args.print_only and not record.get("shared_daemon"):
         from llmsetup.launch import preflight
-        from llmsetup.server import start_detached
+        from llmsetup.server import ensure_not_running, start_detached
 
+        ensure_not_running()
         preflight(record)
         return start_detached(record, console, wait_s=args.wait)
     return start(record, console, print_only=args.print_only)

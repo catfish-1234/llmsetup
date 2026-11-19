@@ -6,6 +6,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `llmsetup start --detach` while the server it started earlier is still
+  running now says so, with its pid and how to stop it, instead of the generic
+  "port is already in use" message from the port check.
+
 ### Changed
 
 - CI now tests Python 3.15 as well, and the package lists it as supported.
