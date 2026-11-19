@@ -46,8 +46,7 @@ from llmsetup.util.fs import app_dir, ensure_dir, write_text
 from llmsetup.util.log import Console, write_console
 from llmsetup.util.proc import format_command
 from llmsetup.util.units import gb
-
-VERSION = "0.3.0"
+from llmsetup.version import __version__ as VERSION
 
 
 def _positive_int(value: str) -> int:

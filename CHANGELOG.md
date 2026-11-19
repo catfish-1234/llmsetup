@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-19
+
 ### Added
 
 - `llmsetup logs` prints the end of the background server's log (`-n` lines,
@@ -24,6 +26,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Changed
 
 - CI now tests Python 3.15 as well, and the package lists it as supported.
+- Every request llmsetup makes (model downloads, runtime installs, catalog
+  updates) now identifies itself with the real version; two of them still
+  said 0.1. The version is defined once, in `llmsetup.version`.
 
 ## [0.3.0] - 2026-11-18
 

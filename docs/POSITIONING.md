@@ -2,7 +2,7 @@
 
 The project is now **llmsetup**, a Python setup assistant for local open-weight
 LLMs under Apache-2.0. The distribution name, Python import, and CLI command are
-all `llmsetup`. The first PyPI release is `0.1.0`; the current version is `0.3.0`.
+all `llmsetup`. The first PyPI release is `0.1.0`; the current version is `0.4.0`.
 
 The source repository stays at
 [catfish-1234/llmsetup](https://github.com/catfish-1234/llmsetup).

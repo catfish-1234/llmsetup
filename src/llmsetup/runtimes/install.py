@@ -24,6 +24,7 @@ from llmsetup.util.errors import ProvisionError
 from llmsetup.util.fs import app_dir
 from llmsetup.util.log import Console
 from llmsetup.util.proc import run
+from llmsetup.version import __version__
 
 BUILD = "b11669"
 ASSETS = {
@@ -174,7 +175,7 @@ def install_llamacpp(hardware: HardwareProfile, console: Console,
             try:
                 if time.monotonic() >= deadline:
                     raise TimeoutError("runtime download timed out after 300s")
-                request = urllib.request.Request(url, headers={"User-Agent": "llmsetup/0.3.0"})
+                request = urllib.request.Request(url, headers={"User-Agent": f"llmsetup/{__version__}"})
                 with urllib.request.urlopen(request, timeout=min(30, deadline - time.monotonic())) as response, archive.open("wb") as out:
                     sha = hashlib.sha256()
                     size = 0

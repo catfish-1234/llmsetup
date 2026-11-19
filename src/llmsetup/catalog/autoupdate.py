@@ -33,6 +33,7 @@ import yaml
 
 from llmsetup.util.fs import app_dir, ensure_dir, write_text
 from llmsetup.util.log import Console
+from llmsetup.version import __version__
 
 #: Where updated catalogs come from. Points at this project's own catalog on
 #: main, which a scheduled workflow keeps current, so the repo is the
@@ -154,7 +155,7 @@ def fetch_catalog(url: str, timeout: float = TIMEOUT_SECONDS) -> Optional[str]:
     """Download a catalog document. None on any failure."""
     try:
         request = urllib.request.Request(
-            url, headers={"User-Agent": "llmsetup/0.1 auto-update"}
+            url, headers={"User-Agent": f"llmsetup/{__version__} auto-update"}
         )
         with urllib.request.urlopen(request, timeout=timeout) as response:
             # Only HTTP responses carry a status; a file:// or other local

@@ -24,9 +24,10 @@ from typing import Callable, Dict, List, Optional
 from llmsetup.util.errors import ProvisionError
 from llmsetup.util.fs import app_dir, ensure_dir, write_text
 from llmsetup.util.units import human_bytes
+from llmsetup.version import __version__
 
 HF_ENDPOINT = os.environ.get("HF_ENDPOINT", "https://huggingface.co").rstrip("/")
-USER_AGENT = "llmsetup/0.1 (+https://github.com/catfish-1234/llmsetup)"
+USER_AGENT = f"llmsetup/{__version__} (+https://github.com/catfish-1234/llmsetup)"
 CHUNK = 1024 * 1024
 
 
