@@ -29,6 +29,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Every request llmsetup makes (model downloads, runtime installs, catalog
   updates) now identifies itself with the real version; two of them still
   said 0.1. The version is defined once, in `llmsetup.version`.
+- Releasing is one command: `python scripts/release.py` checks that `main` is
+  clean, pushed and green, tags the version and pushes it (`--dry-run` shows
+  the plan, `--backfill` tags older untagged versions first). The release
+  workflow now checks the tag against `pyproject.toml` before building and
+  creates the GitHub release with the version's CHANGELOG section, marking only
+  the newest version as latest.
 
 ## [0.3.0] - 2026-11-18
 

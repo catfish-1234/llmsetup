@@ -2,7 +2,7 @@ name: Release
 
 on:
   push:
-    tags: ["v*"]
+    tags: ["v[0-9]+.[0-9]+.[0-9]+", "v[0-9]+.[0-9]+.[0-9]+-*"]
   workflow_dispatch:
     inputs:
       ref:
@@ -26,6 +26,21 @@ jobs:
         with:
           python-version: "3.12"
       - run: python -m pip install -c requirements-ci.txt build twine
+      # A tag that disagrees with pyproject.toml would publish the wrong version under the right
+      # name, and PyPI never lets a version number be reused.
+      - name: Check the tag matches the package version
+        env:
+          REF: ${{ inputs.ref || github.ref_name }}
+        run: |
+          VERSION="$(python -c "import re; print(re.search(r'^version\s*=\s*\"([^\"]+)\"', open('pyproject.toml').read(), re.M).group(1))")"
+          case "$REF" in
+            v[0-9]*)
+              if [ "${REF#v}" != "$VERSION" ]; then
+                echo "tag $REF does not match pyproject.toml version $VERSION" >&2
+                exit 1
+              fi ;;
+            *) echo "building $REF (not a version tag), version $VERSION" ;;
+          esac
       - name: Build and validate
         run: |
           python -m build
@@ -49,3 +64,44 @@ jobs:
           name: dist
           path: dist/
       - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+
+  github-release:
+    name: GitHub release
+    needs: publish
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Every tag, so only the newest version is marked as the latest release.
+          fetch-depth: 0
+          persist-credentials: false
+      # The notes are this version's CHANGELOG.md section. An older tag (a backfilled release) is
+      # not marked latest, so the order in which runs finish cannot move the "Latest" badge back.
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          NOTES_FILE="$RUNNER_TEMP/release-notes.md"
+          awk -v version="$VERSION" '
+            /^## \[/ { section = index($0, "## [" version "]") == 1; next }
+            section { print }
+          ' CHANGELOG.md > "$NOTES_FILE"
+          if [ ! -s "$NOTES_FILE" ]; then
+            echo "See [CHANGELOG.md](https://github.com/$GITHUB_REPOSITORY/blob/main/CHANGELOG.md) for what changed." > "$NOTES_FILE"
+          fi
+          HIGHEST="$(git tag -l 'v*' | sed 's/^v//' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)"
+          case "$VERSION" in
+            *-*) FLAGS="--prerelease --latest=false" ;;
+            "$HIGHEST") FLAGS="--latest" ;;
+            *) FLAGS="--latest=false" ;;
+          esac
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release edit "$GITHUB_REF_NAME" --notes-file "$NOTES_FILE" $FLAGS
+          else
+            gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file "$NOTES_FILE" --verify-tag $FLAGS
+          fi

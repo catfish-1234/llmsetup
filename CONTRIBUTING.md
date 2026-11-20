@@ -109,3 +109,23 @@ suspected vulnerabilities.
   independent of this project's software license.
 - Publication, naming migrations, and changes to support policy need their own
   explicit maintainer decision. See [the naming and migration notes](docs/POSITIONING.md).
+
+## Releasing
+
+1. Add the version's section to `CHANGELOG.md` and set the version in `pyproject.toml` and
+   `src/llmsetup/version.py` (a test fails if they disagree).
+2. Commit and push to `main`, then:
+
+   ```bash
+   python scripts/release.py --dry-run   # see what would be tagged
+   python scripts/release.py             # tag the version and push it
+   ```
+
+The command refuses unless `main` is clean and identical to `origin/main`, and, with the GitHub CLI
+signed in, unless CI is green on the commit it tags. It tags the version at HEAD, or at the commit
+that introduced it while `CHANGELOG.md` still has unreleased entries. Pushing the tag runs
+`.github/workflows/release.yml`: it checks the tag against `pyproject.toml`, builds and checks the
+distributions, publishes to PyPI, and creates the GitHub release with the version's CHANGELOG
+section as notes. `--backfill` also tags older CHANGELOG versions that never got a tag, oldest
+first, one push each, with the current version last.
+
