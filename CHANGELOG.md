@@ -17,6 +17,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   inert: a model server can echo request text into its log, and none of it
   can move the cursor, retitle the terminal or clear the screen.
 
+- `llmsetup restart` stops the background server, if one is running, and
+  starts the verified setup again in the background (`--wait`, `--setup` as
+  for `start`). `llmsetup status` now shows how long the server has been up,
+  and `--json` includes `uptime_s`.
+
 ### Fixed
 
 - `llmsetup start --detach` while the server it started earlier is still

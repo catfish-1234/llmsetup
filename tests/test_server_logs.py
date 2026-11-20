@@ -106,3 +106,15 @@ def test_cli_logs_json(capsys):
     path = write_log("a\nb\nc\n")
     assert cli.main(["logs", "--json", "-n", "2"]) == 0
     assert json.loads(capsys.readouterr().out) == {"log": str(path), "lines": ["b", "c"]}
+
+
+def test_uptime_and_duration_formatting():
+    import datetime
+
+    now = datetime.datetime(2026, 11, 20, 12, 0, tzinfo=datetime.timezone.utc)
+    assert server.uptime_seconds("2026-11-20T11:58:30+00:00", now) == 90
+    assert server.uptime_seconds("2026-11-20T11:58:30", now) == 90  # naive is read as UTC
+    assert server.uptime_seconds("not a time", now) is None
+    assert server.uptime_seconds(None, now) is None
+    assert server.uptime_seconds("2026-11-21T00:00:00+00:00", now) == 0  # clock skew never goes negative
+    assert [server.format_duration(s) for s in (45, 720, 7980, 4 * 86400 + 7200)] == ["45s", "12m", "2h 13m", "4d 2h"]

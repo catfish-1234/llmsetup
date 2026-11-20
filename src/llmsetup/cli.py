@@ -11,6 +11,7 @@ inspected on its own:
     llmsetup start       start the last verified setup again (--detach for background)
     llmsetup status      is the background server running?
     llmsetup stop        stop the background server
+    llmsetup restart     stop it and start the verified setup again
     llmsetup logs        show the background server's log (-f to follow)
     llmsetup export      register an existing model with my other apps
     llmsetup catalog     inspect or extend the model list
@@ -70,6 +71,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "verify": cmd_verify, "doctor": cmd_doctor, "export": cmd_export,
         "catalog": cmd_catalog, "runtimes": cmd_runtimes, "ui": cmd_ui,
         "report": cmd_report, "start": cmd_start, "status": cmd_status, "stop": cmd_stop,
+        "restart": cmd_restart,
         "logs": cmd_logs,
     }.get(args.command)
 
@@ -227,6 +229,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_stop = sub.add_parser("stop", help="stop the server started by `llmsetup start --detach`")
     common(p_stop)
+
+    p_restart = sub.add_parser(
+        "restart", help="stop the background server and start the verified setup again in the background")
+    common(p_restart)
+    p_restart.add_argument("--setup", type=Path, help="saved setup JSON to start")
+    p_restart.add_argument("--wait", type=float, default=180.0, metavar="SECONDS",
+                           help="how long to wait for the endpoint to answer (default 180)")
 
     p_logs = sub.add_parser("logs", help="show the log of the server started by `llmsetup start --detach`")
     common(p_logs)
@@ -890,7 +899,10 @@ def cmd_status(args, console: Console) -> int:
         f"{report['model']} is running (pid {report['pid']}) and "
         + ("answering" if report["healthy"] else "not answering yet"))
     console.info(f"OpenAI-compatible endpoint: {report['base_url']}/v1")
-    console.info(console.dim(f"started {report['started_at']}  log {report['log']}"))
+    from llmsetup.server import format_duration
+
+    uptime = f" (up {format_duration(report['uptime_s'])})" if report.get("uptime_s") is not None else ""
+    console.info(console.dim(f"started {report['started_at']}{uptime}  log {report['log']}"))
     return 0
 
 
@@ -898,6 +910,19 @@ def cmd_stop(args, console: Console) -> int:
     from llmsetup.server import stop
 
     return stop(console)
+
+
+def cmd_restart(args, console: Console) -> int:
+    """Stop the background server, if one is running, and start the verified setup detached."""
+    from llmsetup.server import read_state, server_running, stop
+
+    state = read_state()
+    if state is not None and server_running(state):
+        stop(console)
+    else:
+        console.info("no background server was running; starting one")
+    args.detach, args.print_only, args.json = True, False, False
+    return cmd_start(args, console)
 
 
 def cmd_logs(args, console: Console) -> int:

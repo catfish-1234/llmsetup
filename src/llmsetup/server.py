@@ -190,6 +190,32 @@ def start_detached(record: Dict[str, Any], console: Console, wait_s: float = 180
 # --------------------------------------------------------------------------- #
 
 
+def uptime_seconds(started_at: Any, now: Optional[datetime.datetime] = None) -> Optional[int]:
+    """Seconds since an ISO ``started_at``, or None when it is missing or unreadable."""
+    if not isinstance(started_at, str):
+        return None
+    try:
+        started = datetime.datetime.fromisoformat(started_at)
+    except ValueError:
+        return None
+    if started.tzinfo is None:
+        started = started.replace(tzinfo=datetime.timezone.utc)
+    now = now or datetime.datetime.now(datetime.timezone.utc)
+    return max(0, int((now - started).total_seconds()))
+
+
+def format_duration(seconds: int) -> str:
+    """A short human duration: 45s, 12m, 2h 13m, 4d 2h."""
+    minutes, hours, days = seconds // 60, seconds // 3600, seconds // 86400
+    if seconds < 60:
+        return f"{seconds}s"
+    if seconds < 3600:
+        return f"{minutes}m"
+    if seconds < 86400:
+        return f"{hours}h {minutes % 60}m"
+    return f"{days}d {hours % 24}h"
+
+
 def status() -> Dict[str, Any]:
     """Whether the background server is alive and answering."""
     state = read_state()
@@ -203,6 +229,8 @@ def status() -> Dict[str, Any]:
         "command": format_command(state["command"]),
     }
     report["healthy"] = bool(alive and state.get("base_url") and _healthy(str(state["base_url"])))
+    if alive:
+        report["uptime_s"] = uptime_seconds(state.get("started_at"))
     return report
 
 

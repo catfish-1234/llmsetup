@@ -116,3 +116,31 @@ def test_cli_start_detach_twice_names_the_running_server(record, capsys):
         assert "llmsetup stop" in err
     finally:
         cli.main(["stop"])
+
+
+def test_cli_restart_replaces_the_running_server(record):
+    from llmsetup.util.fs import app_dir, write_json
+
+    write_json(app_dir() / "last-setup.json", {"succeeded": True, "launch": record})
+    try:
+        assert cli.main(["start", "--detach", "--wait", "20"]) == 0
+        first = read_state()["pid"]
+        assert status()["uptime_s"] >= 0
+        assert cli.main(["restart", "--wait", "20"]) == 0
+        report = status()
+        assert report["running"] and report["healthy"]
+        assert report["pid"] != first
+    finally:
+        cli.main(["stop"])
+
+
+def test_cli_restart_starts_a_server_when_none_is_running(record, capsys):
+    from llmsetup.util.fs import app_dir, write_json
+
+    write_json(app_dir() / "last-setup.json", {"succeeded": True, "launch": record})
+    try:
+        assert cli.main(["restart", "--wait", "20"]) == 0
+        assert "no background server was running" in capsys.readouterr().err
+        assert status()["healthy"]
+    finally:
+        cli.main(["stop"])
