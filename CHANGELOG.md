@@ -27,6 +27,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- `llmsetup restart` could fail with "port is already in use" right after
+  stopping the old server: `stop` said "stopped" as soon as the recorded process
+  was gone, while its port could still accept connections for a moment, and the
+  new start's port check then refused. `stop` now waits, for up to ten seconds,
+  until nothing answers on the server's port, and says so if something still
+  does.
 - `python scripts/release.py` without `--yes` crashed with an `EOFError`
   traceback on Windows when stdin was redirected from `NUL`, instead of saying
   to rerun with `--yes`. Windows reports the `NUL` device as a terminal, so the

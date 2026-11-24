@@ -23,6 +23,7 @@ import sys
 import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, TextIO
+from urllib.parse import urlsplit
 
 from llmsetup.util import http
 from llmsetup.util.errors import LlmsetupError
@@ -288,8 +289,36 @@ def stop(console: Console, grace_s: float = 15.0) -> int:
         except ProcessLookupError:
             pass
     clear_state()
+    base_url = str(state.get("base_url") or "")
+    if base_url and not _port_released(base_url):
+        console.warn(f"the server stopped, but {base_url} is still accepting connections; "
+                     "another process may be holding the port")
     console.ok("stopped")
     return 0
+
+
+def _port_released(base_url: str, timeout_s: float = 10.0) -> bool:
+    """Wait until nothing accepts connections on the server's port, for at most ``timeout_s``.
+
+    The recorded process can be gone while its port still answers for a moment: a process in its
+    group is still shutting down, or the exit is not finished. `restart` starts the new server
+    straight after `stop`, and the start's own port check then refused it with "port is already in
+    use". Saying "stopped" only once the port is free makes stop-then-start reliable.
+    """
+    parts = urlsplit(base_url)
+    try:
+        port = parts.port or {"http": 80, "https": 443}.get(parts.scheme)
+    except ValueError:
+        return True
+    if port is None:
+        return True
+    host = parts.hostname or "127.0.0.1"
+    deadline = time.monotonic() + timeout_s
+    while not http.port_is_free(host, port):
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.2)
+    return True
 
 
 # --------------------------------------------------------------------------- #
