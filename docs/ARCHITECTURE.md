@@ -135,7 +135,7 @@ that store rather than handed its own copy:
 - **Ollama.** A generated `Modelfile` with `FROM <abs path>` plus the tuned
   parameters, so Ollama's copy carries the tuning too.
 - **Jan.** Model folder plus `model.json`.
-- **Everything OpenAI-compatible** (Open WebUI, Continue, Aider, Zed, Cursor):
+- **Everything OpenAI-compatible** (Open WebUI, Continue, Aider, Zed, Cursor, OpenCode):
   emitted config snippets pointing at the local endpoint.
 
 Registration is idempotent, uses hardlink → symlink → copy in that order (cheapest

@@ -58,6 +58,7 @@ class Client(str, enum.Enum):
     AIDER = "aider"
     ZED = "zed"
     CURSOR = "cursor"
+    OPENCODE = "opencode"
     LLAMA_CPP = "llama_cpp"
     VLLM = "vllm"
     CUSTOM_OPENAI = "custom_openai"

@@ -58,6 +58,7 @@ CLIENT_OPTIONS = [
     Option("aider", "Aider"),
     Option("zed", "Zed"),
     Option("cursor", "Cursor"),
+    Option("opencode", "OpenCode"),
     Option("llama_cpp", "llama.cpp directly"),
     Option("vllm", "vLLM"),
     Option("custom_openai", "My own code, via the OpenAI API"),

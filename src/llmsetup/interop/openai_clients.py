@@ -1,6 +1,6 @@
 """Config snippets for everything that speaks the OpenAI API.
 
-Open WebUI, Continue, Aider, Zed and Cursor all just need a base URL, a model
+Open WebUI, Continue, Aider, Zed, Cursor and OpenCode all just need a base URL, a model
 name and a dummy key. Rather than editing their config files, which are the
 user's, and which we would have to merge correctly, llmsetup *emits* the exact
 snippet for each and tells the user where it goes. That keeps the tool honest
@@ -67,6 +67,12 @@ def snippets(endpoint: Endpoint, spec: ModelSpec,
                         f"Model name: {model}\n\n"
                         f"Cursor requires a publicly reachable URL for some features;\n"
                         f"expose the local port with a tunnel if chat does not connect.\n"),
+        },
+        Client.OPENCODE.value: {
+            "name": "OpenCode",
+            "path": "opencode.json in the project, or ~/.config/opencode/opencode.json",
+            "format": "json",
+            "content": _opencode(model, openai_base, config),
         },
         Client.CUSTOM_OPENAI.value: {
             "name": "Any OpenAI-compatible client / SDK",
@@ -165,8 +171,36 @@ def _zed(model: str, base: str, config: RuntimeConfig) -> str:
     ) + "\n"
 
 
+def _opencode(model: str, base: str, config: RuntimeConfig) -> str:
+    """OpenCode's provider block: any OpenAI-compatible server through @ai-sdk/openai-compatible.
+
+    The key under ``models`` has to be the name the server serves, which is the endpoint's model
+    name; ``/models`` inside OpenCode then lists it under the llmsetup provider.
+    """
+    return json.dumps(
+        {
+            "$schema": "https://opencode.ai/config.json",
+            "provider": {
+                "llmsetup": {
+                    "npm": "@ai-sdk/openai-compatible",
+                    "name": "llmsetup (local)",
+                    "options": {"baseURL": base, "apiKey": DUMMY_KEY},
+                    "models": {
+                        model: {
+                            "name": f"{model} (local)",
+                            "limit": {"context": config.context_tokens, "output": 4096},
+                        }
+                    },
+                }
+            },
+            "model": f"llmsetup/{model}",
+        },
+        indent=2,
+    ) + "\n"
+
+
 def client_ids() -> List[str]:
     return [
         Client.CONTINUE.value, Client.AIDER.value, Client.OPEN_WEBUI.value,
-        Client.ZED.value, Client.CURSOR.value, Client.CUSTOM_OPENAI.value,
+        Client.ZED.value, Client.CURSOR.value, Client.OPENCODE.value, Client.CUSTOM_OPENAI.value,
     ]

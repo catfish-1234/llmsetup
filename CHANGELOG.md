@@ -19,6 +19,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `--thinking` shows a reasoning model's separately streamed thinking; and
   `--base-url`/`--model`/`--api-key` reach any other OpenAI-compatible server.
 
+- `llmsetup export` (and the end of setup) writes an OpenCode snippet beside the
+  Continue, Aider, Zed and Cursor ones: a `provider` block for
+  `@ai-sdk/openai-compatible` pointing at the local endpoint, keyed by the model
+  name the server serves, with the context length the setup verified. OpenCode
+  is also offered as a client in the interview.
+
 ### Fixed
 
 - `python scripts/release.py` without `--yes` crashed with an `EOFError`
