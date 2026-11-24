@@ -78,6 +78,10 @@ llmsetup status
 llmsetup logs --follow
 llmsetup restart
 llmsetup stop
+
+# Talk to the verified model, or ask it one question.
+llmsetup chat
+llmsetup chat -m "Write a haiku about VRAM"
 ```
 
 `--task` is repeatable, for example `--task coding --task agent`. `--context`
@@ -138,6 +142,17 @@ process ID is never touched. For Ollama and LM Studio
 it shows the endpoint, since their daemons serve the model on demand. Only a
 setup whose checks passed can be started this way; after changing anything,
 run `llmsetup doctor`. Generated client snippets need a running endpoint.
+
+`llmsetup chat` talks to the model in the terminal: the background server if
+one is running, otherwise the last verified setup's endpoint, which has to be
+answering (`llmsetup start --detach` first). Replies stream as they are
+generated and are printed inert, like the log. `/reset` starts the conversation
+over, `/exit` or Ctrl-D leaves, and Ctrl-C stops a reply without ending the
+session. `-m "..."` asks one question and exits (`-m -` reads it from stdin,
+`--json` prints `{"model", "base_url", "reply"}`), `--system` sets a system
+prompt, and `--thinking` also shows the thinking a reasoning model streams
+separately. `--base-url` and `--model` point it at any other
+OpenAI-compatible server, with `--api-key` for one that needs a token.
 
 ## Other commands
 

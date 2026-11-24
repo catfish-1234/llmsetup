@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import platform
 import re
+import sys
 from typing import Any, Dict, Optional, Tuple, cast
 
 from llmsetup.util.proc import run
@@ -138,13 +139,16 @@ def memory_bytes() -> Tuple[int, Optional[int]]:
         except Exception:
             pass
 
-    # POSIX fallback.
-    try:
-        pages = os.sysconf("SC_PHYS_PAGES")
-        page_size = os.sysconf("SC_PAGE_SIZE")
-        return pages * page_size, None
-    except (ValueError, OSError, AttributeError):
-        return 0, None
+    # POSIX fallback. os.sysconf does not exist on Windows, and saying so lets mypy check this
+    # module on a Windows machine as well as on the Linux CI.
+    if sys.platform != "win32":
+        try:
+            pages = os.sysconf("SC_PHYS_PAGES")
+            page_size = os.sysconf("SC_PAGE_SIZE")
+            return pages * page_size, None
+        except (ValueError, OSError, AttributeError):
+            pass
+    return 0, None
 
 
 def _darwin_available(total: int) -> Optional[int]:

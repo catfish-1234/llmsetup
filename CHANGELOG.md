@@ -6,6 +6,31 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `llmsetup chat` talks to the verified model in the terminal, so the end of
+  a setup is a model you can use straight away rather than a URL to paste into
+  another client. It finds the endpoint the way `start` and `status` do (the
+  background server, else the last verified setup) and says what to run when
+  nothing is answering. Replies stream token by token and are printed inert,
+  so nothing a model writes can drive the terminal. `/reset`, `/exit`, Ctrl-D,
+  and Ctrl-C to stop one reply; `-m` asks a single question (`-m -` from
+  stdin, `--json` for scripts); `--system`, `--max-tokens`, `--temperature`;
+  `--thinking` shows a reasoning model's separately streamed thinking; and
+  `--base-url`/`--model`/`--api-key` reach any other OpenAI-compatible server.
+
+### Fixed
+
+- `python scripts/release.py` without `--yes` crashed with an `EOFError`
+  traceback on Windows when stdin was redirected from `NUL`, instead of saying
+  to rerun with `--yes`. Windows reports the `NUL` device as a terminal, so the
+  terminal check passed and the prompt then had nothing to read.
+- `mypy src` reported six errors on a Windows machine, for POSIX-only calls
+  (`os.killpg`, `os.getpgid`, `signal.SIGKILL`, `os.sysconf`) that only run
+  elsewhere. Those branches now test `sys.platform`, which mypy narrows on, so
+  the type check is clean on Windows, Linux and macOS alike. Behaviour is
+  unchanged.
+
 ## [0.4.0] - 2026-11-19
 
 ### Added

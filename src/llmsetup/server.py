@@ -234,21 +234,25 @@ def status() -> Dict[str, Any]:
     return report
 
 
+# sys.platform rather than os.name: mypy narrows on it, so the POSIX-only calls below type-check
+# on a Windows machine too (os.killpg, os.getpgid and signal.SIGKILL do not exist there).
 def _terminate(pid: int) -> None:
-    if os.name == "nt":
+    if sys.platform == "win32":
         run(["taskkill", "/PID", str(pid), "/T"], timeout=15)
     else:
         os.killpg(pid, signal.SIGTERM) if _is_group_leader(pid) else os.kill(pid, signal.SIGTERM)
 
 
 def _kill(pid: int) -> None:
-    if os.name == "nt":
+    if sys.platform == "win32":
         run(["taskkill", "/PID", str(pid), "/T", "/F"], timeout=15)
     else:
         os.killpg(pid, signal.SIGKILL) if _is_group_leader(pid) else os.kill(pid, signal.SIGKILL)
 
 
 def _is_group_leader(pid: int) -> bool:
+    if sys.platform == "win32":
+        return False
     try:
         return os.getpgid(pid) == pid
     except OSError:

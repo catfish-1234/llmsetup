@@ -72,7 +72,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "catalog": cmd_catalog, "runtimes": cmd_runtimes, "ui": cmd_ui,
         "report": cmd_report, "start": cmd_start, "status": cmd_status, "stop": cmd_stop,
         "restart": cmd_restart,
-        "logs": cmd_logs,
+        "logs": cmd_logs, "chat": cmd_chat,
     }.get(args.command)
 
     if handler is None:
@@ -243,6 +243,22 @@ def build_parser() -> argparse.ArgumentParser:
                         help="how many lines from the end to show (default 50)")
     p_logs.add_argument("-f", "--follow", action="store_true",
                         help="keep printing new lines until the server stops or you press Ctrl-C")
+
+    p_chat = sub.add_parser(
+        "chat", help="talk to the verified model in the terminal (or ask one question with -m)")
+    common(p_chat)
+    p_chat.add_argument("-m", "--message",
+                        help="ask one question, print the reply and exit; - reads it from stdin")
+    p_chat.add_argument("--system", help="a system prompt for the conversation")
+    p_chat.add_argument("--setup", type=Path, help="saved setup JSON whose model to talk to")
+    p_chat.add_argument("--base-url", help="talk to this OpenAI-compatible server instead")
+    p_chat.add_argument("--model", help="model name to request (default: the one the setup serves)")
+    p_chat.add_argument("--api-key", help="bearer token for a server that needs one")
+    p_chat.add_argument("--max-tokens", type=_positive_int, default=1024,
+                        help="longest reply, in tokens (default 1024)")
+    p_chat.add_argument("--temperature", type=float, default=0.7, help="sampling temperature (default 0.7)")
+    p_chat.add_argument("--thinking", action="store_true",
+                        help="also show the thinking a reasoning model streams separately")
 
     p_report = sub.add_parser(
         "report", help="reprint the last setup's report (paste this into a bug report)")
@@ -933,6 +949,27 @@ def cmd_logs(args, console: Console) -> int:
         print(json.dumps({"log": str(path), "lines": tail(path, args.lines)}, indent=2))
         return 0
     return logs(console, lines=args.lines, follow=args.follow)
+
+
+def cmd_chat(args, console: Console) -> int:
+    """Talk to the model from the last verified setup, or to any OpenAI-compatible server."""
+    from llmsetup.chat import ensure_answering, resolve_endpoint, run
+
+    message = args.message
+    if message == "-":
+        message = sys.stdin.read().strip()
+        if not message:
+            raise LlmsetupError("-m - read nothing from stdin", hint="pipe the question in, or pass it after -m")
+    if args.json and message is None:
+        raise LlmsetupError("--json needs a question to answer", hint='pass one with -m "..."')
+    if message is None and not sys.stdin.isatty():
+        raise LlmsetupError("chat needs a terminal to read from",
+                            hint='ask one question with -m "...", or pipe it in with -m -')
+    endpoint = resolve_endpoint(args.base_url, args.model, args.setup or (app_dir() / "last-setup.json"),
+                                api_key=args.api_key)
+    ensure_answering(endpoint)
+    return run(endpoint, console, message=message, system=args.system, max_tokens=args.max_tokens,
+               temperature=args.temperature, show_thinking=args.thinking, as_json=args.json)
 
 
 def _save_last(result) -> None:

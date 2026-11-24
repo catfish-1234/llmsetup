@@ -235,7 +235,13 @@ def run(argv: Optional[List[str]] = None) -> int:
     if not args.yes:
         if not sys.stdin.isatty():
             raise ReleaseError("Not a terminal: rerun with --yes to confirm.")
-        if input("\nCreate and push these tags? [y/N] ").strip().lower() not in ("y", "yes"):
+        try:
+            answer = input("\nCreate and push these tags? [y/N] ")
+        except EOFError:
+            # Windows reports the NUL device as a terminal, so stdin redirected from it passes the
+            # check above and then has nothing to read. That is still "not a terminal".
+            raise ReleaseError("Not a terminal: rerun with --yes to confirm.") from None
+        if answer.strip().lower() not in ("y", "yes"):
             print("Cancelled.")
             return 1
 
