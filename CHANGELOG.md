@@ -8,6 +8,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- `llmsetup connect <tool>` writes the verified model into the tool's own
+  config instead of leaving a snippet to paste: OpenCode (`opencode.json`, user
+  or `--project`), Continue (`config.yaml`), Aider (`.aider.conf.yml`) and Zed
+  (`settings.json`); Open WebUI and Cursor, which are set up in their own
+  screens, get the exact steps. It merges an llmsetup entry and keeps everything
+  else, replaces only what it added earlier, takes `--default` to make it the
+  tool's default model, and `--dry-run` shows the result. A config with comments
+  is left alone, with the snippet printed, unless `--rewrite`, since rewriting
+  JSON or YAML loses them; Zed's OpenAI provider is never repointed away from a
+  real remote service. Every write is backed up and journalled, so
+  `llmsetup undo` restores the file exactly.
+
 - Everything llmsetup changes outside its own directory is journalled, and
   `llmsetup undo` reverses it: the newest run by default, `--run ID` one run,
   `--all` everything, `--dry-run` to preview. That covers the links it places in

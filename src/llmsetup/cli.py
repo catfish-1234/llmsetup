@@ -24,7 +24,7 @@ import json
 import sys
 from dataclasses import replace
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from llmsetup.catalog.catalog import Catalog, load_catalog
 from llmsetup.hardware import apply_overrides, detect_hardware
@@ -72,7 +72,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "catalog": cmd_catalog, "runtimes": cmd_runtimes, "ui": cmd_ui,
         "report": cmd_report, "start": cmd_start, "status": cmd_status, "stop": cmd_stop,
         "restart": cmd_restart,
-        "logs": cmd_logs, "chat": cmd_chat, "changes": cmd_changes, "undo": cmd_undo,
+        "logs": cmd_logs, "chat": cmd_chat, "changes": cmd_changes, "undo": cmd_undo, "connect": cmd_connect,
     }.get(args.command)
 
     if handler is None:
@@ -247,6 +247,24 @@ def build_parser() -> argparse.ArgumentParser:
                         help="how many lines from the end to show (default 50)")
     p_logs.add_argument("-f", "--follow", action="store_true",
                         help="keep printing new lines until the server stops or you press Ctrl-C")
+
+    p_connect = sub.add_parser(
+        "connect", help="write the verified model into a tool's own config (opencode, continue, aider, zed, ...)")
+    common(p_connect)
+    p_connect.add_argument("harness", nargs="?", help="the tool to connect; omit to list them")
+    p_connect.add_argument("--list", action="store_true", help="list the tools connect knows")
+    p_connect.add_argument("--config", type=Path, help="edit this config file instead of the tool's usual one")
+    p_connect.add_argument("--project", action="store_true",
+                           help="use the project's config in this folder instead of your user config")
+    p_connect.add_argument("--default", action="store_true",
+                           help="also make it the tool's default model, where the tool has one")
+    p_connect.add_argument("--rewrite", action="store_true",
+                           help="rewrite a config that has comments (they are lost; undo restores the original)")
+    p_connect.add_argument("--dry-run", action="store_true", help="print the resulting config, write nothing")
+    p_connect.add_argument("--setup", type=Path, help="saved setup JSON whose model to connect")
+    p_connect.add_argument("--base-url", help="connect this OpenAI-compatible server instead")
+    p_connect.add_argument("--model", help="model name the server serves")
+    p_connect.add_argument("--api-key", help="bearer token for a server that needs one")
 
     p_changes = sub.add_parser(
         "changes", help="list what llmsetup changed in other apps and config files, by run")
@@ -966,6 +984,80 @@ def cmd_logs(args, console: Console) -> int:
         print(json.dumps({"log": str(path), "lines": tail(path, args.lines)}, indent=2))
         return 0
     return logs(console, lines=args.lines, follow=args.follow)
+
+
+def _connect_context(endpoint, setup_path: Path):
+    """The spec and settings the verified setup has for ``endpoint``, or conservative stand-ins."""
+    from dataclasses import fields
+
+    from llmsetup.types import RuntimeConfig
+    from llmsetup.util.fs import read_json
+
+    loaded = read_json(setup_path) if setup_path.exists() else None
+    saved: Dict[str, Any] = loaded if isinstance(loaded, dict) else {}
+    stored: Dict[str, Any] = saved["config"] if isinstance(saved.get("config"), dict) else {}
+    launch: Dict[str, Any] = saved["launch"] if isinstance(saved.get("launch"), dict) else {}
+    served = launch.get("served_model") or stored.get("served_name") or launch.get("model_id")
+    catalog = load_catalog()
+    if stored and served == endpoint.model:
+        known = {f.name for f in fields(RuntimeConfig)}
+        config = RuntimeConfig(**{k: v for k, v in stored.items() if k in known})
+        spec = catalog.get(config.model_id) or _synthetic_spec(endpoint.model, catalog)
+        return spec, config
+    spec = catalog.get(endpoint.model) or _synthetic_spec(endpoint.model, catalog)
+    return spec, RuntimeConfig(runtime="external", model_id=endpoint.model, quant="unknown",
+                               context_tokens=min(spec.max_context, 8192))
+
+
+def cmd_connect(args, console: Console) -> int:
+    """Write the verified endpoint into another tool's config, journalled so undo restores it."""
+    from llmsetup.chat import resolve_endpoint
+    from llmsetup.connect import (
+        HARNESSES,
+        INSTRUCTIONS_ONLY,
+        Target,
+        connect,
+        instructions,
+        supported,
+    )
+
+    if args.list or not args.harness:
+        for harness_id in supported():
+            how = (f"writes {HARNESSES[harness_id].path(False)}" if harness_id in HARNESSES
+                   else "prints the steps for its settings screen")
+            console.print(f"  {harness_id:<14} {how}")
+        return 0
+    harness_id = args.harness.lower().replace("-", "_")
+    if harness_id not in supported():
+        raise LlmsetupError(f"connect does not know {args.harness}",
+                            hint="one of: " + ", ".join(supported()))
+    setup_path = args.setup or (app_dir() / "last-setup.json")
+    endpoint = resolve_endpoint(args.base_url, args.model, setup_path, api_key=args.api_key)
+    spec, config = _connect_context(endpoint, setup_path)
+    target = Target(endpoint=endpoint, spec=spec, config=config, make_default=args.default)
+
+    if harness_id in INSTRUCTIONS_ONLY:
+        steps = instructions(harness_id, target)
+        if args.json:
+            print(json.dumps(steps, indent=2))
+        else:
+            console.step(f"{steps['name']}: {steps['path']}")
+            print(steps["content"])
+        return 0
+
+    result = connect(harness_id, target, path=args.config, project=args.project,
+                     rewrite=args.rewrite, dry_run=args.dry_run)
+    if args.json:
+        print(json.dumps({k: v for k, v in result.items() if args.dry_run or k != "content"}, indent=2))
+    elif args.dry_run:
+        console.step(f"{result['name']}: {result['path']} would become")
+        print(result["content"], end="")
+    elif not result["changed"]:
+        console.ok(f"{result['name']} already lists {result['model']} at {result['base_url']}")
+    else:
+        console.ok(f"{result['name']} now lists {result['model']} at {result['base_url']} ({result['path']})")
+        console.info("`llmsetup undo` puts the file back as it was")
+    return 0
 
 
 def cmd_changes(args, console: Console) -> int:
