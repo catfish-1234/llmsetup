@@ -18,6 +18,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from llmsetup import changes
 from llmsetup.download import is_projector
 from llmsetup.types import ModelSpec, RuntimeConfig
 from llmsetup.util.fs import link_or_copy, safe_component, safe_subpath
@@ -64,6 +65,11 @@ def register_in_lmstudio(spec: ModelSpec, gguf_path: Path, quant: str,
     if which("lms") and projector is None:
         result = run(["lms", "import", str(gguf_path), "--yes"], timeout=900)
         if result.ok:
+            # LM Studio owns what `lms import` did inside its library, so undoing it is LM Studio's
+            # to do; the journal says how rather than guessing at its folder layout.
+            changes.manual("lm_studio", f"LM Studio imported {gguf_path.name} with `lms import`; "
+                           "delete it in LM Studio under My Models if you no longer want it",
+                           path=str(gguf_path))
             return {"target": "lm_studio", "ok": True, "method": "lms import",
                     "path": str(gguf_path),
                     "note": "visible in LM Studio's My Models list"}
@@ -73,7 +79,12 @@ def register_in_lmstudio(spec: ModelSpec, gguf_path: Path, quant: str,
         files = [*files, projector]
     for shard in files:
         destination = target_path(spec, quant, shard.name)
+        new_folders = [d for d in (destination.parent.parent, destination.parent) if not d.exists()]
         method, path = link_or_copy(shard, destination)
+        for folder in new_folders:
+            changes.created_dir("lm_studio", folder)
+        if method != "existing":
+            changes.created("lm_studio", path)
         linked.append(str(path))
 
     return {

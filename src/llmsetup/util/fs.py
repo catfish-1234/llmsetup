@@ -102,7 +102,18 @@ def link_or_copy(src: Path, dst: Path) -> Tuple[str, Path]:
                 f"{dst} is a directory; expected a file or nothing. "
                 f"Move it aside and retry."
             )
-        dst.unlink()
+        if dst.is_symlink():
+            # Removing a link never removes what it points at.
+            dst.unlink()
+        else:
+            # A real file is somebody's data, perhaps the user's own download under the same
+            # name. It used to be deleted here. It is renamed aside in the same folder instead,
+            # which is instant even for weights, and journalled so `llmsetup undo` puts it back.
+            from llmsetup import changes
+
+            aside = _free_name(dst.with_name(dst.name + ".llmsetup-backup"))
+            dst.rename(aside)
+            changes.moved_aside(dst, aside)
 
     try:
         os.link(str(src), str(dst))
@@ -116,6 +127,15 @@ def link_or_copy(src: Path, dst: Path) -> Tuple[str, Path]:
         pass
     shutil.copy2(str(src), str(dst))
     return "copy", dst
+
+
+def _free_name(path: Path) -> Path:
+    """``path``, or ``path`` with a counter appended, whichever does not exist yet."""
+    candidate, counter = path, 1
+    while candidate.exists() or candidate.is_symlink():
+        counter += 1
+        candidate = path.with_name(f"{path.name}.{counter}")
+    return candidate
 
 
 def _same_file(a: Path, b: Path) -> bool:

@@ -72,7 +72,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "catalog": cmd_catalog, "runtimes": cmd_runtimes, "ui": cmd_ui,
         "report": cmd_report, "start": cmd_start, "status": cmd_status, "stop": cmd_stop,
         "restart": cmd_restart,
-        "logs": cmd_logs, "chat": cmd_chat,
+        "logs": cmd_logs, "chat": cmd_chat, "changes": cmd_changes, "undo": cmd_undo,
     }.get(args.command)
 
     if handler is None:
@@ -81,7 +81,11 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     rerun = "Rerun: " + format_command(["llmsetup", *(argv if argv is not None else sys.argv[1:])])
     try:
-        code = handler(args, console)
+        from llmsetup import changes
+
+        # One journal run per command, so `llmsetup undo` reverses a whole setup or export at once.
+        with changes.run(args.command):
+            code = handler(args, console)
         # `status` reports state through its exit code (3: not running), like
         # `systemctl status`; that is an answer, not a failure to rerun.
         if code and args.command != "status":
@@ -243,6 +247,19 @@ def build_parser() -> argparse.ArgumentParser:
                         help="how many lines from the end to show (default 50)")
     p_logs.add_argument("-f", "--follow", action="store_true",
                         help="keep printing new lines until the server stops or you press Ctrl-C")
+
+    p_changes = sub.add_parser(
+        "changes", help="list what llmsetup changed in other apps and config files, by run")
+    common(p_changes)
+
+    p_undo = sub.add_parser(
+        "undo", help="reverse what the last run changed outside llmsetup (or --all, or --run ID)")
+    common(p_undo)
+    p_undo.add_argument("--run", help="undo this run (an id from `llmsetup changes`) instead of the last one")
+    p_undo.add_argument("--all", dest="undo_all", action="store_true", help="undo every recorded change")
+    p_undo.add_argument("--dry-run", action="store_true", help="show what would be undone, change nothing")
+    p_undo.add_argument("--force", action="store_true",
+                        help="also undo changes to files edited since llmsetup wrote them")
 
     p_chat = sub.add_parser(
         "chat", help="talk to the verified model in the terminal (or ask one question with -m)")
@@ -949,6 +966,66 @@ def cmd_logs(args, console: Console) -> int:
         print(json.dumps({"log": str(path), "lines": tail(path, args.lines)}, indent=2))
         return 0
     return logs(console, lines=args.lines, follow=args.follow)
+
+
+def cmd_changes(args, console: Console) -> int:
+    """List the journal of changes llmsetup made outside its own directory."""
+    from llmsetup import changes
+
+    history = changes.runs()
+    if args.json:
+        print(json.dumps(history, indent=2))
+        return 0
+    if not history:
+        console.info("llmsetup has not changed anything outside its own directory")
+        return 0
+    for group in history:
+        state = f"{group['pending']} to undo" if group["pending"] else "undone"
+        console.print(console.bold(f"{group['at']}  llmsetup {group['command']}  (run {group['run']}, {state})"))
+        for change in group["changes"]:
+            what = change.get("path") or change.get("name") or change.get("note", "")
+            mark = " " if change["status"] == "pending" else "x"
+            console.print(f"  [{mark}] {change['target']:<10} {change['kind']:<12} {what}")
+    console.print()
+    console.info("`llmsetup undo` reverses the newest run; `--run ID` one run, `--all` everything")
+    return 0
+
+
+def cmd_undo(args, console: Console) -> int:
+    """Reverse recorded changes: the newest run by default."""
+    from llmsetup import changes
+
+    pending = changes.pending_changes()
+    if args.run:
+        targets = [c for c in pending if c["run"] == args.run]
+        if not targets:
+            raise LlmsetupError(f"run {args.run} has nothing left to undo",
+                                hint="`llmsetup changes` lists the runs and what each changed")
+    elif args.undo_all:
+        targets = pending
+    else:
+        # The journal is append-only, so its order is the order things happened in; timestamps
+        # have one-second resolution and would tie for runs a second apart.
+        newest = pending[-1]["run"] if pending else None
+        targets = [c for c in pending if c["run"] == newest]
+    if not targets:
+        console.info("nothing to undo")
+        return 0
+    results = changes.undo(targets, force=args.force, dry_run=args.dry_run)
+    if args.json:
+        print(json.dumps(results, indent=2))
+    else:
+        verb = "would undo" if args.dry_run else "undid"
+        for outcome in results:
+            report = {"undone": console.ok, "already": console.info, "manual": console.warn,
+                      "kept": console.warn, "failed": console.error}[outcome["status"]]
+            report(f"{outcome['target']}: {outcome['note']}")
+        done = sum(o["status"] in ("undone", "already") for o in results)
+        console.print()
+        console.info(f"{verb} {done} of {len(results)} change(s)"
+                     + ("; run with --force to also undo files edited since" if any(
+                         o["status"] == "kept" for o in results) else ""))
+    return 1 if any(o["status"] == "failed" for o in results) else 0
 
 
 def cmd_chat(args, console: Console) -> int:

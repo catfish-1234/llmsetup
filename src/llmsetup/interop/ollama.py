@@ -11,6 +11,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from llmsetup import changes
 from llmsetup.types import ModelSpec, RuntimeConfig
 from llmsetup.util import http
 from llmsetup.util.fs import app_dir, ensure_dir, write_text
@@ -53,6 +54,7 @@ def register_in_ollama(spec: ModelSpec, config: RuntimeConfig,
     if not result.ok:
         return {"target": "ollama", "ok": False, "modelfile": str(path),
                 "note": f"`ollama create` failed: {result.output.strip()[:300]}"}
+    changes.ollama_model(tag)
     note = (f"run it with `ollama run {tag}`"
             + ("; note Ollama copied the weights into its own store, so they "
                "occupy disk twice" if duplicates_disk else

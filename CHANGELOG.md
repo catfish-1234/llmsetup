@@ -8,6 +8,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Everything llmsetup changes outside its own directory is journalled, and
+  `llmsetup undo` reverses it: the newest run by default, `--run ID` one run,
+  `--all` everything, `--dry-run` to preview. That covers the links it places in
+  LM Studio's and Jan's model folders, Jan's `model.json`, the Ollama tags it
+  creates, and the client configs `llmsetup connect` writes. A file is removed
+  or restored only while it is still what llmsetup left there; one edited since
+  is reported and kept, unless `--force`. `llmsetup changes` lists the journal by
+  run (`--json` for scripts).
+
 - `llmsetup chat` talks to the verified model in the terminal, so the end of
   a setup is a model you can use straight away rather than a URL to paste into
   another client. It finds the endpoint the way `start` and `status` do (the
@@ -27,6 +36,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Registering a model could delete a file already at the destination: when
+  LM Studio's or Jan's folder held a different file of the same name, such as
+  your own download, it was unlinked to make room. It is now renamed aside in
+  the same folder (`<name>.llmsetup-backup`) and journalled, and `llmsetup undo`
+  puts it back.
 - `llmsetup restart` could fail with "port is already in use" right after
   stopping the old server: `stop` said "stopped" as soon as the recorded process
   was gone, while its port could still accept connections for a moment, and the

@@ -12,6 +12,7 @@ import platform
 from pathlib import Path
 from typing import Any, Dict
 
+from llmsetup import changes
 from llmsetup.types import ModelSpec, RuntimeConfig
 from llmsetup.util.fs import link_or_copy, safe_subpath, write_json
 
@@ -39,7 +40,12 @@ def register_in_jan(spec: ModelSpec, gguf_path: Path,
         return {"target": "jan", "ok": False, "note": "Jan is not installed; skipped"}
 
     folder = safe_subpath(data_dir() / "models", spec.id)
+    folder_existed = folder.exists()
     method, linked = link_or_copy(gguf_path, folder / gguf_path.name)
+    if not folder_existed:
+        changes.created_dir("jan", folder)
+    if method != "existing":
+        changes.created("jan", linked)
 
     descriptor = {
         "object": "model",
@@ -69,6 +75,9 @@ def register_in_jan(spec: ModelSpec, gguf_path: Path,
         },
         "engine": "nitro",
     }
-    write_json(folder / "model.json", descriptor)
+    descriptor_path = folder / "model.json"
+    backup = changes.backup_before_edit(descriptor_path)
+    write_json(descriptor_path, descriptor)
+    changes.modified("jan", descriptor_path, backup)
     return {"target": "jan", "ok": True, "method": method, "path": str(folder),
             "note": "restart Jan to see it in the model list"}
