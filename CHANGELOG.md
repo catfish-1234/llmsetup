@@ -39,7 +39,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   is left alone, with the snippet printed, unless `--rewrite`, since rewriting
   JSON or YAML loses them; Zed's OpenAI provider is never repointed away from a
   real remote service. Every write is backed up and journalled, so
-  `llmsetup undo` restores the file exactly.
+  `llmsetup undo` restores the file exactly. `connect claude-code` points Claude
+  Code at the server's Anthropic Messages API (every model alias it asks for is
+  the local model) as a per-launch command, or in a project's
+  `.claude/settings.local.json` with `--project`, never in the user-wide
+  settings, and warns when the verified context is under the 32K its prompts
+  need. `connect codex` prints the `config.toml` provider and profile, with the
+  caveat that some local servers reject the tools recent Codex releases send.
 
 - Everything llmsetup changes outside its own directory is journalled, and
   `llmsetup undo` reverses it: the newest run by default, `--run ID` one run,

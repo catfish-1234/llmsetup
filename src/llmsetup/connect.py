@@ -148,15 +148,99 @@ def _merge_zed(doc: Dict[str, Any], target: Target) -> Dict[str, Any]:
     return doc
 
 
+def claude_code_env(target: Target) -> Dict[str, str]:
+    """What points Claude Code at the local server, which must speak the Anthropic Messages API.
+
+    The base URL is the server root, without /v1. Every model alias Claude Code asks for (its
+    main model, and the small one it uses for background work) is the local model, so it never
+    asks the server for a model name it does not serve.
+    """
+    token = target.endpoint.headers.get("Authorization", "").removeprefix("Bearer ").strip() or "llmsetup"
+    model = target.model
+    return {
+        "ANTHROPIC_BASE_URL": target.endpoint.base_url.rstrip("/"),
+        "ANTHROPIC_AUTH_TOKEN": token,
+        "ANTHROPIC_MODEL": model,
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": model,
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": model,
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": model,
+    }
+
+
+def _claude_code_path(project: bool) -> Path:
+    if not project:
+        # The user-wide settings would send every Claude Code session to the local model.
+        raise ConnectRefused("connect writes Claude Code's settings only for one project",
+                             hint="rerun with --project in that project's folder, or launch it with the "
+                                  "command `llmsetup connect claude-code` prints")
+    return Path.cwd() / ".claude" / "settings.local.json"
+
+
+def _merge_claude_code(doc: Dict[str, Any], target: Target) -> Dict[str, Any]:
+    env = doc.setdefault("env", {})
+    if not isinstance(env, dict):
+        raise ConnectRefused("its `env` field is not an object")
+    env.update(claude_code_env(target))
+    return doc
+
+
+#: Claude Code's system prompt and tool definitions alone run to tens of thousands of tokens.
+CLAUDE_CODE_MIN_CONTEXT = 32768
+
+
+def claude_code_steps(target: Target) -> Dict[str, str]:
+    env = claude_code_env(target)
+    posix = " ".join(f"{k}={v}" for k, v in env.items())
+    powershell = "; ".join(f'$env:{k}="{v}"' for k, v in env.items())
+    note = ""
+    if target.config.context_tokens < CLAUDE_CODE_MIN_CONTEXT:
+        note = (f"\nThe verified context is {target.config.context_tokens:,} tokens; Claude Code's prompts "
+                f"need at least {CLAUDE_CODE_MIN_CONTEXT:,}. Rerun setup with "
+                f"--set context_tokens={CLAUDE_CODE_MIN_CONTEXT * 2} if it fits.\n")
+    return {
+        "name": "Claude Code",
+        "path": "per launch, or a project's .claude/settings.local.json with --project",
+        "format": "text",
+        "content": (
+            "The server must speak the Anthropic Messages API: llama.cpp from January 2026, "
+            "Ollama, and LM Studio 0.4.1 or later do.\n\n"
+            f"bash / zsh:\n  {posix} claude\n\n"
+            f"PowerShell:\n  {powershell}; claude\n\n"
+            "Or for one project, which writes .claude/settings.local.json (undo restores it):\n"
+            f"  llmsetup connect claude-code --project\n{note}"),
+    }
+
+
+def codex_steps(target: Target) -> Dict[str, str]:
+    return {
+        "name": "Codex CLI",
+        "path": "~/.codex/config.toml",
+        "format": "toml",
+        "content": (
+            "[model_providers.llmsetup]\n"
+            'name = "llmsetup (local)"\n'
+            f'base_url = "{target.base}"\n'
+            'wire_api = "responses"\n\n'
+            "[profiles.llmsetup]\n"
+            'model_provider = "llmsetup"\n'
+            f'model = "{target.model}"\n\n'
+            "# then: codex --profile llmsetup\n"
+            "# Codex speaks only the Responses API. Some local servers reject the non-function\n"
+            "# tools recent Codex releases send; if it fails on tools, OpenCode or Claude Code\n"
+            "# (`llmsetup connect opencode`, `llmsetup connect claude-code`) work with this model.\n"),
+    }
+
+
 HARNESSES: Dict[str, Harness] = {
     "opencode": Harness("opencode", "OpenCode", "json", _opencode_path, _merge_opencode),
     "continue": Harness("continue", "Continue (VS Code / JetBrains)", "yaml", _continue_path, _merge_continue),
     "aider": Harness("aider", "Aider", "yaml", _aider_path, _merge_aider),
     "zed": Harness("zed", "Zed", "json", _zed_path, _merge_zed),
+    "claude_code": Harness("claude_code", "Claude Code", "json", _claude_code_path, _merge_claude_code),
 }
 
-#: Configured in the tool's own interface, so connect prints the steps.
-INSTRUCTIONS_ONLY = {"open_webui", "cursor", "custom_openai"}
+#: Configured in the tool's own interface, or through a file connect does not edit: it prints the steps.
+INSTRUCTIONS_ONLY = {"open_webui", "cursor", "custom_openai", "codex"}
 
 
 # --------------------------------------------------------------------------- #
@@ -232,7 +316,8 @@ def connect(harness_id: str, target: Target, *, path: Optional[Path] = None, pro
     harness = HARNESSES[harness_id]
     path = path or harness.path(project)
     original = path.read_text(encoding="utf-8") if path.exists() else None
-    snippet = snippets(target.endpoint, target.spec, target.config)[harness_id]
+    snippet = (claude_code_steps(target) if harness_id == "claude_code"
+               else snippets(target.endpoint, target.spec, target.config)[harness_id])
 
     def refuse(reason: str) -> ConnectRefused:
         return ConnectRefused(
@@ -282,7 +367,11 @@ def connect(harness_id: str, target: Target, *, path: Optional[Path] = None, pro
 
 
 def instructions(harness_id: str, target: Target) -> Dict[str, str]:
-    """For a tool configured in its own UI: where to go and what to enter."""
+    """For a tool connect does not write to: where to go and what to enter."""
+    if harness_id == "codex":
+        return codex_steps(target)
+    if harness_id == "claude_code":
+        return claude_code_steps(target)
     return snippets(target.endpoint, target.spec, target.config)[harness_id]
 
 

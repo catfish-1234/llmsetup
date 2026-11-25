@@ -133,3 +133,43 @@ class TestCommand:
     def test_an_unknown_tool_lists_the_known_ones(self, capsys):
         assert main(["connect", "notepad", "--base-url", "http://127.0.0.1:8080", "--model", "x"]) == 1
         assert "opencode" in capsys.readouterr().err
+
+
+class TestClaudeCodeAndCodex:
+    def test_claude_code_without_project_prints_the_launch_command_and_writes_nothing(self, tmp_path, capsys,
+                                                                                    monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        assert main(["connect", "claude-code", "--base-url", "http://127.0.0.1:8080", "--model", "local"]) == 0
+        out = capsys.readouterr().out
+        assert "ANTHROPIC_BASE_URL=http://127.0.0.1:8080 " in out and "ANTHROPIC_MODEL=local" in out
+        assert "/v1" not in out.split("ANTHROPIC_BASE_URL=")[1].split()[0]
+        assert not (tmp_path / ".claude").exists()
+
+    def test_claude_code_for_one_project_merges_its_env_and_undo_restores_it(self, tmp_path):
+        path = tmp_path / ".claude" / "settings.local.json"
+        path.parent.mkdir()
+        original = json.dumps({"permissions": {"allow": ["Bash(ls)"]}, "env": {"MY_VAR": "1"}})
+        path.write_text(original)
+        args = ["connect", "claude-code", "--base-url", "http://127.0.0.1:8080", "--model", "local",
+                "--config", str(path), "--api-key", "s3cret"]
+        assert main(args) == 0
+        doc = json.loads(path.read_text())
+        assert doc["permissions"] == {"allow": ["Bash(ls)"]} and doc["env"]["MY_VAR"] == "1"
+        assert doc["env"]["ANTHROPIC_AUTH_TOKEN"] == "s3cret"
+        assert doc["env"]["ANTHROPIC_DEFAULT_HAIKU_MODEL"] == "local"
+        assert main(["undo"]) == 0
+        assert path.read_text() == original
+
+    def test_claude_code_warns_when_the_context_is_too_small_for_its_prompts(self, target):
+        from llmsetup.connect import claude_code_steps
+
+        target.config.context_tokens = 8192
+        assert "--set context_tokens=65536" in claude_code_steps(target)["content"]
+        target.config.context_tokens = 65536
+        assert "--set context_tokens" not in claude_code_steps(target)["content"]
+
+    def test_codex_gets_a_responses_provider_and_a_caveat(self, capsys):
+        assert main(["connect", "codex", "--base-url", "http://127.0.0.1:8080", "--model", "local"]) == 0
+        out = capsys.readouterr().out
+        assert 'wire_api = "responses"' in out and 'base_url = "http://127.0.0.1:8080/v1"' in out
+        assert "codex --profile llmsetup" in out

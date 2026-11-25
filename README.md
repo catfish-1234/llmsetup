@@ -195,13 +195,22 @@ llmsetup connect opencode --default
 llmsetup connect continue
 llmsetup connect aider --project
 llmsetup connect zed --dry-run   # print the result, change nothing
+llmsetup connect claude-code     # the launch command; --project writes .claude/settings.local.json
+llmsetup connect codex           # the ~/.codex/config.toml provider and profile
 ```
 
 It merges an llmsetup entry and keeps everything else in the file, replaces
 only what it added before, and leaves a config that has comments alone (with
 the snippet printed) unless you pass `--rewrite`, since rewriting JSON or YAML
 loses them. Open WebUI and Cursor are set up in their own screens, so `connect`
-prints the steps.
+prints the steps. Claude Code needs a server that speaks the Anthropic Messages
+API (llama.cpp from January 2026, Ollama, LM Studio 0.4.1 or later) and its
+prompts need at least 32K tokens of context; `connect claude-code` prints the
+per-launch command, and writes settings only for one project with `--project`,
+since the user-wide file would send every Claude Code session to the local
+model. Codex speaks only the Responses API, and some local servers reject the
+tools recent releases send, so `connect codex` prints its config with that
+caveat rather than writing it.
 
 Everything llmsetup changes outside its own directory is recorded: links in
 LM Studio's and Jan's model folders, Jan's `model.json`, Ollama tags, and every

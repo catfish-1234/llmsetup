@@ -1113,8 +1113,14 @@ def cmd_connect(args, console: Console) -> int:
 
     if args.list or not args.harness:
         for harness_id in supported():
-            how = (f"writes {HARNESSES[harness_id].path(False)}" if harness_id in HARNESSES
-                   else "prints the steps for its settings screen")
+            if harness_id == "claude_code":
+                how = "prints the launch command; --project writes .claude/settings.local.json"
+            elif harness_id in HARNESSES:
+                how = f"writes {HARNESSES[harness_id].path(False)}"
+            elif harness_id == "codex":
+                how = "prints the ~/.codex/config.toml provider and profile"
+            else:
+                how = "prints the steps for its settings screen"
             print(f"  {harness_id:<14} {how}")
         return 0
     harness_id = args.harness.lower().replace("-", "_")
@@ -1126,7 +1132,10 @@ def cmd_connect(args, console: Console) -> int:
     spec, config = _connect_context(endpoint, setup_path)
     target = Target(endpoint=endpoint, spec=spec, config=config, make_default=args.default)
 
-    if harness_id in INSTRUCTIONS_ONLY:
+    # Claude Code's user-wide settings would redirect every session, so it is written only per project.
+    prints_steps = harness_id in INSTRUCTIONS_ONLY or (
+        harness_id == "claude_code" and not args.project and args.config is None)
+    if prints_steps:
         steps = instructions(harness_id, target)
         if args.json:
             print(json.dumps(steps, indent=2))
