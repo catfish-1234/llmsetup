@@ -131,7 +131,10 @@ class LlamaCppRuntime(Runtime):
 
         for flag in config.extra.get("llamacpp_flags", []):
             cmd.append(str(flag))
-        return self._drop_unsupported(cmd)
+        # Flags you passed with --engine-arg come after the unsupported-flag filter: that filter
+        # keeps llmsetup's own flags compatible with the installed build, and a flag you typed
+        # yourself should reach the engine as given, or fail where you can see it.
+        return self._drop_unsupported(cmd) + [str(flag) for flag in config.extra.get("engine_args", [])]
 
     def _load_mode_flags(self, config: RuntimeConfig) -> List[str]:
         """How the weights get into memory.

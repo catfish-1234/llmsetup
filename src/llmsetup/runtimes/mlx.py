@@ -80,6 +80,7 @@ class MlxRuntime(Runtime):
             "--host", config.host,
             "--port", str(config.port),
             "--max-tokens", str(config.extra.get("max_tokens", 2048)),
+            *(str(flag) for flag in config.extra.get("engine_args", [])),
         ]
 
     def start(self, spec: ModelSpec, config: RuntimeConfig, console: Console) -> Endpoint:

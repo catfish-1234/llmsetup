@@ -55,7 +55,8 @@ class Pipeline:
                  catalog: Catalog, console: Console, *,
                  runtime_name: Optional[str] = None, quick: bool = False,
                  dry_run: bool = False, max_repairs: int = 12,
-                 register: bool = True, sweep: bool = False, cached_only: bool = False):
+                 register: bool = True, sweep: bool = False, cached_only: bool = False,
+                 overrides: Optional[Dict[str, Any]] = None, engine_args: Optional[List[str]] = None):
         self.profile = profile
         self.hardware = hardware
         self.catalog = catalog
@@ -67,6 +68,8 @@ class Pipeline:
         self.register = register
         self.sweep = sweep
         self.cached_only = cached_only
+        self.overrides = overrides or {}
+        self.engine_args = list(engine_args or [])
         self._endpoint: Optional[Endpoint] = None
         self._runtime: Optional[Runtime] = None
 
@@ -310,6 +313,12 @@ class Pipeline:
         tuned = tune(candidate, self.hardware, self.profile, plan.runtime,
                      catalog=self.catalog)
         config = tuned.config
+        if self.overrides or self.engine_args:
+            from llmsetup.tuning.overrides import apply_overrides
+
+            config, notes = apply_overrides(config, self.overrides, self.engine_args)
+            for note in notes:
+                self.console.info(note)
         if getattr(self, "_portable_cpu", False):
             config.extra["portable_runtime"] = True
         for line in tuned.explain():

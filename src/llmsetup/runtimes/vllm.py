@@ -110,6 +110,7 @@ class VllmRuntime(Runtime):
             # family gets no parser rather than a plausible-looking default.
             cmd += ["--enable-auto-tool-choice", "--tool-call-parser", str(parser)]
         cmd += self._advanced_flags(config)
+        cmd += [str(flag) for flag in config.extra.get("engine_args", [])]
         return cmd
 
     def _advanced_flags(self, config: RuntimeConfig) -> List[str]:

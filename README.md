@@ -154,6 +154,70 @@ prompt, and `--thinking` also shows the thinking a reasoning model streams
 separately. `--base-url` and `--model` point it at any other
 OpenAI-compatible server, with `--api-key` for one that needs a token.
 
+## Any model, any setting, any tool, and undo
+
+The catalog is what llmsetup recommends. It does not limit what you can run:
+
+```bash
+# Any GGUF repo on Hugging Face; architecture comes from its config or its base model.
+llmsetup setup --model hf:bartowski/SomeModel-GGUF
+
+# A derivative of a catalog model, found on Hugging Face: abliterated (or heretic,
+# uncensored, or any other name), a fine-tune, a merge.
+llmsetup setup --model qwen3-8b --variant abliterated
+
+# Override anything the tuner chose, and pass flags straight to the engine.
+llmsetup settings                       # what --set can change
+llmsetup setup --set context_tokens=32768 --set flash_attention=true   --set kv_cache_type=q8_0 --engine-arg=--no-warmup
+```
+
+`--model hf:` and `--variant` add an ordinary entry to your overlay catalog
+(`catalog.d/hub.yaml` in the data directory), so the model is planned, fitted
+and verified like any other. A variant keeps its base model's architecture,
+which a fine-tune or abliteration does not change, so its memory plan is as
+exact as the base's, and it never falls back to the base's own Ollama tag or
+weights. Discovery still never *recommends* a decensored model; `--variant` is
+how you ask for one. Read the variant's model card: its behaviour and licence
+terms are its publisher's. `--set` takes any runtime setting (`llmsetup
+settings` lists them with their types) and is applied after tuning and before
+verification, so what is verified, saved and restarted is what you asked for;
+`--no-repair` keeps your values exactly instead of letting repair adjust one
+that fails. `--engine-arg` reaches llama.cpp, vLLM and MLX as given. Setting
+`host` beyond loopback is called out, since anyone who can reach the machine
+can then use the model.
+
+`llmsetup connect` writes the verified model into another tool's own config
+instead of leaving a snippet to paste:
+
+```bash
+llmsetup connect --list          # the tools it knows, and the file it edits for each
+llmsetup connect opencode --default
+llmsetup connect continue
+llmsetup connect aider --project
+llmsetup connect zed --dry-run   # print the result, change nothing
+```
+
+It merges an llmsetup entry and keeps everything else in the file, replaces
+only what it added before, and leaves a config that has comments alone (with
+the snippet printed) unless you pass `--rewrite`, since rewriting JSON or YAML
+loses them. Open WebUI and Cursor are set up in their own screens, so `connect`
+prints the steps.
+
+Everything llmsetup changes outside its own directory is recorded: links in
+LM Studio's and Jan's model folders, Jan's `model.json`, Ollama tags, and every
+config `connect` writes (with a copy of the file as it was). Undo is one
+command:
+
+```bash
+llmsetup changes                 # what each run changed
+llmsetup undo                    # reverse the newest run
+llmsetup undo --run <id>         # or one run, or --all; --dry-run previews
+```
+
+Undo removes or restores a file only while it is still what llmsetup left;
+a file edited since is reported and kept, unless `--force`. Downloaded weights
+stay in the shared store; they are llmsetup's own files, not a change to undo.
+
 ## Other commands
 
 ```bash

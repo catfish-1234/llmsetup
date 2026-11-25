@@ -72,7 +72,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "catalog": cmd_catalog, "runtimes": cmd_runtimes, "ui": cmd_ui,
         "report": cmd_report, "start": cmd_start, "status": cmd_status, "stop": cmd_stop,
         "restart": cmd_restart,
-        "logs": cmd_logs, "chat": cmd_chat, "changes": cmd_changes, "undo": cmd_undo, "connect": cmd_connect,
+        "logs": cmd_logs, "chat": cmd_chat, "changes": cmd_changes, "undo": cmd_undo, "connect": cmd_connect, "settings": cmd_settings,
     }.get(args.command)
 
     if handler is None:
@@ -166,8 +166,15 @@ def build_parser() -> argparse.ArgumentParser:
     hardware_flags(p_setup)
     profile_flags(p_setup)
     p_setup.add_argument("--runtime", help="force a runtime (ollama, llamacpp, vllm, …)")
-    p_setup.add_argument("--model", help="plan around a catalog model ID or name")
+    p_setup.add_argument("--model", help="plan around a catalog model ID or name, or any Hugging Face GGUF repo as hf:owner/repo")
+    p_setup.add_argument("--variant", help="use a derivative of --model instead, e.g. abliterated, found on Hugging Face")
     p_setup.add_argument("--quant", help="force a quantization, e.g. Q4_K_M")
+    p_setup.add_argument("--set", dest="overrides", action="append", metavar="KEY=VALUE",
+                         help="override a tuned setting, e.g. --set flash_attention=true (repeatable; "
+                              "`llmsetup settings` lists them)")
+    p_setup.add_argument("--engine-arg", dest="engine_args", action="append", metavar="FLAG",
+                         help="pass a flag straight to llama.cpp, vLLM or MLX, e.g. --engine-arg=--no-warmup "
+                              "(repeatable)")
     p_setup.add_argument("--quick", action="store_true",
                          help="run only the essential checks")
     p_setup.add_argument("--dry-run", action="store_true",
@@ -198,7 +205,8 @@ def build_parser() -> argparse.ArgumentParser:
     hardware_flags(p_plan)
     profile_flags(p_plan)
     p_plan.add_argument("--runtime")
-    p_plan.add_argument("--model", help="plan around a catalog model ID or name")
+    p_plan.add_argument("--model", help="plan around a catalog model ID or name, or any Hugging Face GGUF repo as hf:owner/repo")
+    p_plan.add_argument("--variant", help="use a derivative of --model instead, e.g. abliterated, found on Hugging Face")
     p_plan.add_argument("--top", type=_positive_int, default=5, help="how many to show")
     p_plan.add_argument("--catalog", type=Path, action="append")
 
@@ -265,6 +273,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_connect.add_argument("--base-url", help="connect this OpenAI-compatible server instead")
     p_connect.add_argument("--model", help="model name the server serves")
     p_connect.add_argument("--api-key", help="bearer token for a server that needs one")
+
+    p_settings = sub.add_parser("settings", help="list the settings `setup --set KEY=VALUE` can override")
+    common(p_settings)
 
     p_changes = sub.add_parser(
         "changes", help="list what llmsetup changed in other apps and config files, by run")
@@ -389,10 +400,83 @@ def cmd_detect(args, console: Console) -> int:
     return 0
 
 
+def _materialize_model(args, console: Console) -> None:
+    """Turn `--model hf:owner/repo` or `--variant NAME` into an ordinary overlay catalog entry.
+
+    Everything after this point (planning, fit, provisioning, verification) then treats it like
+    any catalog model, which is what keeps an explicitly requested model as well checked as a
+    recommended one.
+    """
+    from llmsetup.catalog import hub
+
+    model = getattr(args, "model", None)
+    variant = getattr(args, "variant", None)
+    repo = hub.parse_hub_ref(model) if model else None
+    if not repo and not variant:
+        return
+    if getattr(args, "offline", False):
+        raise LlmsetupError("--variant and --model hf:… look the model up on Hugging Face, which --offline rules out",
+                            hint="drop --offline, or add the model once with `llmsetup catalog add`")
+    if repo:
+        if variant:
+            raise LlmsetupError("--variant finds a derivative of a catalog model, but hf: already names the exact repo",
+                                hint="use one or the other")
+        console.step(f"Reading {repo} from Hugging Face")
+        entry = hub.repo_entry(repo)
+    else:
+        if not model:
+            raise LlmsetupError("--variant needs --model to name the model it is a variant of",
+                                hint=f"for example: --model qwen3-8b --variant {variant}")
+        from llmsetup.planner.model_fit import resolve_requested_model
+
+        variant = str(variant)
+        catalog = load_catalog(extra_paths=getattr(args, "catalog", None))
+        base = resolve_requested_model(model, catalog)
+        console.step(f"Looking for {variant} GGUF variants of {base.name} on Hugging Face")
+        found = hub.find_variants(base, variant)
+        if not found:
+            raise LlmsetupError(f"found no {variant} GGUF variant of {base.name} on Hugging Face",
+                                hint="name an exact repo with --model hf:owner/repo, or try another spelling")
+        choice = found[0]
+        console.ok(f"using {choice['repo']} ({choice['downloads']:,} downloads, "
+                   f"quants {', '.join(choice['quants'][:6])})")
+        if len(found) > 1:
+            console.info("others: " + ", ".join(c["repo"] for c in found[1:])
+                         + "; pick one with --model hf:owner/repo")
+        entry = hub.variant_entry(base, variant, choice)
+        entry["arch_source"] = catalog.arch_source(base.id)
+    path = _save_hub_entry(entry)
+    console.info(f"saved as {entry['id']} in {path}")
+    args.model = entry["id"]
+
+
+def _save_hub_entry(entry) -> Path:
+    """Upsert an entry into the overlay catalog's hub.yaml."""
+    import yaml
+
+    from llmsetup.catalog.refresh import user_catalog_path
+    from llmsetup.util.fs import write_text
+
+    path = user_catalog_path("hub.yaml")
+    existing: Dict[str, Any] = {}
+    if path.exists():
+        try:
+            existing = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        except yaml.YAMLError:
+            existing = {}
+    models = [m for m in existing.get("models") or [] if isinstance(m, dict) and m.get("id") != entry["id"]]
+    existing.update({"schema_version": 1, "models": [*models, entry]})
+    header = ("# Models added with --model hf:owner/repo or --variant. llmsetup's own file;\n"
+              "# delete an entry to forget it.\n\n")
+    write_text(path, header + yaml.safe_dump(existing, sort_keys=False, allow_unicode=True))
+    return path
+
+
 def cmd_plan(args, console: Console) -> int:
     from llmsetup.planner.plan import build_adaptive_plan
     from llmsetup.planner.score import explain
 
+    _materialize_model(args, console)
     hardware = _hardware(args)
     _show_detection(hardware, console)
     profile = _profile(args, console)
@@ -457,6 +541,11 @@ def cmd_plan(args, console: Console) -> int:
 
 
 def cmd_setup(args, console: Console) -> int:
+    from llmsetup.tuning.overrides import parse_overrides
+
+    # Checked before anything slow, so a mistyped setting fails in a second, not after detection.
+    overrides = parse_overrides(getattr(args, "overrides", None))
+    _materialize_model(args, console)
     hardware = _hardware(args)
     _show_detection(hardware, console)
     profile = _profile(args, console)
@@ -486,6 +575,7 @@ def cmd_setup(args, console: Console) -> int:
         register=not args.no_register,
         sweep=getattr(args, "sweep", False),
         cached_only=getattr(args, "cached_only", False),
+        overrides=overrides, engine_args=getattr(args, "engine_args", None),
     )
     try:
         result = pipeline.run()
@@ -1025,7 +1115,7 @@ def cmd_connect(args, console: Console) -> int:
         for harness_id in supported():
             how = (f"writes {HARNESSES[harness_id].path(False)}" if harness_id in HARNESSES
                    else "prints the steps for its settings screen")
-            console.print(f"  {harness_id:<14} {how}")
+            print(f"  {harness_id:<14} {how}")
         return 0
     harness_id = args.harness.lower().replace("-", "_")
     if harness_id not in supported():
@@ -1060,6 +1150,33 @@ def cmd_connect(args, console: Console) -> int:
     return 0
 
 
+def cmd_settings(args, console: Console) -> int:
+    """The runtime settings --set can override, with their type and the tuner's starting default."""
+    import typing
+    from dataclasses import MISSING, fields
+
+    from llmsetup.tuning.overrides import settable
+    from llmsetup.types import RuntimeConfig
+
+    allowed = settable()
+    defaults = {f.name: f.default for f in fields(RuntimeConfig) if f.default is not MISSING}
+    rows = []
+    for name, kind in allowed.items():
+        label = getattr(kind, "__name__", None) or str(kind).replace("typing.", "")
+        args_ = typing.get_args(kind)
+        if args_:
+            label = "/".join(getattr(a, "__name__", str(a)) for a in args_ if a is not type(None)) + " or none"
+        rows.append({"key": name, "type": label, "default": defaults.get(name, "(tuned)")})
+    if args.json:
+        print(json.dumps(rows, indent=2, default=str))
+        return 0
+    console.info("override with `llmsetup setup --set KEY=VALUE` (repeatable); the tuner sets most of these "
+                 "for your hardware, so the default is only where it starts")
+    for row in rows:
+        print(f"  {row['key']:<24} {row['type']:<16} {row['default']}")
+    return 0
+
+
 def cmd_changes(args, console: Console) -> int:
     """List the journal of changes llmsetup made outside its own directory."""
     from llmsetup import changes
@@ -1073,11 +1190,11 @@ def cmd_changes(args, console: Console) -> int:
         return 0
     for group in history:
         state = f"{group['pending']} to undo" if group["pending"] else "undone"
-        console.print(console.bold(f"{group['at']}  llmsetup {group['command']}  (run {group['run']}, {state})"))
+        print(f"{group['at']}  llmsetup {group['command']}  (run {group['run']}, {state})")
         for change in group["changes"]:
             what = change.get("path") or change.get("name") or change.get("note", "")
             mark = " " if change["status"] == "pending" else "x"
-            console.print(f"  [{mark}] {change['target']:<10} {change['kind']:<12} {what}")
+            print(f"  [{mark}] {change['target']:<10} {change['kind']:<12} {what}")
     console.print()
     console.info("`llmsetup undo` reverses the newest run; `--run ID` one run, `--all` everything")
     return 0

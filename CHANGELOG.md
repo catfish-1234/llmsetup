@@ -8,6 +8,27 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- `--model hf:owner/repo` sets up any GGUF repo on Hugging Face, and
+  `--model <catalog id> --variant <name>` a derivative of a catalog model found
+  there, such as an abliterated build (`abliterated`, `heretic` and
+  `uncensored` find each other's spellings). Either becomes an ordinary entry
+  in the overlay catalog (`catalog.d/hub.yaml`), planned, fitted and verified
+  like any other model. A variant keeps its base's architecture, so the memory
+  plan is exact, drops every pointer to the base's own weights (Ollama tag,
+  safetensors and MLX repos) so nothing can serve the original under its name,
+  and keeps vision only when it ships a projector. A repo of unknown lineage
+  reads its architecture from its own or its base model's config.json, or is
+  marked estimated until the GGUF header is read. Discovery still never
+  recommends a decensored model; this is how you ask for one.
+- `setup --set KEY=VALUE` overrides any runtime setting the tuner chose
+  (context, GPU layers, KV cache type, flash attention, batch sizes, sampling
+  defaults, host, port, ...), checked by name and type before anything slow
+  runs; `llmsetup settings` lists them. `--engine-arg` passes flags straight to
+  llama.cpp, vLLM or MLX, after llmsetup's own compatibility filter so they
+  arrive as given. Overrides land after tuning and before verification, so the
+  verified, saved and restarted setup is the one you asked for, and a `host`
+  beyond loopback is called out.
+
 - `llmsetup connect <tool>` writes the verified model into the tool's own
   config instead of leaving a snippet to paste: OpenCode (`opencode.json`, user
   or `--project`), Continue (`config.yaml`), Aider (`.aider.conf.yml`) and Zed
