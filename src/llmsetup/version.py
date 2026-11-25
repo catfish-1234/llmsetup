@@ -1,3 +1,3 @@
 """The llmsetup version: one definition for `--version` and every User-Agent it sends."""
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
