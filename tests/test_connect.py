@@ -173,3 +173,92 @@ class TestClaudeCodeAndCodex:
         out = capsys.readouterr().out
         assert 'wire_api = "responses"' in out and 'base_url = "http://127.0.0.1:8080/v1"' in out
         assert "codex --profile llmsetup" in out
+
+
+class TestQwenCodeGooseAndCrush:
+    def test_qwen_code_lists_the_model_beside_yours_and_undo_restores_it(self, tmp_path, target):
+        path = tmp_path / ".qwen" / "settings.json"
+        path.parent.mkdir()
+        mine = {"id": "gpt-4o", "name": "GPT-4o", "envKey": "OPENAI_API_KEY", "baseUrl": "https://api.openai.com/v1"}
+        original = json.dumps({"theme": "Dracula", "modelProviders": {"openai": [mine]}})
+        path.write_text(original)
+
+        with changes.run("connect"):
+            connect("qwen_code", target, path=path)
+        doc = json.loads(path.read_text())
+        assert doc["theme"] == "Dracula" and doc["modelProviders"]["openai"][0] == mine
+        ours = doc["modelProviders"]["openai"][1]
+        assert ours["id"] == "qwen3:8b" and ours["baseUrl"] == "http://127.0.0.1:11435/v1"
+        assert ours["generationConfig"]["contextWindowSize"] == 16384
+        # A server without a key accepts any placeholder, which Qwen Code reads from its env block.
+        assert doc["env"][ours["envKey"]] == "llmsetup"
+        assert "model" not in doc and "security" not in doc  # only with --default
+
+        changes.undo(changes.pending_changes())
+        assert path.read_text() == original
+
+    def test_qwen_code_default_selects_it_and_a_second_connect_replaces_its_own_entry(self, tmp_path, target):
+        path = tmp_path / "settings.json"
+        target.make_default = True
+        connect("qwen_code", target, path=path)
+        target.endpoint.base_url = "http://127.0.0.1:9000"
+        connect("qwen_code", target, path=path)
+        doc = json.loads(path.read_text())
+        assert [m["baseUrl"] for m in doc["modelProviders"]["openai"]] == ["http://127.0.0.1:9000/v1"]
+        assert doc["security"]["auth"]["selectedType"] == "openai" and doc["model"]["name"] == "qwen3:8b"
+
+    def test_qwen_code_will_not_shadow_a_model_you_listed_yourself(self, tmp_path, target):
+        path = tmp_path / "settings.json"
+        path.write_text(json.dumps({"modelProviders": {"openai": [{"id": "qwen3:8b", "name": "Mine"}]}}))
+        with pytest.raises(ConnectRefused, match="did not add"):
+            connect("qwen_code", target, path=path)
+
+    def test_goose_gets_its_own_provider_file_which_undo_removes(self, tmp_path, monkeypatch, target):
+        monkeypatch.setenv("GOOSE_PATH_ROOT", str(tmp_path / "goose"))
+        with changes.run("connect"):
+            result = connect("goose", target)
+        path = tmp_path / "goose" / "config" / "custom_providers" / "llmsetup.json"
+        assert result["path"] == str(path)
+        doc = json.loads(path.read_text())
+        assert doc["name"] == "llmsetup" and doc["engine"] == "openai"
+        assert doc["base_url"] == "http://127.0.0.1:11435/v1"
+        assert doc["models"] == [{"name": "qwen3:8b", "context_limit": 16384}]
+        assert doc["requires_auth"] is False and doc["api_key_env"] == ""
+
+        changes.undo(changes.pending_changes())
+        assert not (tmp_path / "goose").exists()
+
+    def test_goose_reads_a_servers_key_from_the_environment_not_the_file(self, tmp_path, target):
+        target.endpoint.headers["Authorization"] = "Bearer s3cret"
+        path = tmp_path / "llmsetup.json"
+        connect("goose", target, path=path)
+        doc = json.loads(path.read_text())
+        assert doc["requires_auth"] is True and doc["api_key_env"] == "LLMSETUP_API_KEY"
+        assert "s3cret" not in path.read_text()
+
+    def test_goose_leaves_a_provider_file_it_did_not_write(self, tmp_path, target):
+        path = tmp_path / "llmsetup.json"
+        path.write_text(json.dumps({"name": "corp", "engine": "openai"}))
+        with pytest.raises(ConnectRefused, match="not llmsetup's"):
+            connect("goose", target, path=path)
+
+    def test_goose_has_no_project_file(self, target):
+        with pytest.raises(ConnectRefused, match="per-project"):
+            connect("goose", target, project=True)
+
+    def test_goose_through_the_cli_says_how_to_start_it(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.setenv("GOOSE_PATH_ROOT", str(tmp_path))
+        assert main(["connect", "goose", "--base-url", "http://127.0.0.1:8080", "--model", "local"]) == 0
+        assert "GOOSE_PROVIDER=llmsetup GOOSE_MODEL=local goose session" in capsys.readouterr().out
+
+    def test_crush_gets_the_crushrc_lines(self, capsys):
+        assert main(["connect", "crush", "--base-url", "http://127.0.0.1:8080", "--model", "local"]) == 0
+        out = capsys.readouterr().out
+        assert 'provider add llmsetup --type completions --base-url "http://127.0.0.1:8080/v1"' in out
+        assert "model large llmsetup/local" in out and "--api-key" not in out
+
+    def test_every_known_tool_is_listed_with_what_connect_does(self, capsys):
+        assert main(["connect", "--list"]) == 0
+        out = capsys.readouterr().out
+        for tool in ("opencode", "qwen_code", "goose", "crush", "claude_code", "codex"):
+            assert f"  {tool} " in out

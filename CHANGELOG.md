@@ -6,6 +6,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `llmsetup connect qwen-code` adds the model to Qwen Code's
+  `modelProviders.openai` list (`~/.qwen/settings.json`, or the project's with
+  `--project`) beside your own, with its context window, and with `--default`
+  selects it. A model of the same id that you listed yourself is left alone.
+- `llmsetup connect goose` writes Goose's custom provider file
+  (`custom_providers/llmsetup.json` under Goose's config folder, honouring
+  `GOOSE_PATH_ROOT`) and prints how to start a session on it. A server key is
+  read from `LLMSETUP_API_KEY`, never written into the file, and a provider
+  file llmsetup did not write is never replaced. `undo` removes it.
+- `llmsetup connect crush` prints the `crushrc` lines that add the model as a
+  provider and make it Crush's large and small model.
+
 ## [0.5.0] - 2026-11-25
 
 ### Added

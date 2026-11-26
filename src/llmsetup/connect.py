@@ -46,6 +46,8 @@ class Harness:
     format: str  # json | yaml
     path: Callable[[bool], Path]
     merge: Callable[[Dict[str, Any], "Target"], Dict[str, Any]]
+    #: What to run next, for a tool that does not pick the new entry up by itself.
+    then: Optional[Callable[["Target"], str]] = None
 
 
 @dataclass
@@ -64,6 +66,19 @@ class Target:
     @property
     def model(self) -> str:
         return self.endpoint.model
+
+    @property
+    def api_key(self) -> Optional[str]:
+        """The key the server was started with, if any."""
+        return target_key(self.endpoint)
+
+
+def target_key(endpoint: Endpoint) -> Optional[str]:
+    return endpoint.headers.get("Authorization", "").removeprefix("Bearer ").strip() or None
+
+
+#: The environment variable tools that read their key from one are pointed at.
+KEY_ENV = "LLMSETUP_API_KEY"
 
 
 # --------------------------------------------------------------------------- #
@@ -88,12 +103,40 @@ def _aider_path(project: bool) -> Path:
     return Path.cwd() / ".aider.conf.yml" if project else Path.home() / ".aider.conf.yml"
 
 
+def _appdata() -> Path:
+    return Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming")
+
+
+def _windows() -> bool:
+    return platform.system().lower() == "windows"
+
+
 def _zed_path(project: bool) -> Path:
     if project:
         return Path.cwd() / ".zed" / "settings.json"
-    if platform.system().lower() == "windows":
-        return Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming") / "Zed" / "settings.json"
+    if _windows():
+        return _appdata() / "Zed" / "settings.json"
     return _xdg_config() / "zed" / "settings.json"
+
+
+def _qwen_code_path(project: bool) -> Path:
+    return (Path.cwd() if project else Path.home()) / ".qwen" / "settings.json"
+
+
+def _goose_path(project: bool) -> Path:
+    """Goose reads each custom provider from its own file, so llmsetup's is one it owns outright."""
+    if project:
+        raise ConnectRefused("Goose has no per-project provider file",
+                             hint="rerun without --project; the provider is added for every Goose session "
+                                  "but only used when you pick it")
+    root = os.environ.get("GOOSE_PATH_ROOT")
+    if root and Path(root).is_absolute():
+        config = Path(root) / "config"
+    elif _windows():
+        config = _appdata() / "Block" / "goose" / "config"
+    else:
+        config = _xdg_config() / "goose"
+    return config / "custom_providers" / "llmsetup.json"
 
 
 # --------------------------------------------------------------------------- #
@@ -148,6 +191,89 @@ def _merge_zed(doc: Dict[str, Any], target: Target) -> Dict[str, Any]:
     return doc
 
 
+def _merge_qwen_code(doc: Dict[str, Any], target: Target) -> Dict[str, Any]:
+    """Qwen Code lists OpenAI-compatible models under ``modelProviders.openai``, each reading its key
+    from the environment variable ``envKey`` names, which its own ``env`` block can set."""
+    env = doc.setdefault("env", {})
+    providers = doc.setdefault("modelProviders", {})
+    if not isinstance(env, dict) or not isinstance(providers, dict):
+        raise ConnectRefused("its `env` or `modelProviders` field is not an object")
+    listed = providers.setdefault("openai", [])
+    if not isinstance(listed, list):
+        raise ConnectRefused("its `modelProviders.openai` field is not a list")
+    ours = [m for m in listed if isinstance(m, dict) and str(m.get("name", "")).endswith(MARK)]
+    if any(isinstance(m, dict) and m.get("id") == target.model and m not in ours for m in listed):
+        raise ConnectRefused(f"it already lists a model `{target.model}` that llmsetup did not add")
+    # Local servers without a key accept any placeholder; a key the server was started with goes in.
+    env[KEY_ENV] = target.api_key or "llmsetup"
+    providers["openai"] = [m for m in listed if m not in ours] + [{
+        "id": target.model,
+        "name": f"{target.model} {MARK}",
+        "envKey": KEY_ENV,
+        "baseUrl": target.base,
+        "generationConfig": {"contextWindowSize": target.config.context_tokens},
+    }]
+    if target.make_default:
+        security = doc.setdefault("security", {})
+        model = doc.setdefault("model", {})
+        if not isinstance(security, dict) or not isinstance(model, dict):
+            raise ConnectRefused("its `security` or `model` field is not an object")
+        auth = security.setdefault("auth", {})
+        if not isinstance(auth, dict):
+            raise ConnectRefused("its `security.auth` field is not an object")
+        auth["selectedType"] = "openai"
+        model["name"] = target.model
+    return doc
+
+
+def _merge_goose(doc: Dict[str, Any], target: Target) -> Dict[str, Any]:
+    if doc and doc.get("name") not in (None, "llmsetup"):
+        raise ConnectRefused(f"it defines a provider named {doc.get('name')!r}, not llmsetup's")
+    key = target.api_key
+    return {
+        "name": "llmsetup",
+        "engine": "openai",
+        "display_name": f"{target.model} {MARK}",
+        "description": "The local model llmsetup verified",
+        # Goose reads the key from this variable; with none, it sends no Authorization header.
+        "api_key_env": KEY_ENV if key else "",
+        "base_url": target.base,
+        "models": [{"name": target.model, "context_limit": target.config.context_tokens}],
+        "supports_streaming": True,
+        "requires_auth": bool(key),
+        # The listed model only: no call to the server's model list, which may name other files.
+        "dynamic_models": False,
+    }
+
+
+def _goose_then(target: Target) -> str:
+    key = target.api_key
+    posix = f"GOOSE_PROVIDER=llmsetup GOOSE_MODEL={target.model}"
+    powershell = f'$env:GOOSE_PROVIDER="llmsetup"; $env:GOOSE_MODEL="{target.model}"'
+    if key:
+        posix = f"{KEY_ENV}={key} {posix}"
+        powershell = f'$env:{KEY_ENV}="{key}"; {powershell}'
+    return (f"start Goose on it with:\n  bash / zsh:  {posix} goose session\n"
+            f"  PowerShell:  {powershell}; goose session\n"
+            "or pick it as the provider in `goose configure`")
+
+
+def crush_steps(target: Target) -> Dict[str, str]:
+    key = f' --api-key "{target.api_key}"' if target.api_key else ""
+    context = target.config.context_tokens
+    return {
+        "name": "Crush",
+        "path": "crushrc in ~/.config/crush/ (all projects) or a project's folder",
+        "format": "text",
+        "content": (
+            f'provider add llmsetup --type completions --base-url "{target.base}"{key}\n'
+            f'model add llmsetup/{target.model} --name "{target.model} {MARK}" --context-window {context} '
+            f"--default-max-tokens {min(4096, max(context // 4, 256))}\n"
+            f"model large llmsetup/{target.model}\n"
+            f"model small llmsetup/{target.model}\n"),
+    }
+
+
 def claude_code_env(target: Target) -> Dict[str, str]:
     """What points Claude Code at the local server, which must speak the Anthropic Messages API.
 
@@ -155,7 +281,7 @@ def claude_code_env(target: Target) -> Dict[str, str]:
     main model, and the small one it uses for background work) is the local model, so it never
     asks the server for a model name it does not serve.
     """
-    token = target.endpoint.headers.get("Authorization", "").removeprefix("Bearer ").strip() or "llmsetup"
+    token = target.api_key or "llmsetup"
     model = target.model
     return {
         "ANTHROPIC_BASE_URL": target.endpoint.base_url.rstrip("/"),
@@ -237,10 +363,19 @@ HARNESSES: Dict[str, Harness] = {
     "aider": Harness("aider", "Aider", "yaml", _aider_path, _merge_aider),
     "zed": Harness("zed", "Zed", "json", _zed_path, _merge_zed),
     "claude_code": Harness("claude_code", "Claude Code", "json", _claude_code_path, _merge_claude_code),
+    "qwen_code": Harness("qwen_code", "Qwen Code", "json", _qwen_code_path, _merge_qwen_code),
+    "goose": Harness("goose", "Goose", "json", _goose_path, _merge_goose, then=_goose_then),
+}
+
+#: Steps for the tools connect prints instructions for rather than editing a file.
+STEPS: Dict[str, Callable[[Target], Dict[str, str]]] = {
+    "claude_code": claude_code_steps,
+    "codex": codex_steps,
+    "crush": crush_steps,
 }
 
 #: Configured in the tool's own interface, or through a file connect does not edit: it prints the steps.
-INSTRUCTIONS_ONLY = {"open_webui", "cursor", "custom_openai", "codex"}
+INSTRUCTIONS_ONLY = {"open_webui", "cursor", "custom_openai", "codex", "crush"}
 
 
 # --------------------------------------------------------------------------- #
@@ -316,8 +451,7 @@ def connect(harness_id: str, target: Target, *, path: Optional[Path] = None, pro
     harness = HARNESSES[harness_id]
     path = path or harness.path(project)
     original = path.read_text(encoding="utf-8") if path.exists() else None
-    snippet = (claude_code_steps(target) if harness_id == "claude_code"
-               else snippets(target.endpoint, target.spec, target.config)[harness_id])
+    snippet = _snippet(harness_id, target)
 
     def refuse(reason: str) -> ConnectRefused:
         return ConnectRefused(
@@ -366,13 +500,34 @@ def connect(harness_id: str, target: Target, *, path: Optional[Path] = None, pro
     return result
 
 
+def _snippet(harness_id: str, target: Target) -> Dict[str, str]:
+    if harness_id in STEPS:
+        return STEPS[harness_id](target)
+    clients = snippets(target.endpoint, target.spec, target.config)
+    if harness_id in clients:
+        return clients[harness_id]
+    # A tool with no `llmsetup export` snippet: what connect would write is the snippet.
+    harness = HARNESSES[harness_id]
+    return {"name": harness.name, "path": str(harness.path(False)), "format": harness.format,
+            "content": json.dumps(harness.merge({}, target), indent=2) + "\n"}
+
+
 def instructions(harness_id: str, target: Target) -> Dict[str, str]:
     """For a tool connect does not write to: where to go and what to enter."""
-    if harness_id == "codex":
-        return codex_steps(target)
+    return _snippet(harness_id, target)
+
+
+def describe(harness_id: str) -> str:
+    """One line for ``connect --list``: what connect does for this tool."""
     if harness_id == "claude_code":
-        return claude_code_steps(target)
-    return snippets(target.endpoint, target.spec, target.config)[harness_id]
+        return "prints the launch command; --project writes .claude/settings.local.json"
+    if harness_id in HARNESSES:
+        try:
+            return f"writes {HARNESSES[harness_id].path(False)}"
+        except ConnectRefused:
+            return f"writes {HARNESSES[harness_id].path(True)} (with --project)"
+    return {"codex": "prints the ~/.codex/config.toml provider and profile",
+            "crush": "prints the crushrc lines that add it"}.get(harness_id, "prints the steps for its settings screen")
 
 
 def supported() -> List[str]:

@@ -1107,21 +1107,14 @@ def cmd_connect(args, console: Console) -> int:
         INSTRUCTIONS_ONLY,
         Target,
         connect,
+        describe,
         instructions,
         supported,
     )
 
     if args.list or not args.harness:
         for harness_id in supported():
-            if harness_id == "claude_code":
-                how = "prints the launch command; --project writes .claude/settings.local.json"
-            elif harness_id in HARNESSES:
-                how = f"writes {HARNESSES[harness_id].path(False)}"
-            elif harness_id == "codex":
-                how = "prints the ~/.codex/config.toml provider and profile"
-            else:
-                how = "prints the steps for its settings screen"
-            print(f"  {harness_id:<14} {how}")
+            print(f"  {harness_id:<14} {describe(harness_id)}")
         return 0
     harness_id = args.harness.lower().replace("-", "_")
     if harness_id not in supported():
@@ -1156,6 +1149,9 @@ def cmd_connect(args, console: Console) -> int:
     else:
         console.ok(f"{result['name']} now lists {result['model']} at {result['base_url']} ({result['path']})")
         console.info("`llmsetup undo` puts the file back as it was")
+    then = HARNESSES[harness_id].then
+    if then and not args.json and not args.dry_run:
+        print(then(target))
     return 0
 
 

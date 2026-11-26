@@ -195,15 +195,22 @@ llmsetup connect opencode --default
 llmsetup connect continue
 llmsetup connect aider --project
 llmsetup connect zed --dry-run   # print the result, change nothing
+llmsetup connect qwen-code --default
+llmsetup connect goose           # its own provider file, then how to start Goose on it
 llmsetup connect claude-code     # the launch command; --project writes .claude/settings.local.json
 llmsetup connect codex           # the ~/.codex/config.toml provider and profile
+llmsetup connect crush           # the crushrc lines that add it
 ```
 
 It merges an llmsetup entry and keeps everything else in the file, replaces
 only what it added before, and leaves a config that has comments alone (with
 the snippet printed) unless you pass `--rewrite`, since rewriting JSON or YAML
-loses them. Open WebUI and Cursor are set up in their own screens, so `connect`
-prints the steps. Claude Code needs a server that speaks the Anthropic Messages
+loses them. Goose keeps each custom provider in a file of its own, so `connect
+goose` writes `custom_providers/llmsetup.json` and says how to start a session
+on it; a server key stays in the `LLMSETUP_API_KEY` environment variable rather
+than the file. Crush now reads `crushrc` command files, so `connect crush`
+prints the lines to add. Open WebUI and Cursor are set up in their own screens,
+so `connect` prints the steps. Claude Code needs a server that speaks the Anthropic Messages
 API (llama.cpp from January 2026, Ollama, LM Studio 0.4.1 or later) and its
 prompts need at least 32K tokens of context; `connect claude-code` prints the
 per-launch command, and writes settings only for one project with `--project`,
