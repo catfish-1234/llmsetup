@@ -48,6 +48,10 @@ class Harness:
     merge: Callable[[Dict[str, Any], "Target"], Dict[str, Any]]
     #: What to run next, for a tool that does not pick the new entry up by itself.
     then: Optional[Callable[["Target"], str]] = None
+    #: Takes llmsetup's entries back out of the document, leaving everything else (disconnect).
+    strip: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None
+    #: The whole file is llmsetup's (Goose's provider file): disconnect removes it.
+    owned: bool = False
 
 
 @dataclass
@@ -357,14 +361,111 @@ def codex_steps(target: Target) -> Dict[str, str]:
     }
 
 
+# --------------------------------------------------------------------------- #
+# taking llmsetup's entries back out: `llmsetup disconnect`
+# --------------------------------------------------------------------------- #
+
+_LOCAL_URL = re.compile(r"https?://(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?(?:/|$)")
+
+
+def _prune(doc: Dict[str, Any], *keys: str) -> None:
+    """Drop each key whose value is now an empty object or list."""
+    for key in keys:
+        if key in doc and doc[key] in ({}, []):
+            del doc[key]
+
+
+def _strip_opencode(doc: Dict[str, Any]) -> Dict[str, Any]:
+    providers = doc.get("provider")
+    if isinstance(providers, dict):
+        providers.pop("llmsetup", None)
+        _prune(doc, "provider")
+    if str(doc.get("model", "")).startswith("llmsetup/"):
+        del doc["model"]
+    return doc
+
+
+def _strip_continue(doc: Dict[str, Any]) -> Dict[str, Any]:
+    models = doc.get("models")
+    if isinstance(models, list):
+        doc["models"] = [m for m in models if not (isinstance(m, dict) and str(m.get("name", "")).endswith(MARK))]
+    return doc
+
+
+def _strip_aider(doc: Dict[str, Any]) -> Dict[str, Any]:
+    # Aider's keys carry no name; the placeholder key llmsetup writes is what marks them as its own.
+    if doc.get("openai-api-key") == DUMMY_KEY:
+        for key in ("openai-api-base", "openai-api-key"):
+            doc.pop(key, None)
+        if str(doc.get("model", "")).startswith("openai/"):
+            del doc["model"]
+    return doc
+
+
+def _strip_zed(doc: Dict[str, Any]) -> Dict[str, Any]:
+    models = doc.get("language_models")
+    if not isinstance(models, dict) or not isinstance(models.get("openai"), dict):
+        return doc
+    openai = models["openai"]
+    listed = openai.get("available_models")
+    if isinstance(listed, list):
+        openai["available_models"] = [m for m in listed if not (
+            isinstance(m, dict) and str(m.get("display_name", "")).endswith(MARK))]
+        _prune(openai, "available_models")
+    if "available_models" not in openai and _LOCAL_URL.match(str(openai.get("api_url", ""))):
+        del openai["api_url"]
+    _prune(models, "openai")
+    _prune(doc, "language_models")
+    return doc
+
+
+#: Everything claude_code_env sets.
+_CLAUDE_CODE_KEYS = ("ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL",
+                     "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_HAIKU_MODEL")
+
+
+def _strip_claude_code(doc: Dict[str, Any]) -> Dict[str, Any]:
+    env = doc.get("env")
+    # Only a local base URL is llmsetup's; a proxy or gateway someone configured is left alone.
+    if isinstance(env, dict) and _LOCAL_URL.match(str(env.get("ANTHROPIC_BASE_URL", ""))):
+        for key in _CLAUDE_CODE_KEYS:
+            env.pop(key, None)
+        _prune(doc, "env")
+    return doc
+
+
+def _strip_qwen_code(doc: Dict[str, Any]) -> Dict[str, Any]:
+    providers = doc.get("modelProviders")
+    removed = set()
+    if isinstance(providers, dict) and isinstance(providers.get("openai"), list):
+        listed = providers["openai"]
+        ours = [m for m in listed if isinstance(m, dict) and str(m.get("name", "")).endswith(MARK)]
+        removed = {m.get("id") for m in ours}
+        providers["openai"] = [m for m in listed if m not in ours]
+        _prune(providers, "openai")
+        _prune(doc, "modelProviders")
+    env = doc.get("env")
+    if isinstance(env, dict):
+        env.pop(KEY_ENV, None)
+        _prune(doc, "env")
+    model = doc.get("model")
+    if isinstance(model, dict) and model.get("name") in removed:
+        del model["name"]
+        _prune(doc, "model")
+    return doc
+
+
 HARNESSES: Dict[str, Harness] = {
-    "opencode": Harness("opencode", "OpenCode", "json", _opencode_path, _merge_opencode),
-    "continue": Harness("continue", "Continue (VS Code / JetBrains)", "yaml", _continue_path, _merge_continue),
-    "aider": Harness("aider", "Aider", "yaml", _aider_path, _merge_aider),
-    "zed": Harness("zed", "Zed", "json", _zed_path, _merge_zed),
-    "claude_code": Harness("claude_code", "Claude Code", "json", _claude_code_path, _merge_claude_code),
-    "qwen_code": Harness("qwen_code", "Qwen Code", "json", _qwen_code_path, _merge_qwen_code),
-    "goose": Harness("goose", "Goose", "json", _goose_path, _merge_goose, then=_goose_then),
+    "opencode": Harness("opencode", "OpenCode", "json", _opencode_path, _merge_opencode, strip=_strip_opencode),
+    "continue": Harness("continue", "Continue (VS Code / JetBrains)", "yaml", _continue_path, _merge_continue,
+                        strip=_strip_continue),
+    "aider": Harness("aider", "Aider", "yaml", _aider_path, _merge_aider, strip=_strip_aider),
+    "zed": Harness("zed", "Zed", "json", _zed_path, _merge_zed, strip=_strip_zed),
+    "claude_code": Harness("claude_code", "Claude Code", "json", _claude_code_path, _merge_claude_code,
+                           strip=_strip_claude_code),
+    "qwen_code": Harness("qwen_code", "Qwen Code", "json", _qwen_code_path, _merge_qwen_code,
+                         strip=_strip_qwen_code),
+    "goose": Harness("goose", "Goose", "json", _goose_path, _merge_goose, then=_goose_then, owned=True),
 }
 
 #: Steps for the tools connect prints instructions for rather than editing a file.
@@ -459,27 +560,12 @@ def connect(harness_id: str, target: Target, *, path: Optional[Path] = None, pro
             hint=(f"paste this into it yourself, or rerun with --rewrite to let llmsetup rewrite the "
                   f"file (the original is backed up, and `llmsetup undo` restores it):\n\n{snippet['content']}"))
 
-    doc: Dict[str, Any] = {}
-    if original is not None and original.strip():
-        commented = _json_comments(original) if harness.format == "json" else _yaml_comments(original)
-        if commented and not rewrite:
-            raise refuse("it has comments, which rewriting it would remove")
-        try:
-            loaded = json.loads(strip_jsonc(original)) if harness.format == "json" else yaml.safe_load(original)
-        except (ValueError, yaml.YAMLError) as exc:
-            raise refuse(f"it could not be parsed ({exc})") from None
-        if loaded is not None and not isinstance(loaded, dict):
-            raise refuse("its top level is not a mapping")
-        doc = loaded or {}
-
+    doc = _load(harness, original, rewrite, refuse)
     try:
         merged = harness.merge(doc, target)
     except ConnectRefused as exc:
         raise refuse(exc.message) from None
-    if harness.format == "json":
-        text = json.dumps(merged, indent=2, ensure_ascii=False) + "\n"
-    else:
-        text = yaml.safe_dump(merged, sort_keys=False, allow_unicode=True)
+    text = _dump(harness, merged)
 
     result = {"harness": harness_id, "name": harness.name, "path": str(path), "model": target.model,
               "base_url": target.base, "changed": text != original, "content": text}
@@ -497,6 +583,77 @@ def connect(harness_id: str, target: Target, *, path: Optional[Path] = None, pro
     write_text(path, text)
     changes.modified(harness_id, path, backup)
     result["backup"] = str(backup) if backup else None
+    return result
+
+
+def _load(harness: Harness, original: Optional[str], rewrite: bool,
+          refuse: Callable[[str], ConnectRefused]) -> Dict[str, Any]:
+    if original is None or not original.strip():
+        return {}
+    commented = _json_comments(original) if harness.format == "json" else _yaml_comments(original)
+    if commented and not rewrite:
+        raise refuse("it has comments, which rewriting it would remove")
+    try:
+        loaded = json.loads(strip_jsonc(original)) if harness.format == "json" else yaml.safe_load(original)
+    except (ValueError, yaml.YAMLError) as exc:
+        raise refuse(f"it could not be parsed ({exc})") from None
+    if loaded is not None and not isinstance(loaded, dict):
+        raise refuse("its top level is not a mapping")
+    return loaded or {}
+
+
+def _dump(harness: Harness, doc: Dict[str, Any]) -> str:
+    if harness.format == "json":
+        return json.dumps(doc, indent=2, ensure_ascii=False) + "\n"
+    return yaml.safe_dump(doc, sort_keys=False, allow_unicode=True)
+
+
+def disconnect(harness_id: str, *, path: Optional[Path] = None, project: bool = False,
+               rewrite: bool = False, dry_run: bool = False) -> Dict[str, Any]:
+    """Take llmsetup's entries back out of one tool's config and keep everything else.
+
+    `undo` puts a file back exactly as it was, so it leaves alone a file edited since; this
+    works on the file as it is now. Like connect it is journalled, so `undo` reverses it too.
+    """
+    harness = HARNESSES[harness_id]
+    path = path or harness.path(project)
+    result: Dict[str, Any] = {"harness": harness_id, "name": harness.name, "path": str(path),
+                              "changed": False, "removed": False}
+    if not path.exists():
+        return result
+
+    def refuse(reason: str) -> ConnectRefused:
+        return ConnectRefused(f"{path} was not changed: {reason}",
+                              hint="remove llmsetup's entries from it yourself, or rerun with --rewrite "
+                                   "(the original is backed up, and `llmsetup undo` restores it)")
+
+    original = path.read_text(encoding="utf-8")
+    if harness.owned:
+        doc = _load(harness, original, True, refuse)
+        if doc.get("name") not in (None, "llmsetup"):
+            raise refuse(f"it defines a provider named {doc.get('name')!r}, not llmsetup's")
+        result.update(changed=True, removed=True)
+        if not dry_run:
+            backup = changes.backup_before_edit(path)
+            path.unlink()
+            # No fingerprint: nothing is left at the path, and undo puts the backup back.
+            changes.record("modified", harness_id, path=str(path), backup=str(backup) if backup else None,
+                           fingerprint=None)
+        return result
+
+    doc = _load(harness, original, rewrite, refuse)
+    before = json.dumps(doc, sort_keys=True)
+    assert harness.strip is not None
+    stripped = harness.strip(doc)
+    if json.dumps(stripped, sort_keys=True) == before:
+        return result
+    text = _dump(harness, stripped)
+    result.update(changed=True, content=text)
+    if dry_run:
+        return result
+    backup = changes.backup_before_edit(path)
+    write_text(path, text)
+    changes.modified(harness_id, path, backup)
     return result
 
 

@@ -234,6 +234,12 @@ Undo removes or restores a file only while it is still what llmsetup left;
 a file edited since is reported and kept, unless `--force`. Downloaded weights
 stay in the shared store; they are llmsetup's own files, not a change to undo.
 
+To take a tool off the local model after you have edited its config yourself,
+`llmsetup disconnect <tool>` removes only what `connect` added (the llmsetup
+provider, entries named `... (llmsetup)`, Claude Code's local `ANTHROPIC_*`
+variables, Goose's provider file) and keeps the rest of the file as it is now.
+It is recorded like any change, so `llmsetup undo` reverses it too.
+
 ## Other commands
 
 ```bash

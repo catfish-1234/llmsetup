@@ -17,6 +17,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `GOOSE_PATH_ROOT`) and prints how to start a session on it. A server key is
   read from `LLMSETUP_API_KEY`, never written into the file, and a provider
   file llmsetup did not write is never replaced. `undo` removes it.
+- `llmsetup disconnect <tool>` takes llmsetup's entries back out of a tool's
+  config and keeps everything else, including edits made since `connect`, which
+  `undo` (restoring the file exactly) leaves alone. It removes only what connect
+  marks as its own: the `llmsetup` provider, entries named `... (llmsetup)`,
+  Aider's keys only while they hold llmsetup's placeholder key, Claude Code's
+  `ANTHROPIC_*` variables only while they point at a local server, and Goose's
+  provider file. It is journalled, so `undo` reverses a disconnect too.
 - `llmsetup connect crush` prints the `crushrc` lines that add the model as a
   provider and make it Crush's large and small model.
 

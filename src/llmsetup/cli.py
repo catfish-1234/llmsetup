@@ -72,7 +72,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "catalog": cmd_catalog, "runtimes": cmd_runtimes, "ui": cmd_ui,
         "report": cmd_report, "start": cmd_start, "status": cmd_status, "stop": cmd_stop,
         "restart": cmd_restart,
-        "logs": cmd_logs, "chat": cmd_chat, "changes": cmd_changes, "undo": cmd_undo, "connect": cmd_connect, "settings": cmd_settings,
+        "logs": cmd_logs, "chat": cmd_chat, "changes": cmd_changes, "undo": cmd_undo, "connect": cmd_connect, "disconnect": cmd_disconnect, "settings": cmd_settings,
     }.get(args.command)
 
     if handler is None:
@@ -273,6 +273,17 @@ def build_parser() -> argparse.ArgumentParser:
     p_connect.add_argument("--base-url", help="connect this OpenAI-compatible server instead")
     p_connect.add_argument("--model", help="model name the server serves")
     p_connect.add_argument("--api-key", help="bearer token for a server that needs one")
+
+    p_disconnect = sub.add_parser(
+        "disconnect", help="take llmsetup's entries back out of a tool's config, keeping your own edits")
+    common(p_disconnect)
+    p_disconnect.add_argument("harness", help="the tool to disconnect (as for connect)")
+    p_disconnect.add_argument("--config", type=Path, help="edit this config file instead of the tool's usual one")
+    p_disconnect.add_argument("--project", action="store_true",
+                              help="use the project's config in this folder instead of your user config")
+    p_disconnect.add_argument("--rewrite", action="store_true",
+                              help="rewrite a config that has comments (they are lost; undo restores the original)")
+    p_disconnect.add_argument("--dry-run", action="store_true", help="print the resulting config, write nothing")
 
     p_settings = sub.add_parser("settings", help="list the settings `setup --set KEY=VALUE` can override")
     common(p_settings)
@@ -1152,6 +1163,36 @@ def cmd_connect(args, console: Console) -> int:
     then = HARNESSES[harness_id].then
     if then and not args.json and not args.dry_run:
         print(then(target))
+    return 0
+
+
+def cmd_disconnect(args, console: Console) -> int:
+    """Remove what connect wrote from a tool's config as it is now; journalled, so undo reverses it."""
+    from llmsetup.connect import HARNESSES, disconnect, supported
+
+    harness_id = args.harness.lower().replace("-", "_")
+    if harness_id not in HARNESSES:
+        known = ", ".join(HARNESSES)
+        if harness_id in supported():
+            raise LlmsetupError(f"connect only printed steps for {args.harness}, so there is nothing to remove",
+                                hint=f"disconnect works on the tools connect writes to: {known}")
+        raise LlmsetupError(f"disconnect does not know {args.harness}", hint="one of: " + known)
+    result = disconnect(harness_id, path=args.config, project=args.project, rewrite=args.rewrite,
+                        dry_run=args.dry_run)
+    if args.json:
+        print(json.dumps({k: v for k, v in result.items() if args.dry_run or k != "content"}, indent=2))
+    elif not result["changed"]:
+        console.ok(f"{result['name']}: nothing of llmsetup's in {result['path']}")
+    elif args.dry_run:
+        if result["removed"]:
+            console.step(f"{result['name']}: {result['path']} would be removed")
+        else:
+            console.step(f"{result['name']}: {result['path']} would become")
+            print(result["content"], end="")
+    else:
+        what = "removed" if result["removed"] else "no longer lists llmsetup's model"
+        console.ok(f"{result['name']}: {result['path']} {what}")
+        console.info("`llmsetup undo` puts it back")
     return 0
 
 
