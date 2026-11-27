@@ -10,6 +10,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - The README opens with what llmsetup does end to end (setup, connect, undo) and
   the PyPI metadata carries keywords for the tools and model sources it supports.
+- CI tools: ruff 0.17.6, types-PyYAML 6.0.12.20261122, and PyYAML 6.0.4 on
+  Python 3.10 and later (3.9 keeps 6.0.3, since 6.0.4 needs 3.10).
 
 ## [0.6.0] - 2026-11-25
 
