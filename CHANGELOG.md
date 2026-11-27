@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-11-27
+
 ### Added
 
 - A verified setup ends with a "Use it" section naming what to run next:
@@ -28,7 +30,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   paths and config snippets are never wrapped, and piped or redirected output
   keeps every line whole as before.
 - The README shows a real `llmsetup plan` ranking.
-
+- PyPI's summary says what it does end to end, including the tools it connects to,
+  and the classifiers name the operating systems it supports.
 - The README opens with what llmsetup does end to end (setup, connect, undo) and
   the PyPI metadata carries keywords for the tools and model sources it supports.
 - CI tools: ruff 0.17.6, types-PyYAML 6.0.12.20261122, and PyYAML 6.0.4 on
