@@ -6,6 +6,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- The README opens with what llmsetup does end to end (setup, connect, undo) and
+  the PyPI metadata carries keywords for the tools and model sources it supports.
+
 ## [0.6.0] - 2026-11-25
 
 ### Added

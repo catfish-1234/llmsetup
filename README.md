@@ -1,19 +1,44 @@
 # llmsetup
 
-llmsetup sets up an open-weight LLM on your machine. It scans your hardware and
-installed runtimes first, then asks what you want to do, such as coding, chat,
-or running agents. You never need to enter hardware specs. It picks a model,
-downloads the weights, starts a server, tests the capabilities you need, and
-registers the working setup with your local apps.
+[![PyPI](https://img.shields.io/pypi/v/llmsetup.svg)](https://pypi.org/project/llmsetup/)
+[![Downloads](https://img.shields.io/pypi/dm/llmsetup.svg)](https://pypistats.org/packages/llmsetup)
+[![Python](https://img.shields.io/pypi/pyversions/llmsetup.svg)](https://pypi.org/project/llmsetup/)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-When something fails, it tries repairs and fallback options automatically.
-It only gives you a manual step after those options have failed.
+**A local LLM that works, in one command, wired into the coding agent you already use.**
 
-This is the Python project at
-[catfish-1234/llmsetup](https://github.com/catfish-1234/llmsetup),
-licensed under Apache-2.0. It was renamed from llmfit to avoid confusion with the
-unrelated [AlexsJones/llmfit](https://github.com/AlexsJones/llmfit) Rust project.
-See [the name change and migration notes](docs/POSITIONING.md).
+```bash
+pip install llmsetup
+llmsetup setup                    # finds your hardware, picks and tunes a model, starts it, proves it works
+llmsetup connect claude-code      # or opencode, aider, continue, zed, goose, qwen-code
+llmsetup undo                     # put back everything it changed
+```
+
+- **No specs to look up.** It reads your GPU, memory and installed engines, then
+  fits the model, quantization and context to what is actually free.
+- **Any model.** The catalog's recommendations, any GGUF repo on Hugging Face
+  (`--model hf:owner/repo`), or a variant of a catalog model such as an
+  abliterated build (`--variant abliterated`). Any setting can be overridden
+  (`--set context_tokens=65536`).
+- **Proven, not assumed.** It tests the capabilities you asked for (chat, tool
+  calls, long context, vision) before calling the setup done, and repairs or
+  falls back on its own when something fails.
+- **Connected.** It writes the model into OpenCode, Continue, Aider, Zed, Qwen
+  Code and Goose configs, prints Claude Code's and Codex's launch settings, and
+  registers it with Ollama, LM Studio and Jan.
+- **Reversible.** Every change outside its own folder is recorded; `llmsetup
+  undo` reverses a run and `llmsetup disconnect` takes a tool back off.
+
+It scans your hardware and installed runtimes first, then asks what you want to
+do, such as coding, chat, or running agents. It picks a model, downloads the
+weights, starts a server, tests the capabilities you need, and registers the
+working setup with your local apps. When something fails, it tries repairs and
+fallback options automatically, and only gives you a manual step after those
+have failed.
+
+Apache-2.0. Formerly llmfit, renamed to avoid confusion with the unrelated
+[AlexsJones/llmfit](https://github.com/AlexsJones/llmfit) Rust project; see
+[the name change and migration notes](docs/POSITIONING.md).
 
 ## Install
 
