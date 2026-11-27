@@ -29,6 +29,11 @@ llmsetup undo                     # put back everything it changed
 - **Reversible.** Every change outside its own folder is recorded; `llmsetup
   undo` reverses a run and `llmsetup disconnect` takes a tool back off.
 
+![llmsetup plan ranking three coding models for a 24 GB GPU, with each one's memory budget, estimated speed and warnings](https://raw.githubusercontent.com/catfish-1234/llmsetup/main/docs/plan.svg)
+
+What `llmsetup plan` recommends for coding on a 24 GB GPU. `--vram` asks what
+fits on hardware you don't have yet; without it, the plan uses what it detects.
+
 It scans your hardware and installed runtimes first, then asks what you want to
 do, such as coding, chat, or running agents. It picks a model, downloads the
 weights, starts a server, tests the capabilities you need, and registers the

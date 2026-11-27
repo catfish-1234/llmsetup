@@ -22,6 +22,7 @@ from llmsetup.types import (
     Severity,
 )
 from llmsetup.util.log import Console
+from llmsetup.util.proc import format_command
 from llmsetup.util.units import gb, human_tokens
 
 _MARK = {
@@ -290,9 +291,12 @@ def _render_next_steps(result: SetupResult, console: Console) -> None:
         console.info(note)
     try:
         command = get_runtime(result.plan.runtime).launch_command(spec, config)
-        console.info(shlex.join(command))
+        console.info(format_command(command))
     except Exception:
         pass
+
+    if result.succeeded and result.checks_ran:
+        _render_use_it(result, console)
 
     failures = [c for c in result.checks if c.blocking]
     if failures:
@@ -303,6 +307,24 @@ def _render_next_steps(result: SetupResult, console: Console) -> None:
         console.info(console.dim(
             "run `llmsetup doctor` after changing anything to re-test"
         ))
+
+
+def _render_use_it(result: SetupResult, console: Console) -> None:
+    """The commands that take a verified setup from here, so they are found without the README."""
+    from llmsetup.launch import SHARED_DAEMONS
+
+    steps = []
+    if result.plan.runtime not in SHARED_DAEMONS:
+        steps.append(("llmsetup start --detach", "keep it running in the background"))
+    steps += [
+        ("llmsetup connect claude-code", "or opencode, aider, zed, goose, ... (--list)"),
+        ("llmsetup chat", "talk to it in the terminal"),
+        ("llmsetup undo", "put back what this run changed in other apps"),
+    ]
+    console.print()
+    console.print(console.bold("Use it"))
+    for command, what in steps:
+        console.info(f"{command:<29} {console.dim(what)}")
 
 
 def _launch_note(result: SetupResult) -> str:

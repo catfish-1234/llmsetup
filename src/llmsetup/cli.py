@@ -530,17 +530,17 @@ def cmd_plan(args, console: Console) -> int:
             + (f"~{tps:.0f} tok/s  " if tps else "")
             + f"score {candidate.score:.3f}"
         )
-        console.info(console.dim(f"   {explain(candidate, profile, hardware)}"))
+        console.info(console.dim(f"   {explain(candidate, profile, hardware)}"), wrap=True)
         console.info(console.dim(
             f"   weights {gb(candidate.estimate.weights)} + "
             f"KV {gb(candidate.estimate.kv_cache)} ({candidate.estimate.kv_quant}) + "
             f"overhead {gb(candidate.estimate.overhead)}"
         ))
         for warning in candidate.warnings:
-            console.warn(f"   {warning}")
+            console.warn(f"   {warning}", wrap=True)
     console.print()
     for note in plan.notes:
-        console.info(console.dim(note))
+        console.info(console.dim(note), wrap=True)
 
     embedder = companion_embedding_plan(profile, hardware, catalog)
     if embedder:

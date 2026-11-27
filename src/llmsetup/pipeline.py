@@ -305,9 +305,9 @@ class Pipeline:
             f"(~{candidate.estimate.total_gb:.1f} GB) on {plan.runtime}"
         )
         for note in plan.notes:
-            self.console.info(self.console.dim(note))
+            self.console.info(self.console.dim(note), wrap=True)
         for warning in candidate.warnings:
-            self.console.warn(warning)
+            self.console.warn(warning, wrap=True)
 
         self.console.step("Tuning")
         tuned = tune(candidate, self.hardware, self.profile, plan.runtime,

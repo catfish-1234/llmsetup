@@ -6,7 +6,28 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- A verified setup ends with a "Use it" section naming what to run next:
+  `llmsetup start --detach` (left out for Ollama and LM Studio, which already
+  serve it), `llmsetup connect claude-code` and the other tools, `llmsetup chat`
+  and `llmsetup undo`. A failed or untested setup does not offer them.
+
+### Fixed
+
+- On Windows, the "Run it yourself" command at the end of `setup` was quoted for
+  a POSIX shell (`'C:\...\llama-server.exe' ...`), which neither cmd.exe nor
+  PowerShell accepts. It now uses the same platform quoting as
+  `llmsetup start --print`. The Markdown report's `bash` block is unchanged.
+
 ### Changed
+
+- On a terminal, the plan's explanations, warnings and notes (in `llmsetup plan`
+  and `setup`) wrap to the window's width and continue under their first word,
+  instead of breaking mid-word at the edge of an 80-column window. Commands,
+  paths and config snippets are never wrapped, and piped or redirected output
+  keeps every line whole as before.
+- The README shows a real `llmsetup plan` ranking.
 
 - The README opens with what llmsetup does end to end (setup, connect, undo) and
   the PyPI metadata carries keywords for the tools and model sources it supports.
